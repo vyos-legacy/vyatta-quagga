@@ -24,7 +24,6 @@
 #define _ZEBRA_OSPF_INTERFACE_H
 
 #include "ospfd/ospf_packet.h"
-#include "ospfd/ospf_spf.h"
 
 #define IF_OSPF_IF_INFO(I) ((struct ospf_if_info *)((I)->info))
 #define IF_DEF_PARAMS(I) (IF_OSPF_IF_INFO (I)->def_params)
@@ -45,28 +44,15 @@ struct ospf_if_params
   DECLARE_IF_PARAM (u_int32_t, transmit_delay); /* Interface Transmisson Delay */
   DECLARE_IF_PARAM (u_int32_t, output_cost_cmd);/* Command Interface Output Cost */
   DECLARE_IF_PARAM (u_int32_t, retransmit_interval); /* Retransmission Interval */
-  DECLARE_IF_PARAM (u_char, passive_interface);      /* OSPF Interface is passive: no sending or receiving (no need to join multicast groups) */
+  DECLARE_IF_PARAM (u_char, passive_interface);      /* OSPF Interface is passive */
   DECLARE_IF_PARAM (u_char, priority);               /* OSPF Interface priority */
   DECLARE_IF_PARAM (u_char, type);                   /* type of interface */
 #define OSPF_IF_ACTIVE                  0
 #define OSPF_IF_PASSIVE		        1
-
-#define OSPF_IF_PASSIVE_STATUS(O) \
-       (OSPF_IF_PARAM_CONFIGURED((O)->params, passive_interface) ? \
-         (O)->params->passive_interface : \
-         (OSPF_IF_PARAM_CONFIGURED(IF_DEF_PARAMS((O)->ifp), passive_interface) ? \
-           IF_DEF_PARAMS((O)->ifp)->passive_interface : \
-           (O)->ospf->passive_interface_default))
   
   DECLARE_IF_PARAM (u_int32_t, v_hello);             /* Hello Interval */
   DECLARE_IF_PARAM (u_int32_t, v_wait);              /* Router Dead Interval */
 
-  /* MTU mismatch check (see RFC2328, chap 10.6) */ 
-  DECLARE_IF_PARAM (u_char, mtu_ignore);
-  
-  /* Fast-Hellos */
-  DECLARE_IF_PARAM (u_char, fast_hello);
-  
   /* Authentication data. */
   u_char auth_simple[OSPF_AUTH_SIMPLE_SIZE + 1];       /* Simple password. */
   u_char auth_simple__config:1;
@@ -75,19 +61,11 @@ struct ospf_if_params
   DECLARE_IF_PARAM (int, auth_type);               /* OSPF authentication type */
 };
 
-enum
-{
-  MEMBER_ALLROUTERS = 0,
-  MEMBER_DROUTERS,
-  MEMBER_MAX,
-};
-
 struct ospf_if_info
 {
   struct ospf_if_params *def_params;
   struct route_table *params;
   struct route_table *oifs;
-  unsigned int membership_counts[MEMBER_MAX];	/* multicast group refcnts */
 };
 
 struct ospf_interface;
@@ -98,7 +76,7 @@ struct ospf_vl_data
   struct in_addr    vl_area_id;	   /* Transit area for this VL. */
   int format;                      /* area ID format */
   struct ospf_interface *vl_oi;	   /* Interface data structure for the VL. */
-  struct vertex_nexthop nexthop;   /* Nexthop router and oi to use */
+  struct ospf_interface *out_oi;   /* The interface to go out. */
   struct in_addr    peer_addr;	   /* Address used to reach the peer. */
   u_char flags;
 };
@@ -144,23 +122,6 @@ struct ospf_interface
 
   /* State of Interface State Machine. */
   u_char state;
-
-  /* To which multicast groups do we currently belong? */
-  u_char multicast_memberships;
-#define OI_MEMBER_FLAG(M) (1 << (M))
-#define OI_MEMBER_COUNT(O,M) (IF_OSPF_IF_INFO(oi->ifp)->membership_counts[(M)])
-#define OI_MEMBER_CHECK(O,M) \
-    (CHECK_FLAG((O)->multicast_memberships, OI_MEMBER_FLAG(M)))
-#define OI_MEMBER_JOINED(O,M) \
-  do { \
-    SET_FLAG ((O)->multicast_memberships, OI_MEMBER_FLAG(M)); \
-    IF_OSPF_IF_INFO((O)->ifp)->membership_counts[(M)]++; \
-  } while (0)
-#define OI_MEMBER_LEFT(O,M) \
-  do { \
-    UNSET_FLAG ((O)->multicast_memberships, OI_MEMBER_FLAG(M)); \
-    IF_OSPF_IF_INFO((O)->ifp)->membership_counts[(M)]--; \
-  } while (0)
 
   struct prefix *address;		/* Interface prefix */
   struct connected *connected;          /* Pointer to connected */ 
@@ -232,73 +193,62 @@ struct ospf_interface
 };
 
 /* Prototypes. */
-extern char *ospf_if_name (struct ospf_interface *);
-extern struct ospf_interface *ospf_if_new (struct ospf *, struct interface *,
-					   struct prefix *);
-extern void ospf_if_cleanup (struct ospf_interface *);
-extern void ospf_if_free (struct ospf_interface *);
-extern int ospf_if_up (struct ospf_interface *);
-extern int ospf_if_down (struct ospf_interface *);
+char *ospf_if_name (struct ospf_interface *);
+struct ospf_interface *ospf_if_new (struct ospf *, struct interface *,
+				    struct prefix *);
+void ospf_if_cleanup (struct ospf_interface *);
+void ospf_if_free (struct ospf_interface *);
+int ospf_if_up (struct ospf_interface *);
+int ospf_if_down (struct ospf_interface *);
 
-extern int ospf_if_is_up (struct ospf_interface *);
-extern struct ospf_interface *ospf_if_exists (struct ospf_interface *);
-extern struct ospf_interface *ospf_if_lookup_by_local_addr (struct ospf *,
-							    struct interface
-							    *,
-							    struct in_addr);
-extern struct ospf_interface *ospf_if_lookup_by_prefix (struct ospf *,
-							struct prefix_ipv4 *);
-extern struct ospf_interface *ospf_if_addr_local (struct in_addr);
-extern struct ospf_interface *ospf_if_lookup_recv_if (struct ospf *,
-						      struct in_addr);
-extern struct ospf_interface *ospf_if_is_configured (struct ospf *,
-						     struct in_addr *);
-
-extern struct ospf_if_params *ospf_lookup_if_params (struct interface *,
+int ospf_if_is_up (struct ospf_interface *);
+struct ospf_interface *ospf_if_exists (struct ospf_interface *);
+struct ospf_interface *ospf_if_lookup_by_name (char *);
+struct ospf_interface *ospf_if_lookup_by_local_addr (struct ospf *,
+						     struct interface *,
 						     struct in_addr);
-extern struct ospf_if_params *ospf_get_if_params (struct interface *,
-						  struct in_addr);
-extern void ospf_del_if_params (struct ospf_if_params *);
-extern void ospf_free_if_params (struct interface *, struct in_addr);
-extern void ospf_if_update_params (struct interface *, struct in_addr);
+struct ospf_interface *ospf_if_lookup_by_prefix (struct ospf *,
+						 struct prefix_ipv4 *);
+struct ospf_interface *ospf_if_addr_local (struct in_addr);
+struct ospf_interface *ospf_if_lookup_recv_if (struct ospf *, struct in_addr);
+struct ospf_interface *ospf_if_is_configured (struct ospf *, struct in_addr *);
 
-extern int ospf_if_new_hook (struct interface *);
-extern void ospf_if_init (void);
-extern void ospf_if_stream_set (struct ospf_interface *);
-extern void ospf_if_stream_unset (struct ospf_interface *);
-extern void ospf_if_reset_variables (struct ospf_interface *);
-extern int ospf_if_is_enable (struct ospf_interface *);
-extern int ospf_if_get_output_cost (struct ospf_interface *);
-extern void ospf_if_recalculate_output_cost (struct interface *);
+struct ospf_if_params *ospf_lookup_if_params (struct interface *,
+					      struct in_addr);
+struct ospf_if_params *ospf_get_if_params (struct interface *, struct in_addr);
+void ospf_del_if_params (struct ospf_if_params *);
+void ospf_free_if_params (struct interface *, struct in_addr);
+void ospf_if_update_params (struct interface *, struct in_addr);
+
+int ospf_if_new_hook (struct interface *);
+void ospf_if_init ();
+void ospf_if_stream_set (struct ospf_interface *);
+void ospf_if_stream_unset (struct ospf_interface *);
+void ospf_if_reset_variables (struct ospf_interface *);
+int ospf_if_is_enable (struct ospf_interface *);
+int ospf_if_get_output_cost (struct ospf_interface *);
+void ospf_if_recalculate_output_cost (struct interface *);
 
 /* Simulate down/up on the interface. */
 extern void ospf_if_reset (struct interface *);
 
-extern struct ospf_interface *ospf_vl_new (struct ospf *,
-					   struct ospf_vl_data *);
-extern struct ospf_vl_data *ospf_vl_data_new (struct ospf_area *,
-					      struct in_addr);
-extern struct ospf_vl_data *ospf_vl_lookup (struct ospf *, struct ospf_area *,
-					    struct in_addr);
-extern void ospf_vl_data_free (struct ospf_vl_data *);
-extern void ospf_vl_add (struct ospf *, struct ospf_vl_data *);
-extern void ospf_vl_delete (struct ospf *, struct ospf_vl_data *);
-extern void ospf_vl_up_check (struct ospf_area *, struct in_addr,
-			      struct vertex *);
-extern void ospf_vl_unapprove (struct ospf *);
-extern void ospf_vl_shut_unapproved (struct ospf *);
-extern int ospf_full_virtual_nbrs (struct ospf_area *);
-extern int ospf_vls_in_area (struct ospf_area *);
+struct ospf_interface *ospf_vl_new (struct ospf *, struct ospf_vl_data *);
+struct ospf_vl_data *ospf_vl_data_new (struct ospf_area *, struct in_addr);
+struct ospf_vl_data *ospf_vl_lookup (struct ospf_area *, struct in_addr);
+void ospf_vl_data_free (struct ospf_vl_data *);
+void ospf_vl_add (struct ospf *, struct ospf_vl_data *);
+void ospf_vl_delete (struct ospf *, struct ospf_vl_data *);
+void ospf_vl_up_check (struct ospf_area *, struct in_addr, struct vertex *);
+void ospf_vl_unapprove (struct ospf *);
+void ospf_vl_shut_unapproved (struct ospf *);
+int ospf_full_virtual_nbrs (struct ospf_area *);
+int ospf_vls_in_area (struct ospf_area *);
 
-extern struct crypt_key *ospf_crypt_key_lookup (struct list *, u_char);
-extern struct crypt_key *ospf_crypt_key_new (void);
-extern void ospf_crypt_key_add (struct list *, struct crypt_key *);
-extern int ospf_crypt_key_delete (struct list *, u_char);
+struct crypt_key *ospf_crypt_key_lookup (struct list *, u_char);
+struct crypt_key *ospf_crypt_key_new ();
+void ospf_crypt_key_add (struct list *, struct crypt_key *);
+int ospf_crypt_key_delete (struct list *, u_char);
 
-extern u_char ospf_default_iftype (struct interface *ifp);
-
-/* Set all multicast memberships appropriately based on the type and
-   state of the interface. */
-extern void ospf_if_set_multicast (struct ospf_interface *);
+u_char ospf_default_iftype(struct interface *ifp);
 
 #endif /* _ZEBRA_OSPF_INTERFACE_H */
