@@ -25,8 +25,6 @@
 #include "log.h"
 #include "privs.h"
 
-#include "zebra/ipforward.h"
-
 extern struct zebra_privs_t zserv_privs;
 
 char proc_net_snmp[] = "/proc/net/snmp";
@@ -41,7 +39,7 @@ dropline (FILE *fp)
 }
 
 int
-ipforward (void)
+ipforward ()
 {
   FILE *fp;
   int ipforwarding = 0;
@@ -74,7 +72,7 @@ ipforward (void)
 char proc_ipv4_forwarding[] = "/proc/sys/net/ipv4/ip_forward";
 
 int
-ipforward_on (void)
+ipforward_on ()
 {
   FILE *fp;
   
@@ -100,7 +98,7 @@ ipforward_on (void)
 }
 
 int
-ipforward_off (void)
+ipforward_off ()
 {
   FILE *fp;
 
@@ -129,7 +127,7 @@ ipforward_off (void)
 char proc_ipv6_forwarding[] = "/proc/sys/net/ipv6/conf/all/forwarding";
 
 int
-ipforward_ipv6 (void)
+ipforward_ipv6 ()
 {
   FILE *fp;
   char buf[5];
@@ -148,7 +146,7 @@ ipforward_ipv6 (void)
 }
 
 int
-ipforward_ipv6_on (void)
+ipforward_ipv6_on ()
 {
   FILE *fp;
 
@@ -174,7 +172,7 @@ ipforward_ipv6_on (void)
 }
 
 int
-ipforward_ipv6_off (void)
+ipforward_ipv6_off ()
 {
   FILE *fp;
 

@@ -27,9 +27,6 @@
 #include "if.h"
 #include "rib.h"
 
-#include "zebra/zserv.h"
-#include "zebra/rt.h"
-
 /* Proc file system to read IPv4 routing table. */
 #ifndef _PATH_PROCNET_ROUTE
 #define _PATH_PROCNET_ROUTE      "/proc/net/route"
@@ -47,8 +44,8 @@
 #define RT_BUFSIZ 1024
 
 /* Kernel routing table read up by /proc filesystem. */
-static int
-proc_route_read (void)
+int
+proc_route_read ()
 {
   FILE *fp;
   char buf[RT_BUFSIZ];
@@ -96,7 +93,7 @@ proc_route_read (void)
       p.prefixlen = ip_masklen (tmpmask);
       sscanf (gate, "%lX", (unsigned long *)&gateway);
 
-      rib_add_ipv4 (ZEBRA_ROUTE_KERNEL, zebra_flags, &p, &gateway, NULL, 0, 0, 0, 0);
+      rib_add_ipv4 (ZEBRA_ROUTE_KERNEL, zebra_flags, &p, &gateway, 0, 0, 0, 0);
     }
 
   fclose (fp);
@@ -104,7 +101,7 @@ proc_route_read (void)
 }
 
 #ifdef HAVE_IPV6
-static int
+int
 proc_ipv6_route_read ()
 {
   FILE *fp;
@@ -156,8 +153,7 @@ proc_ipv6_route_read ()
       str2in6_addr (gate, &gateway);
       p.prefixlen = dest_plen;
 
-      rib_add_ipv6 (ZEBRA_ROUTE_KERNEL, zebra_flags, &p, &gateway, 0, 0,
-		    metric, 0);
+      rib_add_ipv6 (ZEBRA_ROUTE_KERNEL, zebra_flags, &p, &gateway, 0, 0);
     }
 
   fclose (fp);
@@ -166,7 +162,7 @@ proc_ipv6_route_read ()
 #endif /* HAVE_IPV6 */
 
 void
-route_read (void)
+route_read ()
 {
   proc_route_read ();
 #ifdef HAVE_IPV6
