@@ -59,9 +59,6 @@ typedef int socklen_t;
 #include <sys/types.h>
 #include <sys/param.h>
 #ifdef HAVE_SYS_SYSCTL_H
-#ifdef GNU_LINUX
-#include <linux/types.h>
-#endif
 #include <sys/sysctl.h>
 #endif /* HAVE_SYS_SYSCTL_H */
 #include <sys/ioctl.h>
@@ -81,9 +78,6 @@ typedef int socklen_t;
 #ifdef HAVE_LIMITS_H
 #include <limits.h>
 #endif /* HAVE_LIMITS_H */
-#ifdef HAVE_INTTYPES_H
-#include <inttypes.h>
-#endif /* HAVE_INTTYPES_H */
 
 /* machine dependent includes */
 #ifdef SUNOS_5
@@ -115,16 +109,12 @@ typedef int socklen_t;
 #endif /* __va_copy */
 #endif /* !va_copy */
 #endif /* !C99 */
-
+#include "zassert.h"
 
 #ifdef HAVE_LCAPS
 #include <sys/capability.h>
 #include <sys/prctl.h>
 #endif /* HAVE_LCAPS */
-
-#ifdef HAVE_SOLARIS_CAPABILITIES
-#include <priv.h>
-#endif /* HAVE_SOLARIS_CAPABILITIES */
 
 /* network include group */
 
@@ -171,6 +161,7 @@ typedef int socklen_t;
 #endif /* HAVE_NETDB_H */
 
 #include <arpa/inet.h>
+#include <arpa/telnet.h>
 
 #ifdef HAVE_INET_ND_H
 #include <inet/nd.h>
@@ -205,27 +196,10 @@ typedef int socklen_t;
 #include <netinet6/nd6.h>
 #endif /* HAVE_NETINET6_ND6_H */
 
-/* Some systems do not define UINT32_MAX, etc.. from inttypes.h
- * e.g. this makes life easier for FBSD 4.11 users.
- */
-#ifndef INT8_MAX
-#define INT8_MAX	(127)
-#endif
-#ifndef INT16_MAX
-#define INT16_MAX	(32767)
-#endif
-#ifndef INT32_MAX
-#define INT32_MAX	(2147483647)
-#endif
-#ifndef UINT8_MAX
-#define UINT8_MAX	(255U)
-#endif
-#ifndef UINT16_MAX
-#define UINT16_MAX	(65535U)
-#endif
+/* Some systems do not define UINT32_MAX */
 #ifndef UINT32_MAX
-#define UINT32_MAX	(4294967295U)
-#endif
+#define UINT32_MAX 0xFFFFFFFFU
+#endif /* UINT32_MAX */
 
 #ifdef HAVE_LIBUTIL_H
 #include <libutil.h>
@@ -248,15 +222,6 @@ typedef int socklen_t;
 #define IN6_ARE_ADDR_EQUAL IN6_IS_ADDR_EQUAL
 
 #endif /* BSDI_NRL */
-
-/* Local includes: */
-#if !(defined(__GNUC__) || defined(VTYSH_EXTRACT_PL)) 
-#define __attribute__(x)
-#endif  /* !__GNUC__ || VTYSH_EXTRACT_PL */
-
-#include "zassert.h"
-#include "str.h"
-
 
 #ifdef HAVE_BROKEN_CMSG_FIRSTHDR
 /* This bug is present in Solaris 8 and pre-patch Solaris 9 <sys/socket.h>;
@@ -309,9 +274,14 @@ typedef int socklen_t;
 #endif /* CMSG_LEN */
 
 
+
+#if !(defined(__GNUC__) || defined(VTYSH_EXTRACT_PL)) 
+#define __attribute__(x)
+#endif  /* !__GNUC__ */
+
 /*  The definition of struct in_pktinfo is missing in old version of
     GLIBC 2.1 (Redhat 6.1).  */
-#if defined (GNU_LINUX) && ! defined (HAVE_STRUCT_IN_PKTINFO)
+#if defined (GNU_LINUX) && ! defined (HAVE_INPKTINFO)
 struct in_pktinfo
 {
   int ipi_ifindex;
@@ -355,23 +325,6 @@ struct in_pktinfo
 #define HAVE_IP_HDRINCL_BSD_ORDER
 #endif
 
-/* Define BYTE_ORDER, if not defined. Useful for compiler conditional
- * code, rather than preprocessor conditional.
- * Not all the world has this BSD define.
- */
-#ifndef BYTE_ORDER
-#define BIG_ENDIAN	4321	/* least-significant byte first (vax, pc) */
-#define LITTLE_ENDIAN	1234	/* most-significant byte first (IBM, net) */
-#define PDP_ENDIAN	3412	/* LSB first in word, MSW first in long (pdp) */
-
-#if defined(WORDS_BIGENDIAN)
-#define BYTE_ORDER	BIG_ENDIAN
-#else /* !WORDS_BIGENDIAN */
-#define BYTE_ORDER	LITTLE_ENDIAN
-#endif /* WORDS_BIGENDIAN */
-
-#endif /* ndef BYTE_ORDER */
-
 /* MAX / MIN are not commonly defined, but useful */
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -384,9 +337,6 @@ struct in_pktinfo
 #ifndef IN6_ARE_ADDR_EQUAL
 #define IN6_ARE_ADDR_EQUAL IN6_IS_ADDR_EQUAL
 #endif /* IN6_ARE_ADDR_EQUAL */
-
-/* default zebra TCP port for zclient */
-#define ZEBRA_PORT			2600
 
 /* Zebra message types. */
 #define ZEBRA_INTERFACE_ADD                1
@@ -413,12 +363,6 @@ struct in_pktinfo
 #define ZEBRA_ROUTER_ID_UPDATE            22
 #define ZEBRA_MESSAGE_MAX                 23
 
-/* Marker value used in new Zserv, in the byte location corresponding
- * the command value in the old zserv header. To allow old and new
- * Zserv headers to be distinguished from each other.
- */
-#define ZEBRA_HEADER_MARKER              255
-
 /* Zebra route's types. */
 #define ZEBRA_ROUTE_SYSTEM               0
 #define ZEBRA_ROUTE_KERNEL               1
@@ -432,21 +376,6 @@ struct in_pktinfo
 #define ZEBRA_ROUTE_BGP                  9
 #define ZEBRA_ROUTE_HSLS		 10
 #define ZEBRA_ROUTE_MAX                  11
-
-/* Note: whenever a new route-type or zserv-command is added the
- * corresponding {command,route}_types[] table in lib/log.c MUST be
- * updated! */
-
-/* Map a route type to a string.  For example, ZEBRA_ROUTE_RIPNG -> "ripng". */
-extern const char *zebra_route_string(unsigned int route_type);
-/* Map a route type to a char.  For example, ZEBRA_ROUTE_RIPNG -> 'R'. */
-extern char zebra_route_char(unsigned int route_type);
-/* Map a zserv command type to the same string, 
- * e.g. ZEBRA_INTERFACE_ADD -> "ZEBRA_INTERFACE_ADD" */
-/* Map a protocol name to its number. e.g. ZEBRA_ROUTE_BGP->9*/
-extern int proto_name2num(const char *s);
-
-extern const char *zserv_command_string (unsigned int command);
 
 /* Zebra's family types. */
 #define ZEBRA_FAMILY_IPV4                1
@@ -515,16 +444,16 @@ extern const char *zserv_command_string (unsigned int command);
 
 /* Flag manipulation macros. */
 #define CHECK_FLAG(V,F)      ((V) & (F))
-#define SET_FLAG(V,F)        (V) |= (F)
-#define UNSET_FLAG(V,F)      (V) &= ~(F)
+#define SET_FLAG(V,F)        (V) = (V) | (F)
+#define UNSET_FLAG(V,F)      (V) = (V) & ~(F)
 
 /* AFI and SAFI type. */
 typedef u_int16_t afi_t;
 typedef u_int8_t safi_t;
 
-/* Zebra types. Used in Zserv message header. */
+/* Zebra types. */
 typedef u_int16_t zebra_size_t;
-typedef u_int16_t zebra_command_t;
+typedef u_int8_t zebra_command_t;
 
 /* FIFO -- first in first out structure and macros.  */
 struct fifo
