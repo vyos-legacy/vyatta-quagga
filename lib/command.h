@@ -25,7 +25,6 @@
 
 #include "vector.h"
 #include "vty.h"
-#include "lib/route_types.h"
 
 /* Host configuration variable */
 struct host
@@ -56,7 +55,6 @@ struct host
 
   /* Banner configuration. */
   const char *motd;
-  char *motdfile;
 };
 
 /* There are some command levels which called from command node. */
@@ -82,7 +80,6 @@ enum node_type
   BGP_IPV4_NODE,		/* BGP IPv4 unicast address family.  */
   BGP_IPV4M_NODE,		/* BGP IPv4 multicast address family.  */
   BGP_IPV6_NODE,		/* BGP IPv6 address family */
-  BGP_IPV6M_NODE,		/* BGP IPv6 multicast address family. */
   OSPF_NODE,			/* OSPF protocol mode */
   OSPF6_NODE,			/* OSPF protocol for IPv6 mode */
   ISIS_NODE,			/* ISIS protocol mode */
@@ -99,7 +96,6 @@ enum node_type
   SMUX_NODE,			/* SNMP configuration node. */
   DUMP_NODE,			/* Packet dump node. */
   FORWARDING_NODE,		/* IP forwarding node. */
-  PROTOCOL_NODE,                /* protocol filtering node */
   VTY_NODE			/* Vty node. */
 };
 
@@ -125,7 +121,7 @@ struct cmd_node
 
 enum
 {
-  CMD_ATTR_DEPRECATED = 1,
+  CMD_ATTR_DEPRECATED,
   CMD_ATTR_HIDDEN,
 };
 
@@ -181,14 +177,11 @@ struct desc
   };
 
 #define DEFUN_CMD_FUNC_DECL(funcname) \
-  static int funcname (struct cmd_element *, struct vty *, int, const char *[]);
+  static int funcname (struct cmd_element *, struct vty *, int, const char *[]); \
 
 #define DEFUN_CMD_FUNC_TEXT(funcname) \
   static int funcname \
-    (struct cmd_element *self __attribute__ ((unused)), \
-     struct vty *vty __attribute__ ((unused)), \
-     int argc __attribute__ ((unused)), \
-     const char *argv[] __attribute__ ((unused)) )
+    (struct cmd_element *self, struct vty *vty, int argc, const char *argv[])
 
 /* DEFUN for vty command interafce. Little bit hacky ;-). */
 #define DEFUN(funcname, cmdname, cmdstr, helpstr) \
@@ -273,7 +266,6 @@ struct desc
 #define IP_STR "IP information\n"
 #define IPV6_STR "IPv6 information\n"
 #define NO_STR "Negate a command or set its defaults\n"
-#define REDIST_STR "Redistribute information from another routing protocol\n"
 #define CLEAR_STR "Reset functions\n"
 #define RIP_STR "RIP information\n"
 #define BGP_STR "BGP information\n"
@@ -325,27 +317,22 @@ struct desc
 #endif /* HAVE_IPV6 */
 
 /* Prototypes. */
-extern void install_node (struct cmd_node *, int (*) (struct vty *));
-extern void install_default (enum node_type);
-extern void install_element (enum node_type, struct cmd_element *);
-extern void sort_node (void);
+void install_node (struct cmd_node *, int (*) (struct vty *));
+void install_default (enum node_type);
+void install_element (enum node_type, struct cmd_element *);
+void sort_node ();
 
-/* Concatenates argv[shift] through argv[argc-1] into a single NUL-terminated
-   string with a space between each element (allocated using
-   XMALLOC(MTYPE_TMP)).  Returns NULL if shift >= argc. */
-extern char *argv_concat (const char **argv, int argc, int shift);
-
-extern vector cmd_make_strvec (const char *);
-extern void cmd_free_strvec (vector);
-extern vector cmd_describe_command (vector, struct vty *, int *status);
-extern char **cmd_complete_command (vector, struct vty *, int *status);
-extern const char *cmd_prompt (enum node_type);
-extern int config_from_file (struct vty *, FILE *);
-extern enum node_type node_parent (enum node_type);
-extern int cmd_execute_command (vector, struct vty *, struct cmd_element **, int);
-extern int cmd_execute_command_strict (vector, struct vty *, struct cmd_element **);
-extern void config_replace_string (struct cmd_element *, char *, ...);
-extern void cmd_init (int);
+char *argv_concat (const char **, int, int);
+vector cmd_make_strvec (const char *);
+void cmd_free_strvec (vector);
+vector cmd_describe_command ();
+char **cmd_complete_command ();
+const char *cmd_prompt (enum node_type);
+int config_from_file (struct vty *, FILE *);
+int cmd_execute_command (vector, struct vty *, struct cmd_element **, int);
+int cmd_execute_command_strict (vector, struct vty *, struct cmd_element **);
+void config_replace_string (struct cmd_element *, char *, ...);
+void cmd_init (int);
 
 /* Export typical functions. */
 extern struct cmd_element config_end_cmd;
@@ -353,11 +340,9 @@ extern struct cmd_element config_exit_cmd;
 extern struct cmd_element config_quit_cmd;
 extern struct cmd_element config_help_cmd;
 extern struct cmd_element config_list_cmd;
-extern char *host_config_file (void);
-extern void host_config_set (char *);
+char *host_config_file ();
+void host_config_set (char *);
 
-extern void print_version (const char *);
+void print_version (const char *);
 
-/* struct host global, ick */
-extern struct host host; 
 #endif /* _ZEBRA_COMMAND_H */
