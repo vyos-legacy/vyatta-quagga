@@ -74,7 +74,7 @@ ospf6_zebra_redistribute (int type)
     return;
   zclient->redist[type] = 1;
   if (zclient->sock > 0)
-    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient, type);
+    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient->sock, type);
 }
 
 void
@@ -84,7 +84,7 @@ ospf6_zebra_no_redistribute (int type)
     return;
   zclient->redist[type] = 0;
   if (zclient->sock > 0)
-    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient, type);
+    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient->sock, type);
 }
 
 /* Inteface addition message from zebra. */
@@ -104,24 +104,16 @@ ospf6_zebra_if_add (int command, struct zclient *zclient, zebra_size_t length)
 int
 ospf6_zebra_if_del (int command, struct zclient *zclient, zebra_size_t length)
 {
+#if 0
   struct interface *ifp;
 
-  if (!(ifp = zebra_interface_state_read(zclient->ibuf)))
-    return 0;
-
-  if (if_is_up (ifp))
-    zlog_warn ("Zebra: got delete of %s, but interface is still up", ifp->name);
-
+  ifp = zebra_interface_delete_read (zclient->ibuf);
   if (IS_OSPF6_DEBUG_ZEBRA (RECV))
     zlog_debug ("Zebra Interface delete: %s index %d mtu %d",
 		ifp->name, ifp->ifindex, ifp->mtu6);
 
-#if 0
-  /* Why is this commented out? */
   ospf6_interface_if_del (ifp);
 #endif /*0*/
-
-  ifp->ifindex = IFINDEX_INTERNAL;
   return 0;
 }
 
@@ -187,6 +179,15 @@ ospf6_zebra_if_address_update_delete (int command, struct zclient *zclient,
   return 0;
 }
 
+
+
+const char *zebra_route_name[ZEBRA_ROUTE_MAX] =
+  { "System", "Kernel", "Connect", "Static", "RIP", "RIPng", "OSPF",
+    "OSPF6", "ISIS", "BGP" };
+
+const char *zebra_route_abname[ZEBRA_ROUTE_MAX] =
+  { "X", "K", "C", "S", "r", "R", "o", "O", "I", "B" };
+
 int
 ospf6_zebra_read_ipv6 (int command, struct zclient *zclient,
                        zebra_size_t length)
@@ -246,7 +247,7 @@ ospf6_zebra_read_ipv6 (int command, struct zclient *zclient,
 
       zlog_debug ("Zebra Receive route %s: %s %s nexthop %s ifindex %ld",
 		  (command == ZEBRA_IPV6_ROUTE_ADD ? "add" : "delete"),
-		  zebra_route_string(api.type), prefixstr, nexthopstr, ifindex);
+		  zebra_route_name[api.type], prefixstr, nexthopstr, ifindex);
     }
  
   if (command == ZEBRA_IPV6_ROUTE_ADD)
@@ -286,7 +287,7 @@ DEFUN (show_zebra,
   for (i = 0; i < ZEBRA_ROUTE_MAX; i++)
     {
       if (zclient->redist[i])
-        vty_out (vty, " %s", zebra_route_string(i));
+        vty_out (vty, " %s", zebra_route_name[i]);
     }
   vty_out (vty, "%s", VNL);
   return CMD_SUCCESS;
@@ -347,7 +348,7 @@ static void
 ospf6_zebra_route_update (int type, struct ospf6_route *request)
 {
   struct zapi_ipv6 api;
-  char buf[64];
+  char buf[64], ifname[IFNAMSIZ];
   int nhcount;
   struct in6_addr **nexthops;
   unsigned int *ifindexes;
@@ -431,15 +432,13 @@ ospf6_zebra_route_update (int type, struct ospf6_route *request)
   for (i = 0; i < nhcount; i++)
     {
       if (IS_OSPF6_DEBUG_ZEBRA (SEND))
-	{
-	  char ifname[IFNAMSIZ];
-	  inet_ntop (AF_INET6, &request->nexthop[i].address,
-		     buf, sizeof (buf));
-	  if (!if_indextoname(request->nexthop[i].ifindex, ifname))
-	    strlcpy(ifname, "unknown", sizeof(ifname));
-	  zlog_debug ("  nexthop: %s%%%.*s(%d)", buf, IFNAMSIZ, ifname,
+        {
+          inet_ntop (AF_INET6, &request->nexthop[i].address,
+                     buf, sizeof (buf));
+          if_indextoname (request->nexthop[i].ifindex, ifname);
+          zlog_debug ("  nexthop: %s%%%s(%d)", buf, ifname,
 		      request->nexthop[i].ifindex);
-	}
+        }
       nexthops[i] = &request->nexthop[i].address;
       ifindexes[i] = request->nexthop[i].ifindex;
     }
