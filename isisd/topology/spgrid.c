@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <values.h>
 
 #include "random.c"
 
@@ -26,16 +27,7 @@
 
 #define NODE( x, y ) (x*Y + y + 1)
 
-/*
- * Prototypes.
- */
-void free_arc(void *);
-void help(struct vty *);
-void print_arc(struct vty *, struct list *, long, long, long);
-void hhelp(struct vty *);
-void usage(struct vty *);
-
-const char   *graph_type[] =  {
+char   *graph_type[] =  {
   "double cycle",
   "cycle",
   "path"
@@ -236,7 +228,7 @@ usage (struct vty *vty) {
 /* parsing  parameters */
 /* checks the validity of incoming parameters */
 int
-spgrid_check_params ( struct vty *vty, int argc, const char **argv)
+spgrid_check_params ( struct vty *vty, int argc, char **argv)
 {
 /* initialized by default values */
   ext=0;
@@ -350,11 +342,11 @@ spgrid_check_params ( struct vty *vty, int argc, const char **argv)
         switch ( args[2] ) {
           case 'l': /* upper bound of the interval */
             cl_f = 1;
-            cl  =  atol ( &args[3] );
+            cl  =  (long) atof ( &args[3] );
             break;
           case 'm': /* lower bound */
             cm_f = 1;
-            cm  = atol ( &args[3] );
+            cm  = (long ) atof ( &args[3] );
             break;
           case 'c': /* type - cycle */
             cw_f = 1;
@@ -381,15 +373,15 @@ spgrid_check_params ( struct vty *vty, int argc, const char **argv)
           {
           case 'l': /* upper bound of the interval */
             al_f = 1;
-            al  =  atol ( &args[3] );
+            al  =  (long) atof ( &args[3] );
             break;
           case 'm': /* lower bound */
             am_f = 1;
-            am  = atol ( &args[3] );
+            am  = (long ) atof ( &args[3] );
             break;
           case 'x': /* number of additional arcs */
             ax_f = 1;
-            ax   = atol ( &args[3] );
+            ax   = (long ) atof ( &args[3] );
             if ( ax < 0 )
              {
                usage (vty);
@@ -413,11 +405,11 @@ spgrid_check_params ( struct vty *vty, int argc, const char **argv)
           {
           case 'l': /* upper bound */
             il_f = 1;
-            il  =  atol ( &args[3] );
+            il  =  (long) atof ( &args[3] );
             break;
           case 'm': /* lower bound */
             im_f = 1;
-            im  = atol ( &args[3] );
+            im  = (long ) atof ( &args[3] );
             break;
           case 'n': /* additional length: l *= in*|i1-i2| */
             in_f = 1;
@@ -461,11 +453,11 @@ spgrid_check_params ( struct vty *vty, int argc, const char **argv)
           {
           case 'l': /* upper bound of art. arc */
             sl_f = 1;
-            sl  =  atol ( &args[3] );
+            sl  =  (long) atof ( &args[3] );
             break;
           case 'm': /* lower bound of art. arc */
             sm_f = 1;
-            sm  =  atol ( &args[3] );
+            sm  =  (long) atof ( &args[3] );
             break;
           default:  /* unknown switch  value */
             usage (vty);
@@ -482,11 +474,11 @@ spgrid_check_params ( struct vty *vty, int argc, const char **argv)
           {
           case 'l': /* upper bound */
             pl_f = 1;
-            pl  =  atol ( &args[3] );
+            pl  =  (long) atof ( &args[3] );
             break;
           case 'm': /* lower bound */
             pm_f = 1;
-            pm  = atol ( &args[3] );
+            pm  = (long ) atof ( &args[3] );
             break;
           case 'n': /* additional: p *= pn*(x+1) */
             pn_f = 1;
@@ -574,7 +566,7 @@ gen_spgrid_topology (struct vty *vty, struct list *topology)
     if ( sl < sm ) { lx = sl; sl = sm; sm = lx; }
   }
 
-  if ( n >= (double)LONG_MAX || m >= (double)LONG_MAX )
+  if ( n >= (double)MAXLONG || m >= (double)MAXLONG )
   {
     zlog_err ("Too large problem. It can't be generated\n");
     exit (4);
