@@ -77,11 +77,14 @@ int irdp_timer_interval = IRDP_DEFAULT_INTERVAL;
 
 int irdp_read_raw(struct thread *r);
 int in_cksum (void *ptr, int nbytes);
+extern int irdp_sock;
 void send_packet(struct interface *ifp, 
 		 struct stream *s,
 		 u_int32_t dst,
 		 struct prefix *p,
 		 u_int32_t ttl);
+
+void irdp_if_init ();
 
 char *
 inet_2a(u_int32_t a, char *b)
@@ -99,48 +102,44 @@ irdp_sock_init (void)
 {
   int ret, i;
   int save_errno;
-  int sock;
 
   if ( zserv_privs.change (ZPRIVS_RAISE) )
        zlog_err ("irdp_sock_init: could not raise privs, %s",
                   safe_strerror (errno) );
 
-  sock = socket (AF_INET, SOCK_RAW, IPPROTO_ICMP);
+  irdp_sock = socket (AF_INET, SOCK_RAW, IPPROTO_ICMP);
   save_errno = errno;
 
   if ( zserv_privs.change (ZPRIVS_LOWER) )
        zlog_err ("irdp_sock_init: could not lower privs, %s",
              safe_strerror (errno) );
 
-  if (sock < 0) {
+  if (irdp_sock < 0) {
     zlog_warn ("IRDP: can't create irdp socket %s", safe_strerror(save_errno));
-    return sock;
+    return irdp_sock;
   };
   
   i = 1;
-  ret = setsockopt (sock, IPPROTO_IP, IP_TTL, 
+  ret = setsockopt (irdp_sock, IPPROTO_IP, IP_TTL, 
                         (void *) &i, sizeof (i));
   if (ret < 0) {
     zlog_warn ("IRDP: can't do irdp sockopt %s", safe_strerror(errno));
-    close(sock);
     return ret;
   };
   
-  ret = setsockopt_ifindex (AF_INET, sock, 1);
+  ret = setsockopt_ifindex (AF_INET, irdp_sock, 1);
   if (ret < 0) {
     zlog_warn ("IRDP: can't do irdp sockopt %s", safe_strerror(errno));
-    close(sock);
     return ret;
   };
 
-  t_irdp_raw = thread_add_read (zebrad.master, irdp_read_raw, NULL, sock); 
+  t_irdp_raw = thread_add_read (zebrad.master, irdp_read_raw, NULL, irdp_sock); 
 
-  return sock;
+  return irdp_sock;
 }
 
 
-static int
-get_pref(struct irdp_interface *irdp, struct prefix *p)
+int get_pref(struct irdp_interface *irdp, struct prefix *p)
 {
   struct listnode *node;
   struct Adv *adv;
@@ -150,7 +149,7 @@ get_pref(struct irdp_interface *irdp, struct prefix *p)
   if( irdp->AdvPrefList == NULL )
     return irdp->Preference;
   
-  for (ALL_LIST_ELEMENTS_RO (irdp->AdvPrefList, node, adv))
+  LIST_LOOP (irdp->AdvPrefList, adv, node)
     if( p->u.prefix4.s_addr == adv->ip.s_addr )
       return adv->pref;
 
@@ -158,10 +157,9 @@ get_pref(struct irdp_interface *irdp, struct prefix *p)
 }
 
 /* Make ICMP Router Advertisement Message. */
-static int
-make_advertisement_packet (struct interface *ifp, 
-			   struct prefix *p,
-			   struct stream *s)
+int make_advertisement_packet (struct interface *ifp, 
+			       struct prefix *p,
+			       struct stream *s)
 {
   struct zebra_if *zi=ifp->info;
   struct irdp_interface *irdp=&zi->irdp;
@@ -193,8 +191,9 @@ make_advertisement_packet (struct interface *ifp,
   return size;
 }
 
-static void
-irdp_send(struct interface *ifp, struct prefix *p, struct stream *s)
+void irdp_send(struct interface *ifp, 
+	       struct prefix *p, 
+	       struct stream *s)
 {
   struct zebra_if *zi=ifp->info;
   struct irdp_interface *irdp=&zi->irdp;
@@ -219,13 +218,13 @@ irdp_send(struct interface *ifp, struct prefix *p, struct stream *s)
   send_packet (ifp, s, dst, p, ttl);
 }
 
-static void irdp_advertisement (struct interface *ifp, struct prefix *p)
+void irdp_advertisement (struct interface *ifp, 
+		   struct prefix *p)
 {
   struct stream *s;
   s = stream_new (128);
   make_advertisement_packet (ifp, p, s);
-  irdp_send(ifp, p, s);
-  stream_free (s);
+  irdp_send(ifp, p, s); 
 }
 
 int irdp_send_thread(struct thread *t_advert)
@@ -235,19 +234,15 @@ int irdp_send_thread(struct thread *t_advert)
   struct zebra_if *zi=ifp->info;
   struct irdp_interface *irdp=&zi->irdp;
   struct prefix *p;
-  struct listnode *node, *nnode;
+  struct listnode *node;
   struct connected *ifc;
 
   irdp->flags &= ~IF_SOLICIT;
 
   if(ifp->connected) 
-    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, ifc))
+    LIST_LOOP (ifp->connected, ifc, node)
       {
         p = ifc->address;
-        
-        if (p->family != AF_INET)
-          continue;
-        
         irdp_advertisement(ifp, p);
         irdp->irdp_sent++;
       }
@@ -271,7 +266,7 @@ void irdp_advert_off(struct interface *ifp)
 {
   struct zebra_if *zi=ifp->info;
   struct irdp_interface *irdp=&zi->irdp;
-  struct listnode *node, *nnode;
+  struct listnode *node;
   int i;
   struct connected *ifc;
   struct prefix *p;
@@ -280,7 +275,7 @@ void irdp_advert_off(struct interface *ifp)
   irdp->t_advertise = NULL;
   
   if(ifp->connected) 
-    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, ifc))
+    LIST_LOOP (ifp->connected, ifc, node)
       {
         p = ifc->address;
 
@@ -324,15 +319,16 @@ void process_solicit (struct interface *ifp)
 void irdp_finish()
 {
 
-  struct listnode *node, *nnode;
+  struct listnode *node;
   struct interface *ifp;
   struct zebra_if *zi;
   struct irdp_interface *irdp;
 
   zlog_info("IRDP: Received shutdown notification.");
   
-  for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
+  for (node = listhead (iflist); node; node = nextnode (node))
     {
+      ifp = getdata(node);
       zi = ifp->info;
       
       if (!zi) 
@@ -349,4 +345,14 @@ void irdp_finish()
     }
 }
 
+void irdp_init()
+{
+  irdp_sock_init();
+  irdp_if_init ();
+}
+
 #endif /* HAVE_IRDP */
+
+
+
+

@@ -31,7 +31,6 @@
 
 #include "zebra/rib.h"
 #include "zebra/rt.h"
-#include "zebra/interface.h"
 
 extern struct zebra_privs_t zserv_privs;
 
@@ -55,10 +54,9 @@ if_ioctl (u_long request, caddr_t buffer)
   sock = socket (AF_INET, SOCK_DGRAM, 0);
   if (sock < 0)
     {
-      int save_errno = errno;
       if (zserv_privs.change(ZPRIVS_LOWER))
         zlog (NULL, LOG_ERR, "Can't lower privileges");
-      zlog_err("Cannot create UDP socket: %s", safe_strerror(save_errno));
+      perror ("socket");
       exit (1);
     }
   if ((ret = ioctl (sock, request, buffer)) < 0)
@@ -76,7 +74,7 @@ if_ioctl (u_long request, caddr_t buffer)
 }
 
 #ifdef HAVE_IPV6
-static int
+int
 if_ioctl_ipv6 (u_long request, caddr_t buffer)
 {
   int sock;
@@ -88,11 +86,9 @@ if_ioctl_ipv6 (u_long request, caddr_t buffer)
   sock = socket (AF_INET6, SOCK_DGRAM, 0);
   if (sock < 0)
     {
-      int save_errno = errno;
       if (zserv_privs.change(ZPRIVS_LOWER))
         zlog (NULL, LOG_ERR, "Can't lower privileges");
-      zlog_err("Cannot create IPv6 datagram socket: %s",
-	       safe_strerror(save_errno));
+      perror ("socket");
       exit (1);
     }
 
@@ -155,9 +151,6 @@ if_get_mtu (struct interface *ifp)
   ifp->mtu6 = ifp->mtu = ifreq.ifr_mtu;
 #endif /* SUNOS_5 */
 
-  /* propogate */
-  zebra_interface_up_update(ifp);
-
 #else
   zlog (NULL, LOG_INFO, "Can't lookup mtu on this system");
   ifp->mtu6 = ifp->mtu = -1;
@@ -179,7 +172,7 @@ if_unset_prefix (struct interface *ifp, struct connected *ifc)
   return kernel_address_delete_ipv4 (ifp, ifc);
 }
 #else /* ! HAVE_NETLINK */
-#ifdef HAVE_STRUCT_IFALIASREQ
+#ifdef HAVE_IFALIASREQ
 /* Set up interface's IP address, netmask (and broadcas? ).  *BSD may
    has ifaliasreq structure.  */
 int
@@ -199,7 +192,7 @@ if_set_prefix (struct interface *ifp, struct connected *ifc)
   memset (&addr, 0, sizeof (struct sockaddr_in));
   addr.sin_addr = p->prefix;
   addr.sin_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   addr.sin_len = sizeof (struct sockaddr_in);
 #endif
   memcpy (&addreq.ifra_addr, &addr, sizeof (struct sockaddr_in));
@@ -207,7 +200,7 @@ if_set_prefix (struct interface *ifp, struct connected *ifc)
   memset (&mask, 0, sizeof (struct sockaddr_in));
   masklen2ip (p->prefixlen, &mask.sin_addr);
   mask.sin_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   mask.sin_len = sizeof (struct sockaddr_in);
 #endif
   memcpy (&addreq.ifra_mask, &mask, sizeof (struct sockaddr_in));
@@ -237,7 +230,7 @@ if_unset_prefix (struct interface *ifp, struct connected *ifc)
   memset (&addr, 0, sizeof (struct sockaddr_in));
   addr.sin_addr = p->prefix;
   addr.sin_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   addr.sin_len = sizeof (struct sockaddr_in);
 #endif
   memcpy (&addreq.ifra_addr, &addr, sizeof (struct sockaddr_in));
@@ -245,7 +238,7 @@ if_unset_prefix (struct interface *ifp, struct connected *ifc)
   memset (&mask, 0, sizeof (struct sockaddr_in));
   masklen2ip (p->prefixlen, &mask.sin_addr);
   mask.sin_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   mask.sin_len = sizeof (struct sockaddr_in);
 #endif
   memcpy (&addreq.ifra_mask, &mask, sizeof (struct sockaddr_in));
@@ -335,7 +328,7 @@ if_unset_prefix (struct interface *ifp, struct connected *ifc)
 
   return 0;
 }
-#endif /* HAVE_STRUCT_IFALIASREQ */
+#endif /* HAVE_IFALIASREQ */
 #endif /* HAVE_NETLINK */
 
 /* get interface flags */
@@ -350,16 +343,16 @@ if_get_flags (struct interface *ifp)
   ret = if_ioctl (SIOCGIFFLAGS, (caddr_t) &ifreq);
   if (ret < 0) 
     {
-      zlog_err("if_ioctl(SIOCGIFFLAGS) failed: %s", safe_strerror(errno));
+      perror ("ioctl");
       return;
     }
 
-  if_flags_update (ifp, (ifreq.ifr_flags & 0x0000ffff));
+  ifp->flags = ifreq.ifr_flags & 0x0000ffff;
 }
 
 /* Set interface flags */
 int
-if_set_flags (struct interface *ifp, uint64_t flags)
+if_set_flags (struct interface *ifp, unsigned long flags)
 {
   int ret;
   struct ifreq ifreq;
@@ -382,7 +375,7 @@ if_set_flags (struct interface *ifp, uint64_t flags)
 
 /* Unset interface's flag. */
 int
-if_unset_flags (struct interface *ifp, uint64_t flags)
+if_unset_flags (struct interface *ifp, unsigned long flags)
 {
   int ret;
   struct ifreq ifreq;
@@ -457,7 +450,7 @@ if_prefix_delete_ipv6 (struct interface *ifp, struct connected *ifc)
   return ret;
 }
 #else /* LINUX_IPV6 */
-#ifdef HAVE_STRUCT_IN6_ALIASREQ
+#ifdef HAVE_IN6_ALIASREQ
 #ifndef ND6_INFINITE_LIFETIME
 #define ND6_INFINITE_LIFETIME 0xffffffffL
 #endif /* ND6_INFINITE_LIFETIME */
@@ -478,7 +471,7 @@ if_prefix_add_ipv6 (struct interface *ifp, struct connected *ifc)
   memset (&addr, 0, sizeof (struct sockaddr_in6));
   addr.sin6_addr = p->prefix;
   addr.sin6_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   addr.sin6_len = sizeof (struct sockaddr_in6);
 #endif
   memcpy (&addreq.ifra_addr, &addr, sizeof (struct sockaddr_in6));
@@ -486,7 +479,7 @@ if_prefix_add_ipv6 (struct interface *ifp, struct connected *ifc)
   memset (&mask, 0, sizeof (struct sockaddr_in6));
   masklen2ip6 (p->prefixlen, &mask.sin6_addr);
   mask.sin6_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   mask.sin6_len = sizeof (struct sockaddr_in6);
 #endif
   memcpy (&addreq.ifra_prefixmask, &mask, sizeof (struct sockaddr_in6));
@@ -494,7 +487,7 @@ if_prefix_add_ipv6 (struct interface *ifp, struct connected *ifc)
   addreq.ifra_lifetime.ia6t_vltime = 0xffffffff;
   addreq.ifra_lifetime.ia6t_pltime = 0xffffffff;
   
-#ifdef HAVE_STRUCT_IF6_ALIASREQ_IFRA_LIFETIME 
+#ifdef HAVE_IFRA_LIFETIME 
   addreq.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME; 
   addreq.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME; 
 #endif
@@ -522,7 +515,7 @@ if_prefix_delete_ipv6 (struct interface *ifp, struct connected *ifc)
   memset (&addr, 0, sizeof (struct sockaddr_in6));
   addr.sin6_addr = p->prefix;
   addr.sin6_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   addr.sin6_len = sizeof (struct sockaddr_in6);
 #endif
   memcpy (&addreq.ifra_addr, &addr, sizeof (struct sockaddr_in6));
@@ -530,12 +523,12 @@ if_prefix_delete_ipv6 (struct interface *ifp, struct connected *ifc)
   memset (&mask, 0, sizeof (struct sockaddr_in6));
   masklen2ip6 (p->prefixlen, &mask.sin6_addr);
   mask.sin6_family = p->family;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   mask.sin6_len = sizeof (struct sockaddr_in6);
 #endif
   memcpy (&addreq.ifra_prefixmask, &mask, sizeof (struct sockaddr_in6));
 
-#ifdef HAVE_STRUCT_IF6_ALIASREQ_IFRA_LIFETIME
+#ifdef HAVE_IFRA_LIFETIME
   addreq.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME; 
   addreq.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME; 
 #endif
@@ -557,7 +550,7 @@ if_prefix_delete_ipv6 (struct interface *ifp, struct connected *ifc)
 {
   return 0;
 }
-#endif /* HAVE_STRUCT_IN6_ALIASREQ */
+#endif /* HAVE_IN6_ALIASREQ */
 
 #endif /* LINUX_IPV6 */
 

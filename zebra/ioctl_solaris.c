@@ -31,15 +31,14 @@
 
 #include "zebra/rib.h"
 #include "zebra/rt.h"
-#include "zebra/interface.h"
 
 extern struct zebra_privs_t zserv_privs;
 
 /* clear and set interface name string */
 void
-lifreq_set_name (struct lifreq *lifreq, const char *ifname)
+lifreq_set_name (struct lifreq *lifreq, struct interface *ifp)
 {
-  strncpy (lifreq->lifr_name, ifname, IFNAMSIZ);
+  strncpy (lifreq->lifr_name, ifp->name, IFNAMSIZ);
 }
 
 /* call ioctl system call */
@@ -56,10 +55,9 @@ if_ioctl (u_long request, caddr_t buffer)
   sock = socket (AF_INET, SOCK_DGRAM, 0);
   if (sock < 0)
     {
-      int save_errno = errno;
       if (zserv_privs.change(ZPRIVS_LOWER))
         zlog (NULL, LOG_ERR, "Can't lower privileges");
-      zlog_err("Cannot create UDP socket: %s", safe_strerror(save_errno));
+      perror ("socket");
       exit (1);
     }
 
@@ -94,11 +92,9 @@ if_ioctl_ipv6 (u_long request, caddr_t buffer)
   sock = socket (AF_INET6, SOCK_DGRAM, 0);
   if (sock < 0)
     {
-      int save_errno = errno;
       if (zserv_privs.change(ZPRIVS_LOWER))
         zlog (NULL, LOG_ERR, "Can't lower privileges");
-      zlog_err("Cannot create IPv6 datagram socket: %s",
-	       safe_strerror(save_errno));
+      perror ("socket");
       exit (1);
     }
 
@@ -130,7 +126,7 @@ if_get_metric (struct interface *ifp)
   struct lifreq lifreq;
   int ret;
 
-  lifreq_set_name (&lifreq, ifp->name);
+  lifreq_set_name (&lifreq, ifp);
 
   if (ifp->flags & IFF_IPV4)
     ret = AF_IOCTL (AF_INET, SIOCGLIFMETRIC, (caddr_t) & lifreq);
@@ -156,11 +152,10 @@ if_get_mtu (struct interface *ifp)
 {
   struct lifreq lifreq;
   int ret;
-  u_char changed = 0;
   
   if (ifp->flags & IFF_IPV4)
     {
-      lifreq_set_name (&lifreq, ifp->name);
+      lifreq_set_name (&lifreq, ifp);
       ret = AF_IOCTL (AF_INET, SIOCGLIFMTU, (caddr_t) & lifreq);
       if (ret < 0)
         {
@@ -171,20 +166,15 @@ if_get_mtu (struct interface *ifp)
       else
         {
           ifp->mtu = lifreq.lifr_metric;
-          changed = 1;
         }
     }
 
 #ifdef HAVE_IPV6
   if ((ifp->flags & IFF_IPV6) == 0)
-    {
-      if (changed)
-        zebra_interface_up_update(ifp);
-      return;
-    }
+    return;
     
   memset(&lifreq, 0, sizeof(lifreq));
-  lifreq_set_name (&lifreq, ifp->name);
+  lifreq_set_name (&lifreq, ifp);
 
   ret = AF_IOCTL (AF_INET6, SIOCGLIFMTU, (caddr_t) & lifreq);
   if (ret < 0)
@@ -195,11 +185,7 @@ if_get_mtu (struct interface *ifp)
   else
     {
       ifp->mtu6 = lifreq.lifr_metric;
-      changed = 1;
     }
-  
-  if (changed)
-    zebra_interface_up_update(ifp);
 #endif /* HAVE_IPV6 */
 }
 
@@ -285,79 +271,47 @@ if_unset_prefix (struct interface *ifp, struct connected *ifc)
   return 0;
 }
 
-/* Get just the flags for the given name.
- * Used by the normal 'if_get_flags' function, as well
- * as the bootup interface-list code, which has to peek at per-address
- * flags in order to figure out which ones should be ignored..
- */
-int
-if_get_flags_direct (const char *ifname, uint64_t *flags, unsigned int af)
-{
-  struct lifreq lifreq;
-  int ret;
-    
-  lifreq_set_name (&lifreq, ifname);
-  
-  ret = AF_IOCTL (af, SIOCGLIFFLAGS, (caddr_t) &lifreq);
-  
-  if (ret)
-    zlog_debug ("%s: ifname %s, error %s (%d)",
-                __func__, ifname, safe_strerror (errno), errno);
-  
-  *flags = lifreq.lifr_flags;
-  
-  return ret;
-}
-
 /* get interface flags */
 void
 if_get_flags (struct interface *ifp)
 {
-  int ret4, ret6;
-  uint64_t newflags = 0;
-  uint64_t tmpflags;
+  int ret;
+  struct lifreq lifreq;
+  unsigned long flags4 = 0, flags6 = 0;
 
   if (ifp->flags & IFF_IPV4)
     {
-      ret4 = if_get_flags_direct (ifp->name, &tmpflags, AF_INET);
+      lifreq_set_name (&lifreq, ifp);
       
-      if (!ret4)
-        newflags |= tmpflags;
-      else if (errno == ENXIO)
-        {
-          /* it's gone */
-          UNSET_FLAG (ifp->flags, IFF_UP);
-          if_flags_update (ifp, ifp->flags);
-        }
+      ret = AF_IOCTL (AF_INET, SIOCGLIFFLAGS, (caddr_t) & lifreq);
+
+      flags4 = (lifreq.lifr_flags & 0xffffffff);
+      if (!(flags4 & IFF_UP))
+        flags4 &= ~IFF_IPV4;
     }
 
   if (ifp->flags & IFF_IPV6)
     {
-      ret6 = if_get_flags_direct (ifp->name, &tmpflags, AF_INET6);
+      lifreq_set_name (&lifreq, ifp);
       
-      if (!ret6)
-        newflags |= tmpflags;
-      else if (errno == ENXIO)
-        {
-          /* it's gone */
-          UNSET_FLAG (ifp->flags, IFF_UP);
-          if_flags_update (ifp, ifp->flags);
-        }
+      ret = AF_IOCTL (AF_INET6, SIOCGLIFFLAGS, (caddr_t) & lifreq);
+              
+      flags6 = (lifreq.lifr_flags & 0xffffffff);
+      if (!(flags6 & IFF_UP))
+        flags6 &= ~IFF_IPV6;
     }
-  
-  /* only update flags if one of above succeeded */
-  if ( !(ret4 && ret6) )
-    if_flags_update (ifp, newflags);
+
+  ifp->flags = (flags4 | flags6);
 }
 
 /* Set interface flags */
 int
-if_set_flags (struct interface *ifp, uint64_t flags)
+if_set_flags (struct interface *ifp, unsigned long flags)
 {
   int ret;
   struct lifreq lifreq;
 
-  lifreq_set_name (&lifreq, ifp->name);
+  lifreq_set_name (&lifreq, ifp);
 
   lifreq.lifr_flags = ifp->flags;
   lifreq.lifr_flags |= flags;
@@ -380,12 +334,12 @@ if_set_flags (struct interface *ifp, uint64_t flags)
 
 /* Unset interface's flag. */
 int
-if_unset_flags (struct interface *ifp, uint64_t flags)
+if_unset_flags (struct interface *ifp, unsigned long flags)
 {
   int ret;
   struct lifreq lifreq;
 
-  lifreq_set_name (&lifreq, ifp->name);
+  lifreq_set_name (&lifreq, ifp);
 
   lifreq.lifr_flags = ifp->flags;
   lifreq.lifr_flags &= ~flags;

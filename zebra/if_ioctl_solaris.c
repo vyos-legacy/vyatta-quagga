@@ -33,9 +33,8 @@
 
 #include "zebra/interface.h"
 
-void lifreq_set_name (struct lifreq *, const char *);
-int if_get_flags_direct (const char *, uint64_t *, unsigned int af);
-static int if_get_addr (struct interface *, struct sockaddr *, const char *);
+void lifreq_set_name (struct lifreq *, struct interface *);
+static int if_get_addr (struct interface *, struct sockaddr *);
 static void interface_info_ioctl (struct interface *);
 extern struct zebra_privs_t zserv_privs;
 
@@ -72,7 +71,7 @@ interface_list_ioctl (int af)
 
 calculate_lifc_len:     /* must hold privileges to enter here */
   lifn.lifn_family = af;
-  lifn.lifn_flags = LIFC_NOXMIT; /* we want NOXMIT interfaces too */
+  lifn.lifn_flags = 0;
   ret = ioctl (sock, SIOCGLIFNUM, &lifn);
   save_errno = errno;
   
@@ -109,7 +108,7 @@ calculate_lifc_len:     /* must hold privileges to enter here */
   lastneeded = needed;
 
   lifconf.lifc_family = af;
-  lifconf.lifc_flags = LIFC_NOXMIT;
+  lifconf.lifc_flags = 0;
   lifconf.lifc_len = needed;
   lifconf.lifc_buf = buf;
 
@@ -139,35 +138,7 @@ calculate_lifc_len:     /* must hold privileges to enter here */
 
   for (n = 0; n < lifconf.lifc_len; n += sizeof (struct lifreq))
     {
-      /* we treat Solaris logical interfaces as addresses, because that is
-       * how PF_ROUTE on Solaris treats them. Hence we can not directly use
-       * the lifreq_name to get the ifp.  We need to normalise the name
-       * before attempting get.
-       *
-       * Solaris logical interface names are in the form of:
-       * <interface name>:<logical interface id>
-       */
-      unsigned int normallen = 0;
-      uint64_t lifflags;
-      
-      /* We should exclude ~IFF_UP interfaces, as we'll find out about them
-       * coming up later through RTM_NEWADDR message on the route socket.
-       */
-      if (if_get_flags_direct (lifreq->lifr_name, &lifflags,
-                           lifreq->lifr_addr.ss_family)
-          || !CHECK_FLAG (lifflags, IFF_UP))
-        {
-          lifreq++;
-          continue;
-        }
-      
-      /* Find the normalised name */
-      while ( (normallen < sizeof(lifreq->lifr_name))
-             && ( *(lifreq->lifr_name + normallen) != '\0')
-             && ( *(lifreq->lifr_name + normallen) != ':') )
-        normallen++;
-      
-      ifp = if_get_by_name_len(lifreq->lifr_name, normallen);
+      ifp = if_get_by_name (lifreq->lifr_name);
 
       if (lifreq->lifr_addr.ss_family == AF_INET)
         ifp->flags |= IFF_IPV4;
@@ -185,19 +156,7 @@ calculate_lifc_len:     /* must hold privileges to enter here */
       if_add_update (ifp);
 
       interface_info_ioctl (ifp);
-      
-      /* If a logical interface pass the full name so it can be
-       * as a label on the address
-       */
-      if ( *(lifreq->lifr_name + normallen) != '\0')
-        if_get_addr (ifp, (struct sockaddr *) &lifreq->lifr_addr,
-                     lifreq->lifr_name);
-      else
-        if_get_addr (ifp, (struct sockaddr *) &lifreq->lifr_addr, NULL);
-        
-      /* Poke the interface flags. Lets IFF_UP mangling kick in */
-      if_flags_update (ifp, ifp->flags);
-      
+      if_get_addr (ifp, (struct sockaddr *) &lifreq->lifr_addr);
       lifreq++;
     }
 
@@ -214,7 +173,7 @@ if_get_index (struct interface *ifp)
   int ret;
   struct lifreq lifreq;
 
-  lifreq_set_name (&lifreq, ifp->name);
+  lifreq_set_name (&lifreq, ifp);
 
   if (ifp->flags & IFF_IPV4)
     ret = AF_IOCTL (AF_INET, SIOCGLIFINDEX, (caddr_t) & lifreq);
@@ -248,9 +207,8 @@ if_get_index (struct interface *ifp)
 #define SIN(s) ((struct sockaddr_in *)(s))
 #define SIN6(s) ((struct sockaddr_in6 *)(s))
 
-/* Retrieve address information for the given ifp */
 static int
-if_get_addr (struct interface *ifp, struct sockaddr *addr, const char *label)
+if_get_addr (struct interface *ifp, struct sockaddr *addr)
 {
   int ret;
   struct lifreq lifreq;
@@ -258,13 +216,9 @@ if_get_addr (struct interface *ifp, struct sockaddr *addr, const char *label)
   char *dest_pnt = NULL;
   u_char prefixlen = 0;
   afi_t af;
-  int flags = 0;
 
-  /* Interface's name and address family.
-   * We need to use the logical interface name / label, if we've been
-   * given one, in order to get the right address
-   */
-  strncpy (lifreq.lifr_name, (label ? label : ifp->name), IFNAMSIZ);
+  /* Interface's name and address family. */
+  strncpy (lifreq.lifr_name, ifp->name, IFNAMSIZ);
 
   /* Interface's address. */
   memcpy (&lifreq.lifr_addr, addr, ADDRLEN (addr));
@@ -273,14 +227,21 @@ if_get_addr (struct interface *ifp, struct sockaddr *addr, const char *label)
   /* Point to point or broad cast address pointer init. */
   dest_pnt = NULL;
 
-  if (AF_IOCTL (af, SIOCGLIFDSTADDR, (caddr_t) & lifreq) >= 0)
+  if (ifp->flags & IFF_POINTOPOINT)
     {
+      ret = AF_IOCTL (af, SIOCGLIFDSTADDR, (caddr_t) & lifreq);
+        
+      if (ret < 0)
+        {
+          zlog_warn ("SIOCGLIFDSTADDR (%s) fail: %s",
+                     ifp->name, safe_strerror (errno));
+          return ret;
+        }
       memcpy (&dest, &lifreq.lifr_dstaddr, ADDRLEN (addr));
       if (af == AF_INET)
         dest_pnt = (char *) &(SIN (&dest)->sin_addr);
       else
         dest_pnt = (char *) &(SIN6 (&dest)->sin6_addr);
-      flags = ZEBRA_IFA_PEER;
     }
 
   if (af == AF_INET)
@@ -300,8 +261,19 @@ if_get_addr (struct interface *ifp, struct sockaddr *addr, const char *label)
       memcpy (&mask, &lifreq.lifr_addr, ADDRLEN (addr));
 
       prefixlen = ip_masklen (SIN (&mask)->sin_addr);
-      if (!dest_pnt && (if_ioctl (SIOCGLIFBRDADDR, (caddr_t) & lifreq) >= 0))
-	{
+      if (ifp->flags & IFF_BROADCAST)
+        {
+          ret = if_ioctl (SIOCGLIFBRDADDR, (caddr_t) & lifreq);
+          if (ret < 0)
+            {
+              if (errno != EADDRNOTAVAIL)
+                {
+                  zlog_warn ("SIOCGLIFBRDADDR (%s) fail: %s",
+                             ifp->name, safe_strerror (errno));
+                  return ret;
+                }
+              return 0;
+            }
           memcpy (&dest, &lifreq.lifr_broadaddr, sizeof (struct sockaddr_in));
           dest_pnt = (char *) &SIN (&dest)->sin_addr;
         }
@@ -309,29 +281,34 @@ if_get_addr (struct interface *ifp, struct sockaddr *addr, const char *label)
 #ifdef HAVE_IPV6
   else if (af == AF_INET6)
     {
-      if (if_ioctl_ipv6 (SIOCGLIFSUBNET, (caddr_t) & lifreq) < 0)
-	{
-	  if (ifp->flags & IFF_POINTOPOINT)
-	    prefixlen = IPV6_MAX_BITLEN;
-	  else
-	    zlog_warn ("SIOCGLIFSUBNET (%s) fail: %s",
-		       ifp->name, safe_strerror (errno));
-	}
+      if (ifp->flags & IFF_POINTOPOINT)
+        {
+          prefixlen = IPV6_MAX_BITLEN;
+        }
       else
-	{
-	  prefixlen = lifreq.lifr_addrlen;
-	}
+        {
+          ret = if_ioctl_ipv6 (SIOCGLIFSUBNET, (caddr_t) & lifreq);
+          if (ret < 0)
+            {
+              zlog_warn ("SIOCGLIFSUBNET (%s) fail: %s",
+                         ifp->name, safe_strerror (errno));
+            }
+          else
+            {
+              prefixlen = lifreq.lifr_addrlen;
+            }
+        }
     }
 #endif /* HAVE_IPV6 */
 
   /* Set address to the interface. */
   if (af == AF_INET)
-    connected_add_ipv4 (ifp, flags, &SIN (addr)->sin_addr, prefixlen,
-                        (struct in_addr *) dest_pnt, label);
+    connected_add_ipv4 (ifp, 0, &SIN (addr)->sin_addr, prefixlen,
+                        (struct in_addr *) dest_pnt, NULL);
 #ifdef HAVE_IPV6
   else if (af == AF_INET6)
-    connected_add_ipv6 (ifp, flags, &SIN6 (addr)->sin6_addr, prefixlen,
-                        (struct in6_addr *) dest_pnt, label);
+    connected_add_ipv6 (ifp, &SIN6 (addr)->sin6_addr, prefixlen,
+                        (struct in6_addr *) dest_pnt);
 #endif /* HAVE_IPV6 */
 
   return 0;
@@ -353,7 +330,6 @@ interface_list ()
 {
   interface_list_ioctl (AF_INET);
   interface_list_ioctl (AF_INET6);
-  interface_list_ioctl (AF_UNSPEC);
 }
 
 struct connected *
@@ -366,7 +342,7 @@ if_lookup_linklocal (struct interface *ifp)
   if (ifp == NULL)
     return NULL;
 
-  for (ALL_LIST_ELEMENTS_RO(ifp->connected, node, ifc))
+  LIST_LOOP (ifp->connected, ifc, node)
     {
       if ((ifc->address->family == AF_INET6) &&
           (IN6_IS_ADDR_LINKLOCAL (&ifc->address->u.prefix6)))
