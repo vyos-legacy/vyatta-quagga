@@ -23,7 +23,6 @@
 #include <zebra.h>
 #include <thread.h>
 #include <log.h>
-#include <network.h>
 #include <sigevent.h>
 #include <lib/version.h>
 #include <getopt.h>
@@ -609,7 +608,7 @@ handle_read(struct thread *t_read)
     {
       char why[100];
 
-      if (ERRNO_IO_RETRY(errno))
+      if ((errno == EINTR) || (errno == EAGAIN))
 	{
 	  /* Pretend it never happened. */
 	  SET_READ_HANDLER(dmn);
@@ -734,6 +733,7 @@ try_connect(struct daemon *dmn)
   int sock;
   struct sockaddr_un addr;
   socklen_t len;
+  int flags;
 
   if (gs.loglevel > LOG_DEBUG+1)
     zlog_debug("%s: attempting to connect",dmn->name);
@@ -743,11 +743,11 @@ try_connect(struct daemon *dmn)
   addr.sun_family = AF_UNIX;
   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s.vty",
 	   gs.vtydir,dmn->name);
-#ifdef HAVE_STRUCT_SOCKADDR_UN_SUN_LEN
+#ifdef HAVE_SUN_LEN
   len = addr.sun_len = SUN_LEN(&addr);
 #else
   len = sizeof (addr.sun_family) + strlen (addr.sun_path);
-#endif /* HAVE_STRUCT_SOCKADDR_UN_SUN_LEN */
+#endif /* HAVE_SUN_LEN */
 
   /* Quick check to see if we might succeed before we go to the trouble
      of creating a socket. */
@@ -766,10 +766,18 @@ try_connect(struct daemon *dmn)
       return -1;
     }
 
-  if (set_nonblocking(sock) < 0)
+  /* Set non-blocking. */
+  if ((flags = fcntl(sock, F_GETFL, 0)) < 0)
     {
-      zlog_err("%s(%s): set_nonblocking(%d) failed",
-	       __func__, addr.sun_path, sock);
+      zlog_err("%s(%s): fcntl(F_GETFL) failed: %s",
+	       __func__,addr.sun_path, safe_strerror(errno));
+      close(sock);
+      return -1;
+    }
+  if (fcntl(sock, F_SETFL, (flags|O_NONBLOCK)) < 0)
+    {
+      zlog_err("%s(%s): fcntl(F_SETFL,O_NONBLOCK) failed: %s",
+	       __func__,addr.sun_path, safe_strerror(errno));
       close(sock);
       return -1;
     }
