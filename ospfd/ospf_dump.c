@@ -58,7 +58,6 @@ int ospf_ism_state_msg_max = OSPF_ISM_STATE_MAX;
 struct message ospf_nsm_state_msg[] =
 {
   { NSM_DependUpon, "DependUpon" },
-  { NSM_Deleted,    "Deleted"    },
   { NSM_Down,       "Down" },
   { NSM_Attempt,    "Attempt" },
   { NSM_Init,       "Init" },
@@ -104,6 +103,21 @@ struct message ospf_link_state_id_type_msg[] =
 };
 int ospf_link_state_id_type_msg_max = OSPF_MAX_LSA;
 
+struct message ospf_redistributed_proto[] =
+{
+  { ZEBRA_ROUTE_SYSTEM,   "System" },
+  { ZEBRA_ROUTE_KERNEL,   "Kernel" },
+  { ZEBRA_ROUTE_CONNECT,  "Connected" },
+  { ZEBRA_ROUTE_STATIC,   "Static" },
+  { ZEBRA_ROUTE_RIP,      "RIP" },
+  { ZEBRA_ROUTE_RIPNG,    "RIPng" },
+  { ZEBRA_ROUTE_OSPF,     "OSPF" },
+  { ZEBRA_ROUTE_OSPF6,    "OSPFv3" },
+  { ZEBRA_ROUTE_BGP,      "BGP" },
+  { ZEBRA_ROUTE_MAX,	  "Default" },
+};
+int ospf_redistributed_proto_max = ZEBRA_ROUTE_MAX + 1;
+
 struct message ospf_network_type_msg[] =
 {
   { OSPF_IFTYPE_NONE,		  "NONE" },
@@ -134,14 +148,6 @@ unsigned long term_debug_ospf_zebra = 0;
 unsigned long term_debug_ospf_nssa = 0;
 
 
-
-const char *
-ospf_redist_string(u_int route_type)
-{
-  return (route_type == ZEBRA_ROUTE_MAX) ?
-  	 "Default" : zebra_route_string(route_type);
-}
-
 #define OSPF_AREA_STRING_MAXLEN  16
 const char *
 ospf_area_name_string (struct ospf_area *area)
@@ -182,6 +188,7 @@ ospf_area_desc_string (struct ospf_area *area)
       break;
     default:
       return ospf_area_name_string (area);
+      break;
     }
 
   return buf;
@@ -230,78 +237,35 @@ ospf_nbr_state_message (struct ospf_neighbor *nbr, char *buf, size_t size)
 }
 
 const char *
-ospf_timeval_dump (struct timeval *t, char *buf, size_t size)
-{
-  /* Making formatted timer strings. */
-#define MINUTE_IN_SECONDS	60
-#define HOUR_IN_SECONDS		(60*MINUTE_IN_SECONDS)
-#define DAY_IN_SECONDS		(24*HOUR_IN_SECONDS)
-#define WEEK_IN_SECONDS		(7*DAY_IN_SECONDS)
-  unsigned long w, d, h, m, s, ms;
-  
-  if (!t)
-    return "inactive";
-  
-  w = d = h = m = s = ms = 0;
-  memset (buf, 0, size);
-  
-  ms = t->tv_usec / 1000;
-  
-  if (ms >= 1000)
-    {
-      t->tv_sec += ms / 1000;
-      ms %= 1000;
-    }
-  
-  if (t->tv_sec > WEEK_IN_SECONDS)
-    {
-      w = t->tv_sec / WEEK_IN_SECONDS;
-      t->tv_sec -= w * WEEK_IN_SECONDS;
-    }
-  
-  if (t->tv_sec > DAY_IN_SECONDS)
-    {
-      d = t->tv_sec / DAY_IN_SECONDS;
-      t->tv_sec -= d * DAY_IN_SECONDS;
-    }
-  
-  if (t->tv_sec >= HOUR_IN_SECONDS)
-    {
-      h = t->tv_sec / HOUR_IN_SECONDS;
-      t->tv_sec -= h * HOUR_IN_SECONDS;
-    }
-  
-  if (t->tv_sec >= MINUTE_IN_SECONDS)
-    {
-      m = t->tv_sec / MINUTE_IN_SECONDS;
-      t->tv_sec -= m * MINUTE_IN_SECONDS;
-    }
-  
-  if (w > 99)
-    snprintf (buf, size, "%ldw%1ldd", w, d);
-  else if (w)
-    snprintf (buf, size, "%ldw%1ldd%02ldh", w, d, h);
-  else if (d)
-    snprintf (buf, size, "%1ldd%02ldh%02ldm", d, h, m);
-  else if (h)
-    snprintf (buf, size, "%ldh%02ldm%02lds", h, m, t->tv_sec);
-  else if (m)
-    snprintf (buf, size, "%ldm%02lds", m, t->tv_sec);
-  else
-    snprintf (buf, size, "%ld.%03lds", t->tv_sec, ms);
-  
-  return buf;
-}
-
-const char *
 ospf_timer_dump (struct thread *t, char *buf, size_t size)
 {
-  struct timeval result;
+  struct timeval now;
+  unsigned long h, m, s;
+
   if (!t)
     return "inactive";
-  
-  result = tv_sub (t->u.sands, recent_relative_time());
-  return ospf_timeval_dump (&result, buf, size);
+
+  h = m = s = 0;
+  memset (buf, 0, size);
+
+  gettimeofday (&now, NULL);
+
+  s = t->u.sands.tv_sec - now.tv_sec;
+  if (s >= 3600)
+    {
+      h = s / 3600;
+      s -= h * 3600;
+    }
+
+  if (s >= 60)
+    {
+      m = s / 60;
+      s -= m * 60;
+    }
+
+  snprintf (buf, size, "%02ld:%02ld:%02ld", h, m, s);
+
+  return buf;
 }
 
 #define OSPF_OPTION_STR_MAXLEN		24
@@ -322,7 +286,7 @@ ospf_options_dump (u_char options)
   return buf;
 }
 
-static void
+void
 ospf_packet_hello_dump (struct stream *s, u_int16_t length)
 {
   struct ospf_hello *hello;
@@ -346,7 +310,7 @@ ospf_packet_hello_dump (struct stream *s, u_int16_t length)
     zlog_debug ("    Neighbor %s", inet_ntoa (hello->neighbors[i]));
 }
 
-static char *
+char *
 ospf_dd_flags_dump (u_char flags, char *buf, size_t size)
 {
   memset (buf, 0, size);
@@ -377,7 +341,7 @@ ospf_lsa_header_dump (struct lsa_header *lsah)
   zlog_debug ("    length %d", ntohs (lsah->length));
 }
 
-static char *
+char *
 ospf_router_lsa_flags_dump (u_char flags, char *buf, size_t size)
 {
   memset (buf, 0, size);
@@ -390,7 +354,7 @@ ospf_router_lsa_flags_dump (u_char flags, char *buf, size_t size)
   return buf;
 }
 
-static void
+void
 ospf_router_lsa_dump (struct stream *s, u_int16_t length)
 {
   char buf[BUFSIZ];
@@ -417,7 +381,7 @@ ospf_router_lsa_dump (struct stream *s, u_int16_t length)
     }
 }
 
-static void
+void
 ospf_network_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct network_lsa *nl;
@@ -438,7 +402,7 @@ ospf_network_lsa_dump (struct stream *s, u_int16_t length)
     zlog_debug ("      Attached Router %s", inet_ntoa (nl->routers[i]));
 }
 
-static void
+void
 ospf_summary_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct summary_lsa *sl;
@@ -456,7 +420,7 @@ ospf_summary_lsa_dump (struct stream *s, u_int16_t length)
 	       GET_METRIC (sl->metric));
 }
 
-static void
+void
 ospf_as_external_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct as_external_lsa *al;
@@ -478,7 +442,7 @@ ospf_as_external_lsa_dump (struct stream *s, u_int16_t length)
     }
 }
 
-static void
+void
 ospf_lsa_header_list_dump (struct stream *s, u_int16_t length)
 {
   struct lsa_header *lsa;
@@ -491,12 +455,12 @@ ospf_lsa_header_list_dump (struct stream *s, u_int16_t length)
       lsa = (struct lsa_header *) STREAM_PNT (s);
       ospf_lsa_header_dump (lsa);
 
-      stream_forward_getp (s, OSPF_LSA_HEADER_SIZE);
+      stream_forward (s, OSPF_LSA_HEADER_SIZE);
       length -= OSPF_LSA_HEADER_SIZE;
     }
 }
 
-static void
+void
 ospf_packet_db_desc_dump (struct stream *s, u_int16_t length)
 {
   struct ospf_db_desc *dd;
@@ -517,14 +481,14 @@ ospf_packet_db_desc_dump (struct stream *s, u_int16_t length)
 
   length -= OSPF_HEADER_SIZE + OSPF_DB_DESC_MIN_SIZE;
 
-  stream_forward_getp (s, OSPF_DB_DESC_MIN_SIZE);
+  stream_forward (s, OSPF_DB_DESC_MIN_SIZE);
 
   ospf_lsa_header_list_dump (s, length);
 
   stream_set_getp (s, gp);
 }
 
-static void
+void
 ospf_packet_ls_req_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -554,7 +518,7 @@ ospf_packet_ls_req_dump (struct stream *s, u_int16_t length)
   stream_set_getp (s, sp);
 }
 
-static void
+void
 ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -613,7 +577,7 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
 	  break;
 	}
 
-      stream_forward_getp (s, lsa_len);
+      stream_forward (s, lsa_len);
       length -= lsa_len;
       count--;
     }
@@ -621,7 +585,7 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
   stream_set_getp (s, sp);
 }
 
-static void
+void
 ospf_packet_ls_ack_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -653,7 +617,7 @@ ospf_ip_header_dump (struct ip *iph)
   zlog_debug ("ip_dst %s", inet_ntoa (iph->ip_dst));
 }
 
-static void
+void
 ospf_header_dump (struct ospf_header *ospfh)
 {
   char buf[9];
@@ -709,7 +673,7 @@ ospf_packet_dump (struct stream *s)
 
   /* Show OSPF header detail. */
   ospf_header_dump (ospfh);
-  stream_forward_getp (s, OSPF_HEADER_SIZE);
+  stream_forward (s, OSPF_HEADER_SIZE);
 
   switch (ospfh->type)
     {
@@ -902,10 +866,8 @@ DEFUN (no_debug_ospf_packet,
       }
 
 #ifdef DEBUG
-  /*
   for (i = 0; i < 5; i++)
     zlog_debug ("flag[%d] = %d", i, ospf_debug_packet[i]);
-  */
 #endif /* DEBUG */
 
   return CMD_SUCCESS;
@@ -1516,7 +1478,7 @@ struct cmd_node debug_node =
   1 /* VTYSH */
 };
 
-static int
+int
 config_write_debug (struct vty *vty)
 {
   int write = 0;
@@ -1545,7 +1507,7 @@ config_write_debug (struct vty *vty)
   else
     {
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_STATUS))
-	vty_out (vty, "debug ospf nsm status%s", VTY_NEWLINE);
+	vty_out (vty, "debug ospf ism status%s", VTY_NEWLINE);
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_EVENTS))
 	vty_out (vty, "debug ospf nsm event%s", VTY_NEWLINE);
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_TIMERS))
