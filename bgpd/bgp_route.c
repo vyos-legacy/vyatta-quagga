@@ -33,7 +33,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "sockunion.h"
 #include "plist.h"
 #include "thread.h"
-#include "workqueue.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_table.h"
@@ -53,29 +52,24 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_damp.h"
 #include "bgpd/bgp_advertise.h"
 #include "bgpd/bgp_zebra.h"
-#include "bgpd/bgp_vty.h"
 
 /* Extern from bgp_dump.c */
 extern char *bgp_origin_str[];
 extern char *bgp_origin_long_str[];
 
-static struct bgp_node *
+struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
 		  struct prefix_rd *prd)
 {
   struct bgp_node *rn;
   struct bgp_node *prn = NULL;
-  
-  assert (table);
-  if (!table)
-    return NULL;
-  
+
   if (safi == SAFI_MPLS_VPN)
     {
       prn = bgp_node_get (table, (struct prefix *) prd);
 
       if (prn->info == NULL)
-	prn->info = bgp_table_init (afi, safi);
+	prn->info = bgp_table_init ();
       else
 	bgp_unlock_node (prn);
       table = prn->info;
@@ -89,44 +83,8 @@ bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix
   return rn;
 }
 
-/* Allocate bgp_info_extra */
-static struct bgp_info_extra *
-bgp_info_extra_new (void)
-{
-  struct bgp_info_extra *new;
-  new = XCALLOC (MTYPE_BGP_ROUTE_EXTRA, sizeof (struct bgp_info_extra));
-  return new;
-}
-
-static void
-bgp_info_extra_free (struct bgp_info_extra **extra)
-{
-  if (extra && *extra)
-    {
-      if ((*extra)->damp_info)
-        bgp_damp_info_free ((*extra)->damp_info, 0);
-      
-      (*extra)->damp_info = NULL;
-      
-      XFREE (MTYPE_BGP_ROUTE_EXTRA, *extra);
-      
-      *extra = NULL;
-    }
-}
-
-/* Get bgp_info extra information for the given bgp_info, lazy allocated
- * if required.
- */
-struct bgp_info_extra *
-bgp_info_extra_get (struct bgp_info *ri)
-{
-  if (!ri->extra)
-    ri->extra = bgp_info_extra_new();
-  return ri->extra;
-}
-
 /* Allocate new bgp info structure. */
-static struct bgp_info *
+struct bgp_info *
 bgp_info_new ()
 {
   struct bgp_info *new;
@@ -138,51 +96,16 @@ bgp_info_new ()
 }
 
 /* Free bgp route information. */
-static void
+void
 bgp_info_free (struct bgp_info *binfo)
 {
   if (binfo->attr)
     bgp_attr_unintern (binfo->attr);
-  
-  bgp_info_extra_free (&binfo->extra);
 
-  peer_unlock (binfo->peer); /* bgp_info peer reference */
+  if (binfo->damp_info)
+    bgp_damp_info_free (binfo->damp_info, 0);
 
   XFREE (MTYPE_BGP_ROUTE, binfo);
-}
-
-struct bgp_info *
-bgp_info_lock (struct bgp_info *binfo)
-{
-  binfo->lock++;
-  return binfo;
-}
-
-struct bgp_info *
-bgp_info_unlock (struct bgp_info *binfo)
-{
-  assert (binfo && binfo->lock > 0);
-  binfo->lock--;
-  
-  if (binfo->lock == 0)
-    {
-#if 0
-      zlog_debug ("%s: unlocked and freeing", __func__);
-      zlog_backtrace (LOG_DEBUG);
-#endif
-      bgp_info_free (binfo);
-      return NULL;
-    }
-
-#if 0
-  if (binfo->lock == 1)
-    {
-      zlog_debug ("%s: unlocked to 1", __func__);
-      zlog_backtrace (LOG_DEBUG);
-    }
-#endif
-  
-  return binfo;
 }
 
 void
@@ -191,22 +114,16 @@ bgp_info_add (struct bgp_node *rn, struct bgp_info *ri)
   struct bgp_info *top;
 
   top = rn->info;
-  
+
   ri->next = rn->info;
   ri->prev = NULL;
   if (top)
     top->prev = ri;
   rn->info = ri;
-  
-  bgp_info_lock (ri);
-  bgp_lock_node (rn);
-  peer_lock (ri->peer); /* bgp_info peer reference */
 }
 
-/* Do the actual removal of info from RIB, for use by bgp_process 
-   completion callback *only* */
-static void
-bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri)
+void
+bgp_info_delete (struct bgp_node *rn, struct bgp_info *ri)
 {
   if (ri->next)
     ri->next->prev = ri->prev;
@@ -214,98 +131,11 @@ bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri)
     ri->prev->next = ri->next;
   else
     rn->info = ri->next;
-  
-  bgp_info_unlock (ri);
-  bgp_unlock_node (rn);
-}
-
-void
-bgp_info_delete (struct bgp_node *rn, struct bgp_info *ri)
-{
-  bgp_info_set_flag (rn, ri, BGP_INFO_REMOVED);
-  /* set of previous already took care of pcount */
-  UNSET_FLAG (ri->flags, BGP_INFO_VALID);
-}
-
-/* undo the effects of a previous call to bgp_info_delete; typically
-   called when a route is deleted and then quickly re-added before the
-   deletion has been processed */
-static void
-bgp_info_restore (struct bgp_node *rn, struct bgp_info *ri)
-{
-  bgp_info_unset_flag (rn, ri, BGP_INFO_REMOVED);
-  /* unset of previous already took care of pcount */
-  SET_FLAG (ri->flags, BGP_INFO_VALID);
-}
-
-/* Adjust pcount as required */   
-static void
-bgp_pcount_adjust (struct bgp_node *rn, struct bgp_info *ri)
-{
-  assert (rn && rn->table);
-  assert (ri && ri->peer && ri->peer->bgp);
-
-  /* Ignore 'pcount' for RS-client tables */
-  if (rn->table->type != BGP_TABLE_MAIN
-      || ri->peer == ri->peer->bgp->peer_self)
-    return;
-    
-  if (BGP_INFO_HOLDDOWN (ri)
-      && CHECK_FLAG (ri->flags, BGP_INFO_COUNTED))
-    {
-          
-      UNSET_FLAG (ri->flags, BGP_INFO_COUNTED);
-      
-      /* slight hack, but more robust against errors. */
-      if (ri->peer->pcount[rn->table->afi][rn->table->safi])
-        ri->peer->pcount[rn->table->afi][rn->table->safi]--;
-      else
-        {
-          zlog_warn ("%s: Asked to decrement 0 prefix count for peer %s",
-                     __func__, ri->peer->host);
-          zlog_backtrace (LOG_WARNING);
-          zlog_warn ("%s: Please report to Quagga bugzilla", __func__);
-        }      
-    }
-  else if (!BGP_INFO_HOLDDOWN (ri) 
-           && !CHECK_FLAG (ri->flags, BGP_INFO_COUNTED))
-    {
-      SET_FLAG (ri->flags, BGP_INFO_COUNTED);
-      ri->peer->pcount[rn->table->afi][rn->table->safi]++;
-    }
-}
-
-
-/* Set/unset bgp_info flags, adjusting any other state as needed.
- * This is here primarily to keep prefix-count in check.
- */
-void
-bgp_info_set_flag (struct bgp_node *rn, struct bgp_info *ri, u_int32_t flag)
-{
-  SET_FLAG (ri->flags, flag);
-  
-  /* early bath if we know it's not a flag that changes useability state */
-  if (!CHECK_FLAG (flag, BGP_INFO_VALID|BGP_INFO_UNUSEABLE))
-    return;
-  
-  bgp_pcount_adjust (rn, ri);
-}
-
-void
-bgp_info_unset_flag (struct bgp_node *rn, struct bgp_info *ri, u_int32_t flag)
-{
-  UNSET_FLAG (ri->flags, flag);
-  
-  /* early bath if we know it's not a flag that changes useability state */
-  if (!CHECK_FLAG (flag, BGP_INFO_VALID|BGP_INFO_UNUSEABLE))
-    return;
-  
-  bgp_pcount_adjust (rn, ri);
 }
 
 /* Get MED value.  If MED value is missing and "bgp bestpath
    missing-as-worst" is specified, treat it as the worst value. */
-static u_int32_t
+u_int32_t
 bgp_med_value (struct attr *attr, struct bgp *bgp)
 {
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC))
@@ -320,15 +150,13 @@ bgp_med_value (struct attr *attr, struct bgp *bgp)
 }
 
 /* Compare two bgp route entity.  br is preferable then return 1. */
-static int
+int
 bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
 {
   u_int32_t new_pref;
   u_int32_t exist_pref;
   u_int32_t new_med;
   u_int32_t exist_med;
-  u_int32_t new_weight = 0;
-  u_int32_t exist_weight = 0;
   struct in_addr new_id;
   struct in_addr exist_id;
   int new_cluster;
@@ -344,13 +172,9 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
     return 1;
 
   /* 1. Weight check. */
-  if (new->attr->extra)
-    new_weight = new->attr->extra->weight;
-  if (exist->attr->extra)
-    exist_weight = exist->attr->extra->weight;
-  if (new_weight > exist_weight)
+  if (new->attr->weight > exist->attr->weight)
     return 1;
-  if (new_weight < exist_weight)
+  if (new->attr->weight < exist->attr->weight)
     return 0;
 
   /* 2. Local preference check. */
@@ -388,30 +212,10 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
   /* 4. AS path length check. */
   if (! bgp_flag_check (bgp, BGP_FLAG_ASPATH_IGNORE))
     {
-      int exist_hops = aspath_count_hops (exist->attr->aspath);
-      int exist_confeds = aspath_count_confeds (exist->attr->aspath);
-      
-      if (bgp_flag_check (bgp, BGP_FLAG_ASPATH_CONFED))
-	{
-	  int aspath_hops;
-	  
-	  aspath_hops = aspath_count_hops (new->attr->aspath);
-          aspath_hops += aspath_count_confeds (new->attr->aspath);
-          
-	  if ( aspath_hops < (exist_hops + exist_confeds))
-	    return 1;
-	  if ( aspath_hops > (exist_hops + exist_confeds))
-	    return 0;
-	}
-      else
-	{
-	  int newhops = aspath_count_hops (new->attr->aspath);
-	  
-	  if (newhops < exist_hops)
-	    return 1;
-          if (newhops > exist_hops)
-	    return 0;
-	}
+      if (new->attr->aspath->count < exist->attr->aspath->count)
+	return 1;
+      if (new->attr->aspath->count > exist->attr->aspath->count)
+	return 0;
     }
 
   /* 5. Origin check. */
@@ -421,12 +225,12 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
     return 0;
 
   /* 6. MED check. */
-  internal_as_route = (aspath_count_hops (new->attr->aspath) == 0
-		      && aspath_count_hops (exist->attr->aspath) == 0);
-  confed_as_route = (aspath_count_confeds (new->attr->aspath) > 0
-		    && aspath_count_confeds (exist->attr->aspath) > 0
-		    && aspath_count_hops (new->attr->aspath) == 0
-		    && aspath_count_hops (exist->attr->aspath) == 0);
+  internal_as_route = (new->attr->aspath->length == 0
+		      && exist->attr->aspath->length == 0);
+  confed_as_route = (new->attr->aspath->length > 0
+		    && exist->attr->aspath->length > 0
+		    && new->attr->aspath->count == 0
+		    && exist->attr->aspath->count == 0);
   
   if (bgp_flag_check (bgp, BGP_FLAG_ALWAYS_COMPARE_MED)
       || (bgp_flag_check (bgp, BGP_FLAG_MED_CONFED)
@@ -459,16 +263,10 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
     return 0;
 
   /* 8. IGP metric check. */
-  if (new->extra || exist->extra)
-    {
-      uint32_t newm = (new->extra ? new->extra->igpmetric : 0);
-      uint32_t existm = (exist->extra ? exist->extra->igpmetric : 0);
-      
-      if (newm < existm)
-        return 1;
-      if (newm > existm)
-        return 0;
-    }
+  if (new->igpmetric < exist->igpmetric)
+    return 1;
+  if (new->igpmetric > exist->igpmetric)
+    return 0;
 
   /* 9. Maximum path check. */
 
@@ -488,11 +286,11 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
 
   /* 11. Rourter-ID comparision. */
   if (new->attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-    new_id.s_addr = new->attr->extra->originator_id.s_addr;
+    new_id.s_addr = new->attr->originator_id.s_addr;
   else
     new_id.s_addr = new->peer->remote_id.s_addr;
   if (exist->attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-    exist_id.s_addr = exist->attr->extra->originator_id.s_addr;
+    exist_id.s_addr = exist->attr->originator_id.s_addr;
   else
     exist_id.s_addr = exist->peer->remote_id.s_addr;
 
@@ -503,11 +301,11 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
 
   /* 12. Cluster length comparision. */
   if (new->attr->flag & ATTR_FLAG_BIT(BGP_ATTR_CLUSTER_LIST))
-    new_cluster = new->attr->extra->cluster->length;
+    new_cluster = new->attr->cluster->length;
   else
     new_cluster = 0;
   if (exist->attr->flag & ATTR_FLAG_BIT(BGP_ATTR_CLUSTER_LIST))
-    exist_cluster = exist->attr->extra->cluster->length;
+    exist_cluster = exist->attr->cluster->length;
   else
     exist_cluster = 0;
 
@@ -527,7 +325,7 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
   return 1;
 }
 
-static enum filter_type
+enum filter_type
 bgp_input_filter (struct peer *peer, struct prefix *p, struct attr *attr,
 		  afi_t afi, safi_t safi)
 {
@@ -550,7 +348,7 @@ bgp_input_filter (struct peer *peer, struct prefix *p, struct attr *attr,
   return FILTER_PERMIT;
 }
 
-static enum filter_type
+enum filter_type
 bgp_output_filter (struct peer *peer, struct prefix *p, struct attr *attr,
 		   afi_t afi, safi_t safi)
 {
@@ -574,7 +372,7 @@ bgp_output_filter (struct peer *peer, struct prefix *p, struct attr *attr,
 }
 
 /* If community attribute includes no_export then return 1. */
-static int
+int
 bgp_community_filter (struct peer *peer, struct attr *attr)
 {
   if (attr->community)
@@ -603,20 +401,20 @@ bgp_cluster_filter (struct peer *peer, struct attr *attr)
 {
   struct in_addr cluster_id;
 
-  if (attr->extra && attr->extra->cluster)
+  if (attr->cluster)
     {
       if (peer->bgp->config & BGP_CONFIG_CLUSTER_ID)
 	cluster_id = peer->bgp->cluster_id;
       else
 	cluster_id = peer->bgp->router_id;
       
-      if (cluster_loop_check (attr->extra->cluster, cluster_id))
+      if (cluster_loop_check (attr->cluster, cluster_id))
 	return 1;
     }
   return 0;
 }
 
-static int
+int
 bgp_input_modifier (struct peer *peer, struct prefix *p, struct attr *attr,
 		    afi_t afi, safi_t safi)
 {
@@ -627,8 +425,7 @@ bgp_input_modifier (struct peer *peer, struct prefix *p, struct attr *attr,
   filter = &peer->filter[afi][safi];
 
   /* Apply default weight value. */
-  if (peer->weight)
-    (bgp_attr_extra_get (attr))->weight = peer->weight;
+  attr->weight = peer->weight;
 
   /* Route map apply. */
   if (ROUTE_MAP_IN_NAME (filter))
@@ -654,7 +451,7 @@ bgp_input_modifier (struct peer *peer, struct prefix *p, struct attr *attr,
   return RMAP_PERMIT;
 }
 
-static int
+int
 bgp_export_modifier (struct peer *rsclient, struct peer *peer,
         struct prefix *p, struct attr *attr, afi_t afi, safi_t safi)
 {
@@ -688,7 +485,7 @@ bgp_export_modifier (struct peer *rsclient, struct peer *peer,
   return RMAP_PERMIT;
 }
 
-static int
+int
 bgp_import_modifier (struct peer *rsclient, struct peer *peer,
         struct prefix *p, struct attr *attr, afi_t afi, safi_t safi)
 {
@@ -699,8 +496,7 @@ bgp_import_modifier (struct peer *rsclient, struct peer *peer,
   filter = &rsclient->filter[afi][safi];
 
   /* Apply default weight value. */
-  if (peer->weight)
-    (bgp_attr_extra_get (attr))->weight = peer->weight;
+  attr->weight = peer->weight;
 
   /* Route map apply. */
   if (ROUTE_MAP_IMPORT_NAME (filter))
@@ -726,15 +522,17 @@ bgp_import_modifier (struct peer *rsclient, struct peer *peer,
   return RMAP_PERMIT;
 }
 
-static int
+int
 bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 		    struct attr *attr, afi_t afi, safi_t safi)
 {
   int ret;
   char buf[SU_ADDRSTRLEN];
   struct bgp_filter *filter;
+  struct bgp_info info;
   struct peer *from;
   struct bgp *bgp;
+  struct attr dummy_attr;
   int transparent;
   int reflect;
 
@@ -765,7 +563,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 #endif
 
   /* Aggregate-address suppress check. */
-  if (ri->extra && ri->extra->suppress)
+  if (ri->suppress)
     if (! UNSUPPRESS_MAP_NAME (filter))
       return 0;
 
@@ -795,7 +593,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
      peer's id. */
   if (ri->attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
     {
-      if (IPV4_ADDR_SAME (&peer->remote_id, &ri->attr->extra->originator_id))
+      if (IPV4_ADDR_SAME (&peer->remote_id, &ri->attr->originator_id))
 	{
 	  if (BGP_DEBUG (filter, FILTER))  
 	    zlog (peer->log, LOG_DEBUG,
@@ -885,8 +683,8 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
     }
 
   /* For modify attribute, copy it to temporary structure. */
-  bgp_attr_dup (attr, ri->attr);
-  
+  *attr = *ri->attr;
+
   /* If local-preference is not set. */
   if ((peer_sort (peer) == BGP_PEER_IBGP 
        || peer_sort (peer) == BGP_PEER_CONFED) 
@@ -911,7 +709,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 	  && ((p->family == AF_INET && attr->nexthop.s_addr)
 #ifdef HAVE_IPV6
 	      || (p->family == AF_INET6 && 
-                  ! IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global))
+                  ! IN6_IS_ADDR_UNSPECIFIED(&attr->mp_nexthop_global))
 #endif /* HAVE_IPV6 */
 	      )))
     {
@@ -921,7 +719,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 	   || (p->family == AF_INET && attr->nexthop.s_addr == 0)
 #ifdef HAVE_IPV6
 	   || (p->family == AF_INET6 && 
-               IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global))
+               IN6_IS_ADDR_UNSPECIFIED(&attr->mp_nexthop_global))
 #endif /* HAVE_IPV6 */
 	   || (peer_sort (peer) == BGP_PEER_EBGP
 	       && bgp_multiaccess_check_v4 (attr->nexthop, peer->host) == 0))
@@ -930,8 +728,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
       if (p->family == AF_INET)
 	{
 	  if (safi == SAFI_MPLS_VPN)
-	    memcpy (&attr->extra->mp_nexthop_global_in, &peer->nexthop.v4,
-	            IPV4_MAX_BYTELEN);
+	    memcpy (&attr->mp_nexthop_global_in, &peer->nexthop.v4, IPV4_MAX_BYTELEN);
 	  else
 	    memcpy (&attr->nexthop, &peer->nexthop.v4, IPV4_MAX_BYTELEN);
 	}
@@ -940,9 +737,9 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
       if (p->family == AF_INET6)
 	{
 	  /* IPv6 global nexthop must be included. */
-	  memcpy (&attr->extra->mp_nexthop_global, &peer->nexthop.v6_global, 
+	  memcpy (&attr->mp_nexthop_global, &peer->nexthop.v6_global, 
 		  IPV6_MAX_BYTELEN);
-	  attr->extra->mp_nexthop_len = 16;
+	  attr->mp_nexthop_len = 16;
 	}
 #endif /* HAVE_IPV6 */
     }
@@ -954,35 +751,35 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
       if ( CHECK_FLAG (peer->af_flags[afi][safi], 
            PEER_FLAG_NEXTHOP_LOCAL_UNCHANGED) )
         {
-          if ( IN6_IS_ADDR_LINKLOCAL (&attr->extra->mp_nexthop_local) )
-            attr->extra->mp_nexthop_len=32;
+          if ( IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_local) )
+            attr->mp_nexthop_len=32;
           else
-            attr->extra->mp_nexthop_len=16;
+            attr->mp_nexthop_len=16;
         }
 
       /* Default nexthop_local treatment for non-RS-Clients */
       else 
         {
       /* Link-local address should not be transit to different peer. */
-      attr->extra->mp_nexthop_len = 16;
+      attr->mp_nexthop_len = 16;
 
       /* Set link-local address for shared network peer. */
       if (peer->shared_network 
 	  && ! IN6_IS_ADDR_UNSPECIFIED (&peer->nexthop.v6_local))
 	{
-	  memcpy (&attr->extra->mp_nexthop_local, &peer->nexthop.v6_local, 
+	  memcpy (&attr->mp_nexthop_local, &peer->nexthop.v6_local, 
 		  IPV6_MAX_BYTELEN);
-	  attr->extra->mp_nexthop_len = 32;
+	  attr->mp_nexthop_len = 32;
 	}
 
       /* If bgpd act as BGP-4+ route-reflector, do not send link-local
 	 address.*/
       if (reflect)
-	attr->extra->mp_nexthop_len = 16;
+	attr->mp_nexthop_len = 16;
 
       /* If BGP-4+ link-local nexthop is not link-local nexthop. */
       if (! IN6_IS_ADDR_LINKLOCAL (&peer->nexthop.v6_local))
-	attr->extra->mp_nexthop_len = 16;
+	attr->mp_nexthop_len = 16;
     }
 
     }
@@ -996,36 +793,29 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 
   /* Route map & unsuppress-map apply. */
   if (ROUTE_MAP_OUT_NAME (filter)
-      || (ri->extra && ri->extra->suppress) )
+      || ri->suppress)
     {
-      struct bgp_info info;
-      struct attr dummy_attr;
-      
       info.peer = peer;
       info.attr = attr;
-      
 
       /* The route reflector is not allowed to modify the attributes
 	 of the reflected IBGP routes. */
       if (peer_sort (from) == BGP_PEER_IBGP 
 	  && peer_sort (peer) == BGP_PEER_IBGP)
 	{
-	  dummy_attr.extra = NULL;
-	  bgp_attr_dup (&dummy_attr, attr);
-	  info.attr = &dummy_attr; 
+	  dummy_attr = *attr;
+	  info.attr = &dummy_attr;
 	}
 
       SET_FLAG (peer->rmap_type, PEER_RMAP_TYPE_OUT); 
 
-      if (ri->extra && ri->extra->suppress)
+      if (ri->suppress)
 	ret = route_map_apply (UNSUPPRESS_MAP (filter), p, RMAP_BGP, &info);
       else
 	ret = route_map_apply (ROUTE_MAP_OUT (filter), p, RMAP_BGP, &info);
 
       peer->rmap_type = 0;
-      
-      bgp_attr_extra_free (&dummy_attr);
-      
+
       if (ret == RMAP_DENYMATCH)
 	{
 	  bgp_attr_flush (attr);
@@ -1035,7 +825,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
   return 1;
 }
 
-static int
+int
 bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
         struct prefix *p, struct attr *attr, afi_t afi, safi_t safi)
 {
@@ -1059,7 +849,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
     return 0;
 
   /* Aggregate-address suppress check. */
-  if (ri->extra && ri->extra->suppress)
+  if (ri->suppress)
     if (! UNSUPPRESS_MAP_NAME (filter))
       return 0;
 
@@ -1079,8 +869,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
      peer's id. */
   if (ri->attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
     {
-      if (IPV4_ADDR_SAME (&rsclient->remote_id, 
-                          &ri->attr->extra->originator_id))
+      if (IPV4_ADDR_SAME (&rsclient->remote_id, &ri->attr->originator_id))
         {
          if (BGP_DEBUG (filter, FILTER))
            zlog (rsclient->log, LOG_DEBUG,
@@ -1133,7 +922,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
   if ((p->family == AF_INET && attr->nexthop.s_addr == 0)
 #ifdef HAVE_IPV6
           || (p->family == AF_INET6 &&
-              IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global))
+              IN6_IS_ADDR_UNSPECIFIED(&attr->mp_nexthop_global))
 #endif /* HAVE_IPV6 */
      )
   {
@@ -1141,7 +930,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
     if (p->family == AF_INET)
       {
         if (safi == SAFI_MPLS_VPN)
-          memcpy (&attr->extra->mp_nexthop_global_in, &rsclient->nexthop.v4,
+          memcpy (&attr->mp_nexthop_global_in, &rsclient->nexthop.v4,
                   IPV4_MAX_BYTELEN);
         else
           memcpy (&attr->nexthop, &rsclient->nexthop.v4, IPV4_MAX_BYTELEN);
@@ -1151,9 +940,10 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
     if (p->family == AF_INET6)
       {
         /* IPv6 global nexthop must be included. */
-        memcpy (&attr->extra->mp_nexthop_global, &rsclient->nexthop.v6_global,
+        memcpy (&attr->mp_nexthop_global, &rsclient->nexthop.v6_global,
+
                 IPV6_MAX_BYTELEN);
-        attr->extra->mp_nexthop_len = 16;
+        attr->mp_nexthop_len = 16;
       }
 #endif /* HAVE_IPV6 */
   }
@@ -1161,18 +951,14 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
 #ifdef HAVE_IPV6
   if (p->family == AF_INET6)
     {
-      struct attr_extra *attre = attr->extra;
-      
-      assert (attr->extra);
-      
       /* Left nexthop_local unchanged if so configured. */
       if ( CHECK_FLAG (rsclient->af_flags[afi][safi], 
            PEER_FLAG_NEXTHOP_LOCAL_UNCHANGED) )
         {
-          if ( IN6_IS_ADDR_LINKLOCAL (&attre->mp_nexthop_local) )
-            attre->mp_nexthop_len=32;
+          if ( IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_local) )
+            attr->mp_nexthop_len=32;
           else
-            attre->mp_nexthop_len=16;
+            attr->mp_nexthop_len=16;
         }
         
       /* Default nexthop_local treatment for RS-Clients */
@@ -1182,23 +968,23 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
           if (rsclient->shared_network && from->shared_network &&
               (rsclient->ifindex == from->ifindex))
             {
-              if ( IN6_IS_ADDR_LINKLOCAL (&attre->mp_nexthop_local) )
-                attre->mp_nexthop_len=32;
+              if ( IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_local) )
+                attr->mp_nexthop_len=32;
               else
-                attre->mp_nexthop_len=16;
+                attr->mp_nexthop_len=16;
             }
 
           /* Set link-local address for shared network peer. */
           else if (rsclient->shared_network
               && IN6_IS_ADDR_LINKLOCAL (&rsclient->nexthop.v6_local))
             {
-              memcpy (&attre->mp_nexthop_local, &rsclient->nexthop.v6_local,
+              memcpy (&attr->mp_nexthop_local, &rsclient->nexthop.v6_local,
                       IPV6_MAX_BYTELEN);
-              attre->mp_nexthop_len = 32;
+              attr->mp_nexthop_len = 32;
             }
 
           else
-            attre->mp_nexthop_len = 16;
+            attr->mp_nexthop_len = 16;
         }
 
     }
@@ -1212,14 +998,14 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
     attr->aspath = aspath_empty_get ();
 
   /* Route map & unsuppress-map apply. */
-  if (ROUTE_MAP_OUT_NAME (filter) || (ri->extra && ri->extra->suppress) )
+  if (ROUTE_MAP_OUT_NAME (filter) || ri->suppress)
     {
       info.peer = rsclient;
       info.attr = attr;
 
       SET_FLAG (rsclient->rmap_type, PEER_RMAP_TYPE_OUT);
 
-      if (ri->extra && ri->extra->suppress)
+      if (ri->suppress)
         ret = route_map_apply (UNSUPPRESS_MAP (filter), p, RMAP_BGP, &info);
       else
         ret = route_map_apply (ROUTE_MAP_OUT (filter), p, RMAP_BGP, &info);
@@ -1242,7 +1028,7 @@ struct bgp_info_pair
   struct bgp_info *new;
 };
 
-static void
+void
 bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *result)
 {
   struct bgp_info *new_select;
@@ -1250,8 +1036,7 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
   struct bgp_info *ri;
   struct bgp_info *ri1;
   struct bgp_info *ri2;
-  struct bgp_info *nextri = NULL;
-  
+
   /* bgp deterministic-med */
   new_select = NULL;
   if (bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
@@ -1277,57 +1062,59 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
 		{
 		  if (bgp_info_cmp (bgp, ri2, new_select))
 		    {
-		      bgp_info_unset_flag (rn, new_select, BGP_INFO_DMED_SELECTED);
+		      UNSET_FLAG (new_select->flags, BGP_INFO_DMED_SELECTED);
 		      new_select = ri2;
 		    }
 
-		  bgp_info_set_flag (rn, ri2, BGP_INFO_DMED_CHECK);
+		  SET_FLAG (ri2->flags, BGP_INFO_DMED_CHECK);
 		}
 	    }
-	bgp_info_set_flag (rn, new_select, BGP_INFO_DMED_CHECK);
-	bgp_info_set_flag (rn, new_select, BGP_INFO_DMED_SELECTED);
+	SET_FLAG (new_select->flags, BGP_INFO_DMED_CHECK);
+	SET_FLAG (new_select->flags, BGP_INFO_DMED_SELECTED);
       }
 
   /* Check old selected route and new selected route. */
   old_select = NULL;
   new_select = NULL;
-  for (ri = rn->info; (ri != NULL) && (nextri = ri->next, 1); ri = nextri)
+  for (ri = rn->info; ri; ri = ri->next)
     {
       if (CHECK_FLAG (ri->flags, BGP_INFO_SELECTED))
 	old_select = ri;
 
       if (BGP_INFO_HOLDDOWN (ri))
-        {
-          /* reap REMOVED routes, if needs be 
-           * selected route must stay for a while longer though
-           */
-          if (CHECK_FLAG (ri->flags, BGP_INFO_REMOVED)
-              && (ri != old_select))
-              bgp_info_reap (rn, ri);
-          
-          continue;
-        }
+	continue;
 
       if (bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED)
           && (! CHECK_FLAG (ri->flags, BGP_INFO_DMED_SELECTED)))
 	{
-	  bgp_info_unset_flag (rn, ri, BGP_INFO_DMED_CHECK);
+	  UNSET_FLAG (ri->flags, BGP_INFO_DMED_CHECK);
 	  continue;
         }
-      bgp_info_unset_flag (rn, ri, BGP_INFO_DMED_CHECK);
-      bgp_info_unset_flag (rn, ri, BGP_INFO_DMED_SELECTED);
+      UNSET_FLAG (ri->flags, BGP_INFO_DMED_CHECK);
+      UNSET_FLAG (ri->flags, BGP_INFO_DMED_SELECTED);
 
       if (bgp_info_cmp (bgp, ri, new_select))
 	new_select = ri;
     }
-    
+
+    if ( (! old_select) || old_select != new_select)
+	{
+  if (old_select)
+    UNSET_FLAG (old_select->flags, BGP_INFO_SELECTED);
+  if (new_select)
+    {
+      SET_FLAG (new_select->flags, BGP_INFO_SELECTED);
+      UNSET_FLAG (new_select->flags, BGP_INFO_ATTR_CHANGED);
+    }
+      }
+
     result->old = old_select;
     result->new = new_select;
 
     return;
 }
 
-static int
+int
 bgp_process_announce_selected (struct peer *peer, struct bgp_info *selected,
         struct bgp_node *rn, struct attr *attr, afi_t afi, safi_t safi)
     {
@@ -1369,98 +1156,61 @@ bgp_process_announce_selected (struct peer *peer, struct bgp_info *selected,
         break;
     }
   return 0;
-}
+    }
 
-struct bgp_process_queue 
+int
+bgp_process_rsclient (struct bgp *bgp, struct peer *rsclient,
+        struct bgp_node *rn, afi_t afi, safi_t safi)
 {
-  struct bgp *bgp;
-  struct bgp_node *rn;
-  afi_t afi;
-  safi_t safi;
-};
-
-static wq_item_status
-bgp_process_rsclient (struct work_queue *wq, void *data)
-{
-  struct bgp_process_queue *pq = data;
-  struct bgp *bgp = pq->bgp;
-  struct bgp_node *rn = pq->rn;
-  afi_t afi = pq->afi;
-  safi_t safi = pq->safi;
+  struct prefix *p;
   struct bgp_info *new_select;
   struct bgp_info *old_select;
   struct bgp_info_pair old_and_new;
   struct attr attr;
-  struct listnode *node, *nnode;
-  struct peer *rsclient = rn->table->owner;
-  
-  memset (&attr, 0, sizeof (struct attr));
+  struct peer_group *group;
+  struct listnode *nn;
+
+  p = &rn->p;
+
   /* Best path selection. */
   bgp_best_selection (bgp, rn, &old_and_new);
   new_select = old_and_new.new;
   old_select = old_and_new.old;
 
-  if (CHECK_FLAG (rsclient->sflags, PEER_STATUS_GROUP))
-    {
-      for (ALL_LIST_ELEMENTS (rsclient->group->peer, node, nnode, rsclient))
-	{
-	  /* Nothing to do. */
-	  if (old_select && old_select == new_select)
-	    if (!CHECK_FLAG (old_select->flags, BGP_INFO_ATTR_CHANGED))
-	      continue;
+  if (CHECK_FLAG(rsclient->sflags, PEER_STATUS_GROUP))
+  {
+    group = rsclient->group;
+    LIST_LOOP(group->peer, rsclient, nn)
+      {
+        /* Nothing to do. */
+        if (old_select && old_select == new_select)
+          if (! CHECK_FLAG (old_select->flags, BGP_INFO_ATTR_CHANGED))
+            continue;
 
-	  if (old_select)
-	    bgp_info_unset_flag (rn, old_select, BGP_INFO_SELECTED);
-	  if (new_select)
-	    {
-	      bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
-	      bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
-	    }
+        bgp_process_announce_selected (rsclient, new_select, rn, &attr, 
+              afi, safi);
+      }
+    return 0;
+  }
 
-	  bgp_process_announce_selected (rsclient, new_select, rn, &attr,
-					 afi, safi);
-	}
-    }
-  else
-    {
-      if (old_select)
-	bgp_info_unset_flag (rn, old_select, BGP_INFO_SELECTED);
-      if (new_select)
-	{
-	  bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
-	  bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
-	}
-      bgp_process_announce_selected (rsclient, new_select, rn,
-				     &attr, afi, safi);
-    }
+  bgp_process_announce_selected (rsclient, new_select, rn, &attr, afi, safi);
 
-  if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
-    bgp_info_reap (rn, old_select);
-  
-  bgp_attr_extra_free (&attr);
-  
-  UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-  return WQ_SUCCESS;
+  return 0;
 }
 
-static wq_item_status
-bgp_process_main (struct work_queue *wq, void *data)
-{
-  struct bgp_process_queue *pq = data;
-  struct bgp *bgp = pq->bgp;
-  struct bgp_node *rn = pq->rn;
-  afi_t afi = pq->afi;
-  safi_t safi = pq->safi;
-  struct prefix *p = &rn->p;
+int
+bgp_process_main (struct bgp *bgp, struct bgp_node *rn, afi_t afi, safi_t safi)
+    {
+  struct prefix *p;
   struct bgp_info *new_select;
   struct bgp_info *old_select;
   struct bgp_info_pair old_and_new;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct peer *peer;
   struct attr attr;
-  
-  memset (&attr, 0, sizeof (struct attr));
-  
+
+  p = &rn->p;
+
   /* Best path selection. */
   bgp_best_selection (bgp, rn, &old_and_new);
   old_select = old_and_new.old;
@@ -1470,26 +1220,15 @@ bgp_process_main (struct work_queue *wq, void *data)
   if (old_select && old_select == new_select)
     {
       if (! CHECK_FLAG (old_select->flags, BGP_INFO_ATTR_CHANGED))
-        {
-          if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED))
-            bgp_zebra_announce (p, old_select, bgp);
-          
-          UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-          return WQ_SUCCESS;
-        }
+       {
+         if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED))
+           bgp_zebra_announce (p, old_select, bgp);
+         return 0;
+       }
     }
-
-  if (old_select)
-    bgp_info_unset_flag (rn, old_select, BGP_INFO_SELECTED);
-  if (new_select)
-    {
-      bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
-      bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
-    }
-
 
   /* Check each BGP peer. */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       bgp_process_announce_selected (peer, new_select, rn, &attr, afi, safi);
     }
@@ -1511,104 +1250,23 @@ bgp_process_main (struct work_queue *wq, void *data)
 	    bgp_zebra_withdraw (p, old_select);
 	}
     }
-    
-  /* Reap old select bgp_info, it it has been removed */
-  if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
-    bgp_info_reap (rn, old_select);
-  
-  bgp_attr_extra_free (&attr);
-  
-  UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-  return WQ_SUCCESS;
-}
-
-static void
-bgp_processq_del (struct work_queue *wq, void *data)
-{
-  struct bgp_process_queue *pq = data;
-  
-  bgp_unlock_node (pq->rn);
-  XFREE (MTYPE_BGP_PROCESS_QUEUE, pq);
-}
-
-static void
-bgp_process_queue_init (void)
-{
-  bm->process_main_queue
-    = work_queue_new (bm->master, "process_main_queue");
-  bm->process_rsclient_queue
-    = work_queue_new (bm->master, "process_rsclient_queue");
-  
-  if ( !(bm->process_main_queue && bm->process_rsclient_queue) )
-    {
-      zlog_err ("%s: Failed to allocate work queue", __func__);
-      exit (1);
-    }
-  
-  bm->process_main_queue->spec.workfunc = &bgp_process_main;
-  bm->process_rsclient_queue->spec.workfunc = &bgp_process_rsclient;
-  bm->process_main_queue->spec.del_item_data = &bgp_processq_del;
-  bm->process_rsclient_queue->spec.del_item_data
-    =  bm->process_main_queue->spec.del_item_data;
-  bm->process_main_queue->spec.max_retries
-    = bm->process_main_queue->spec.max_retries = 0;
-  bm->process_rsclient_queue->spec.hold
-    = bm->process_main_queue->spec.hold = 50;
-}
-
-void
-bgp_process (struct bgp *bgp, struct bgp_node *rn, afi_t afi, safi_t safi)
-{
-  struct bgp_process_queue *pqnode;
-  
-  /* already scheduled for processing? */
-  if (CHECK_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED))
-    return;
-  
-  if ( (bm->process_main_queue == NULL) ||
-       (bm->process_rsclient_queue == NULL) )
-    bgp_process_queue_init ();
-  
-  pqnode = XCALLOC (MTYPE_BGP_PROCESS_QUEUE, 
-                    sizeof (struct bgp_process_queue));
-  if (!pqnode)
-    return;
-  
-  pqnode->rn = bgp_lock_node (rn); /* unlocked by bgp_processq_del */
-  pqnode->bgp = bgp;
-  pqnode->afi = afi;
-  pqnode->safi = safi;
-  
-  switch (rn->table->type)
-    {
-      case BGP_TABLE_MAIN:
-        work_queue_add (bm->process_main_queue, pqnode);
-        break;
-      case BGP_TABLE_RSCLIENT:
-        work_queue_add (bm->process_rsclient_queue, pqnode);
-        break;
-    }
-  
-  return;
-}
-
-static int
-bgp_maximum_prefix_restart_timer (struct thread *thread)
-{
-  struct peer *peer;
-
-  peer = THREAD_ARG (thread);
-  peer->t_pmax_restart = NULL;
-
-  if (BGP_DEBUG (events, EVENTS))
-    zlog_debug ("%s Maximum-prefix restart timer expired, restore peering",
-		peer->host);
-
-  peer_clear (peer);
-
   return 0;
 }
 
+int
+bgp_process (struct bgp *bgp, struct bgp_node *rn, afi_t afi, safi_t safi)
+{
+  switch (rn->table->type)
+    {
+    case BGP_TABLE_MAIN:
+      return bgp_process_main (bgp, rn, afi, safi);
+    case BGP_TABLE_RSCLIENT:
+      return bgp_process_rsclient (bgp, (struct peer *) rn->table->owner,
+                                   rn, afi, safi);
+    }
+  return 0;
+}
+  
 int
 bgp_maximum_prefix_overflow (struct peer *peer, afi_t afi, 
                              safi_t safi, int always)
@@ -1623,9 +1281,8 @@ bgp_maximum_prefix_overflow (struct peer *peer, afi_t afi,
        return 0;
 
       zlog (peer->log, LOG_INFO,
-	    "%%MAXPFXEXCEED: No. of %s prefix received from %s %ld exceed, "
-	    "limit %ld", afi_safi_print (afi, safi), peer->host,
-	    peer->pcount[afi][safi], peer->pmax[afi][safi]);
+           "%%MAXPFXEXCEED: No. of prefix received from %s (afi %d): %ld exceed limit %ld",
+           peer->host, afi, peer->pcount[afi][safi], peer->pmax[afi][safi]);
       SET_FLAG (peer->af_sflags[afi][safi], PEER_STATUS_PREFIX_LIMIT);
 
       if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING))
@@ -1649,20 +1306,6 @@ bgp_maximum_prefix_overflow (struct peer *peer, afi_t afi,
        bgp_notify_send_with_data (peer, BGP_NOTIFY_CEASE,
                                   BGP_NOTIFY_CEASE_MAX_PREFIX, ndata, 7);
       }
-
-      /* restart timer start */
-      if (peer->pmax_restart[afi][safi])
-	{
-	  peer->v_pmax_restart = peer->pmax_restart[afi][safi] * 60;
-
-	  if (BGP_DEBUG (events, EVENTS))
-	    zlog_debug ("%s Maximum-prefix restart timer started for %d secs",
-			peer->host, peer->v_pmax_restart);
-
-	  BGP_TIMER_ON (peer->t_pmax_restart, bgp_maximum_prefix_restart_timer,
-			peer->v_pmax_restart);
-	}
-
       return 1;
     }
   else
@@ -1675,9 +1318,8 @@ bgp_maximum_prefix_overflow (struct peer *peer, afi_t afi,
        return 0;
 
       zlog (peer->log, LOG_INFO,
-	    "%%MAXPFX: No. of %s prefix received from %s reaches %ld, max %ld",
-	    afi_safi_print (afi, safi), peer->host, peer->pcount[afi][safi],
-	    peer->pmax[afi][safi]);
+           "%%MAXPFX: No. of prefix received from %s (afi %d) reaches %ld, max %ld",
+           peer->host, afi, peer->pcount[afi][safi], peer->pmax[afi][safi]);
       SET_FLAG (peer->af_sflags[afi][safi], PEER_STATUS_PREFIX_THRESHOLD);
     }
   else
@@ -1685,50 +1327,74 @@ bgp_maximum_prefix_overflow (struct peer *peer, afi_t afi,
   return 0;
 }
 
-/* Unconditionally remove the route from the RIB, without taking
- * damping into consideration (eg, because the session went down)
- */
-static void
+void
 bgp_rib_remove (struct bgp_node *rn, struct bgp_info *ri, struct peer *peer,
 		afi_t afi, safi_t safi)
 {
-  bgp_aggregate_decrement (peer->bgp, &rn->p, ri, afi, safi);
-  
-  if (!CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
-    bgp_info_delete (rn, ri); /* keep historical info */
-    
-  bgp_process (peer->bgp, rn, afi, safi);
+  if (! CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
+    {
+      /* Ignore 'pcount' for RS-client tables */
+      if ( rn->table->type == BGP_TABLE_MAIN)
+        {
+      peer->pcount[afi][safi]--;
+      bgp_aggregate_decrement (peer->bgp, &rn->p, ri, afi, safi);
+        }
+      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
+      bgp_process (peer->bgp, rn, afi, safi);
+    }
+  bgp_info_delete (rn, ri);
+  bgp_info_free (ri);
+  bgp_unlock_node (rn);
 }
 
-static void
+void
 bgp_rib_withdraw (struct bgp_node *rn, struct bgp_info *ri, struct peer *peer,
-		  afi_t afi, safi_t safi)
+		  afi_t afi, safi_t safi, int force)
 {
+  int valid;
   int status = BGP_DAMP_NONE;
 
-  /* apply dampening, if result is suppressed, we'll be retaining 
-   * the bgp_info in the RIB for historical reference.
-   */
-  if (CHECK_FLAG (peer->bgp->af_flags[afi][safi], BGP_CONFIG_DAMPENING)
-      && peer_sort (peer) == BGP_PEER_EBGP)
-    if ( (status = bgp_damp_withdraw (ri, rn, afi, safi, 0)) 
-         == BGP_DAMP_SUPPRESSED)
-      {
-        bgp_aggregate_decrement (peer->bgp, &rn->p, ri, afi, safi);
-        return;
-      }
-    
-  bgp_rib_remove (rn, ri, peer, afi, safi);
+  /* Ignore 'pcount' for RS-client tables */
+  if (! CHECK_FLAG (ri->flags, BGP_INFO_HISTORY) &&
+          rn->table->type == BGP_TABLE_MAIN)
+    {
+      peer->pcount[afi][safi]--;
+      bgp_aggregate_decrement (peer->bgp, &rn->p, ri, afi, safi);
+    }
+
+  if (! force)
+    {
+      if (CHECK_FLAG (peer->bgp->af_flags[afi][safi], BGP_CONFIG_DAMPENING)
+	  && peer_sort (peer) == BGP_PEER_EBGP)
+	status = bgp_damp_withdraw (ri, rn, afi, safi, 0);
+
+      if (status == BGP_DAMP_SUPPRESSED)
+	return;
+    }
+
+  valid = CHECK_FLAG (ri->flags, BGP_INFO_VALID);
+  UNSET_FLAG (ri->flags, BGP_INFO_VALID);
+  bgp_process (peer->bgp, rn, afi, safi);
+
+  if (valid)
+    SET_FLAG (ri->flags, BGP_INFO_VALID);
+
+  if (status != BGP_DAMP_USED)
+    {
+      bgp_info_delete (rn, ri);
+      bgp_info_free (ri);
+      bgp_unlock_node (rn);
+    }
 }
 
-static void
+void
 bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
       struct attr *attr, struct peer *peer, struct prefix *p, int type,
       int sub_type, struct prefix_rd *prd, u_char *tag)
 {
   struct bgp_node *rn;
   struct bgp *bgp;
-  struct attr new_attr = { 0 };
+  struct attr new_attr;
   struct attr *attr_new;
   struct attr *attr_new2;
   struct bgp_info *ri;
@@ -1736,8 +1402,6 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
   const char *reason;
   char buf[SU_ADDRSTRLEN];
 
-  //memset (new_attr, 0, sizeof (struct attr));
-  
   /* Do not insert announces from a rsclient into its own 'bgp_table'. */
   if (peer == rsclient)
     return;
@@ -1759,13 +1423,13 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
 
   /* Route reflector originator ID check.  */
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID)
-      && IPV4_ADDR_SAME (&rsclient->remote_id, &attr->extra->originator_id))
+      && IPV4_ADDR_SAME (&rsclient->remote_id, &attr->originator_id))
     {
       reason = "originator is us;";
       goto filtered;
     }
-  
-  bgp_attr_dup (&new_attr, attr);
+
+  new_attr = *attr;
 
   /* Apply export policy. */
   if (CHECK_FLAG(peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT) &&
@@ -1776,7 +1440,7 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
     }
 
   attr_new2 = bgp_attr_intern (&new_attr);
-  
+
   /* Apply import policy. */
   if (bgp_import_modifier (rsclient, peer, p, &new_attr, afi, safi) == RMAP_DENY)
     {
@@ -1802,21 +1466,17 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
          goto filtered;
        }
     }
-  
-  /* new_attr isn't passed to any functions after here */
-  bgp_attr_extra_free (&new_attr);
-  
+
   /* If the update is implicit withdraw. */
   if (ri)
     {
       ri->uptime = time (NULL);
 
       /* Same attribute comes in. */
-      if (!CHECK_FLAG(ri->flags, BGP_INFO_REMOVED)
-          && attrhash_cmp (ri->attr, attr_new))
+      if (attrhash_cmp (ri->attr, attr_new))
         {
 
-          bgp_info_unset_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+          UNSET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 
           if (BGP_DEBUG (update, UPDATE_IN))
             zlog (peer->log, LOG_DEBUG,
@@ -1831,10 +1491,6 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
                     return;
         }
 
-      /* Withdraw/Announce before we fully processed the withdraw */
-      if (CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
-        bgp_info_restore (rn, ri);
-      
       /* Received Logging. */
       if (BGP_DEBUG (update, UPDATE_IN))
         zlog (peer->log, LOG_DEBUG, "%s rcvd %s/%d for RS-client %s",
@@ -1843,7 +1499,7 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
                 p->prefixlen, rsclient->host);
 
       /* The attribute is changed. */
-      bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+      SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 
       /* Update to new attribute.  */
       bgp_attr_unintern (ri->attr);
@@ -1851,9 +1507,9 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
 
       /* Update MPLS tag.  */
       if (safi == SAFI_MPLS_VPN)
-        memcpy ((bgp_info_extra_get (ri))->tag, tag, 3);
+        memcpy (ri->tag, tag, 3);
 
-      bgp_info_set_flag (rn, ri, BGP_INFO_VALID);
+      SET_FLAG (ri->flags, BGP_INFO_VALID);
 
       /* Process change. */
       bgp_process (bgp, rn, afi, safi);
@@ -1881,21 +1537,16 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
 
   /* Update MPLS tag. */
   if (safi == SAFI_MPLS_VPN)
-    memcpy ((bgp_info_extra_get (new))->tag, tag, 3);
+    memcpy (new->tag, tag, 3);
 
-  bgp_info_set_flag (rn, new, BGP_INFO_VALID);
+  SET_FLAG (new->flags, BGP_INFO_VALID);
 
   /* Register new BGP information. */
   bgp_info_add (rn, new);
-  
-  /* route_node_get lock */
-  bgp_unlock_node (rn);
-  
+
   /* Process change. */
   bgp_process (bgp, rn, afi, safi);
-  
-  bgp_attr_extra_free (&new_attr);
-  
+
   return;
 
  filtered: 
@@ -1909,17 +1560,14 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
         p->prefixlen, rsclient->host, reason);
 
   if (ri)
-    bgp_rib_remove (rn, ri, peer, afi, safi);
+    bgp_rib_withdraw (rn, ri, peer, afi, safi, 1);
 
   bgp_unlock_node (rn);
-  
-  if (new_attr.extra)
-    bgp_attr_extra_free (&new_attr);
-  
+
   return;
 }
 
-static void
+void
 bgp_withdraw_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
       struct peer *peer, struct prefix *p, int type, int sub_type,
       struct prefix_rd *prd, u_char *tag)
@@ -1940,7 +1588,7 @@ bgp_withdraw_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
 
   /* Withdraw specified route from routing table. */
   if (ri && ! CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
-    bgp_rib_withdraw (rn, ri, peer, afi, safi);
+    bgp_rib_withdraw (rn, ri, peer, afi, safi, 0);
   else if (BGP_DEBUG (update, UPDATE_IN))
     zlog (peer->log, LOG_DEBUG,
           "%s Can't find the route %s/%d", peer->host,
@@ -1951,7 +1599,7 @@ bgp_withdraw_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
       bgp_unlock_node (rn);
     }
 
-static int
+int
 bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	    afi_t afi, safi_t safi, int type, int sub_type,
 	    struct prefix_rd *prd, u_char *tag, int soft_reconfig)
@@ -1960,7 +1608,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   int aspath_loop_count = 0;
   struct bgp_node *rn;
   struct bgp *bgp;
-  struct attr new_attr = { 0 };
+  struct attr new_attr;
   struct attr *attr_new;
   struct bgp_info *ri;
   struct bgp_info *new;
@@ -1969,7 +1617,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 
   bgp = peer->bgp;
   rn = bgp_afi_node_get (bgp->rib[afi][safi], afi, safi, p, prd);
-  
+
   /* When peer's soft reconfiguration enabled.  Record input packet in
      Adj-RIBs-In.  */
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_SOFT_RECONFIG)
@@ -2006,7 +1654,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 
   /* Route reflector originator ID check.  */
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID)
-      && IPV4_ADDR_SAME (&bgp->router_id, &attr->extra->originator_id))
+      && IPV4_ADDR_SAME (&bgp->router_id, &attr->originator_id))
     {
       reason = "originator is us;";
       goto filtered;
@@ -2027,7 +1675,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
     }
 
   /* Apply incoming route-map. */
-  bgp_attr_dup (&new_attr, attr);
+  new_attr = *attr;
 
   if (bgp_input_modifier (peer, p, &new_attr, afi, safi) == RMAP_DENY)
     {
@@ -2042,7 +1690,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	 discard it.  */
       if (peer_sort (peer) == BGP_PEER_EBGP && peer->ttl == 1
 	  && ! bgp_nexthop_check_ebgp (afi, &new_attr)
-	  && ! CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+	  && ! CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP))
 	{
 	  reason = "non-connected next-hop;";
 	  goto filtered;
@@ -2067,10 +1715,9 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
       ri->uptime = time (NULL);
 
       /* Same attribute comes in. */
-      if (!CHECK_FLAG (ri->flags, BGP_INFO_REMOVED) 
-          && attrhash_cmp (ri->attr, attr_new))
+      if (attrhash_cmp (ri->attr, attr_new))
 	{
-	  bgp_info_unset_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+	  UNSET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 
 	  if (CHECK_FLAG (bgp->af_flags[afi][safi], BGP_CONFIG_DAMPENING)
 	      && peer_sort (peer) == BGP_PEER_EBGP
@@ -2082,13 +1729,15 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 		  inet_ntop(p->family, &p->u.prefix, buf, SU_ADDRSTRLEN),
 		  p->prefixlen);
 
-	      if (bgp_damp_update (ri, rn, afi, safi) != BGP_DAMP_SUPPRESSED)
-	        {
-                  bgp_aggregate_increment (bgp, p, ri, afi, safi);
-                  bgp_process (bgp, rn, afi, safi);
-                }
+	      peer->pcount[afi][safi]++;
+	      ret = bgp_damp_update (ri, rn, afi, safi);
+	      if (ret != BGP_DAMP_SUPPRESSED)
+		{
+		  bgp_aggregate_increment (bgp, p, ri, afi, safi);
+		  bgp_process (bgp, rn, afi, safi);
+		}
 	    }
-          else /* Duplicate - odd */
+	  else
 	    {
 	      if (BGP_DEBUG (update, UPDATE_IN))  
 		zlog (peer->log, LOG_DEBUG,
@@ -2096,32 +1745,12 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 		peer->host,
 		inet_ntop(p->family, &p->u.prefix, buf, SU_ADDRSTRLEN),
 		p->prefixlen);
-
-	      /* graceful restart STALE flag unset. */
-	      if (CHECK_FLAG (ri->flags, BGP_INFO_STALE))
-		{
-		  bgp_info_unset_flag (rn, ri, BGP_INFO_STALE);
-		  bgp_process (bgp, rn, afi, safi);
-		}
 	    }
 
 	  bgp_unlock_node (rn);
 	  bgp_attr_unintern (attr_new);
-	  bgp_attr_extra_free (&new_attr);
-	  
 	  return 0;
 	}
-
-      /* Withdraw/Announce before we fully processed the withdraw */
-      if (CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
-        {
-          if (BGP_DEBUG (update, UPDATE_IN))
-            zlog (peer->log, LOG_DEBUG, "%s rcvd %s/%d, flapped quicker than processing",
-            peer->host,
-            inet_ntop(p->family, &p->u.prefix, buf, SU_ADDRSTRLEN),
-            p->prefixlen);
-          bgp_info_restore (rn, ri);
-        }
 
       /* Received Logging. */
       if (BGP_DEBUG (update, UPDATE_IN))  
@@ -2130,18 +1759,9 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	      inet_ntop(p->family, &p->u.prefix, buf, SU_ADDRSTRLEN),
 	      p->prefixlen);
 
-      /* graceful restart STALE flag unset. */
-      if (CHECK_FLAG (ri->flags, BGP_INFO_STALE))
-	bgp_info_unset_flag (rn, ri, BGP_INFO_STALE);
-
       /* The attribute is changed. */
-      bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
-      
-      /* implicit withdraw, decrement aggregate and pcount here.
-       * only if update is accepted, they'll increment below.
-       */
-      bgp_aggregate_decrement (bgp, p, ri, afi, safi);
-      
+      SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
+
       /* Update bgp route dampening information.  */
       if (CHECK_FLAG (bgp->af_flags[afi][safi], BGP_CONFIG_DAMPENING)
 	  && peer_sort (peer) == BGP_PEER_EBGP)
@@ -2150,15 +1770,19 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	     information.  */
 	  if (! CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
 	    bgp_damp_withdraw (ri, rn, afi, safi, 1);  
+	  else
+	    peer->pcount[afi][safi]++;
 	}
 	
+      bgp_aggregate_decrement (bgp, p, ri, afi, safi);
+
       /* Update to new attribute.  */
       bgp_attr_unintern (ri->attr);
       ri->attr = attr_new;
 
       /* Update MPLS tag.  */
       if (safi == SAFI_MPLS_VPN)
-        memcpy ((bgp_info_extra_get (ri))->tag, tag, 3);
+	memcpy (ri->tag, tag, 3);
 
       /* Update bgp route dampening information.  */
       if (CHECK_FLAG (bgp->af_flags[afi][safi], BGP_CONFIG_DAMPENING)
@@ -2169,7 +1793,6 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	  if (ret == BGP_DAMP_SUPPRESSED)
 	    {
 	      bgp_unlock_node (rn);
-	      bgp_attr_extra_free (&new_attr);
 	      return 0;
 	    }
 	}
@@ -2179,23 +1802,21 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	  && safi == SAFI_UNICAST 
 	  && (peer_sort (peer) == BGP_PEER_IBGP
 	      || (peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
-	      || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)))
+	      || CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP)))
 	{
 	  if (bgp_nexthop_lookup (afi, peer, ri, NULL, NULL))
-	    bgp_info_set_flag (rn, ri, BGP_INFO_VALID);
+	    SET_FLAG (ri->flags, BGP_INFO_VALID);
 	  else
-	    bgp_info_unset_flag (rn, ri, BGP_INFO_VALID);
+	    UNSET_FLAG (ri->flags, BGP_INFO_VALID);
 	}
       else
-        bgp_info_set_flag (rn, ri, BGP_INFO_VALID);
+	SET_FLAG (ri->flags, BGP_INFO_VALID);
 
       /* Process change. */
       bgp_aggregate_increment (bgp, p, ri, afi, safi);
 
       bgp_process (bgp, rn, afi, safi);
       bgp_unlock_node (rn);
-      bgp_attr_extra_free (&new_attr);
-      
       return 0;
     }
 
@@ -2208,6 +1829,9 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	    p->prefixlen);
     }
 
+  /* Increment prefix counter */
+  peer->pcount[afi][safi]++;
+
   /* Make new BGP info. */
   new = bgp_info_new ();
   new->type = type;
@@ -2218,34 +1842,29 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 
   /* Update MPLS tag. */
   if (safi == SAFI_MPLS_VPN)
-    memcpy ((bgp_info_extra_get (new))->tag, tag, 3);
+    memcpy (new->tag, tag, 3);
 
   /* Nexthop reachability check. */
   if ((afi == AFI_IP || afi == AFI_IP6)
       && safi == SAFI_UNICAST
       && (peer_sort (peer) == BGP_PEER_IBGP
 	  || (peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
-	  || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)))
+	  || CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP)))
     {
       if (bgp_nexthop_lookup (afi, peer, new, NULL, NULL))
-	bgp_info_set_flag (rn, new, BGP_INFO_VALID);
+	SET_FLAG (new->flags, BGP_INFO_VALID);
       else
-        bgp_info_unset_flag (rn, new, BGP_INFO_VALID);
+	UNSET_FLAG (new->flags, BGP_INFO_VALID);
     }
   else
-    bgp_info_set_flag (rn, new, BGP_INFO_VALID);
+    SET_FLAG (new->flags, BGP_INFO_VALID);
 
-  /* Increment prefix */
+  /* Aggregate address increment. */
   bgp_aggregate_increment (bgp, p, new, afi, safi);
   
   /* Register new BGP information. */
   bgp_info_add (rn, new);
-  
-  /* route_node_get lock */
-  bgp_unlock_node (rn);
-  
-  bgp_attr_extra_free (&new_attr);
-  
+
   /* If maximum prefix count is configured and current prefix
      count exeed it. */
   if (bgp_maximum_prefix_overflow (peer, afi, safi, 0))
@@ -2267,12 +1886,10 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	  p->prefixlen, reason);
 
   if (ri)
-    bgp_rib_remove (rn, ri, peer, afi, safi);
+    bgp_rib_withdraw (rn, ri, peer, afi, safi, 1);
 
   bgp_unlock_node (rn);
-  
-  bgp_attr_extra_free (&new_attr);
-  
+
   return 0;
 }
 
@@ -2282,7 +1899,7 @@ bgp_update (struct peer *peer, struct prefix *p, struct attr *attr,
             struct prefix_rd *prd, u_char *tag, int soft_reconfig)
 {
   struct peer *rsclient;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct bgp *bgp;
   int ret;
 
@@ -2292,7 +1909,7 @@ bgp_update (struct peer *peer, struct prefix *p, struct attr *attr,
   bgp = peer->bgp;
 
   /* Process the update for each RS-client. */
-  for (ALL_LIST_ELEMENTS (bgp->rsclient, node, nnode, rsclient))
+  LIST_LOOP(bgp->rsclient, rsclient, nn)
     {
       if (CHECK_FLAG (rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
         bgp_update_rsclient (rsclient, afi, safi, attr, peer, p, type,
@@ -2304,20 +1921,20 @@ bgp_update (struct peer *peer, struct prefix *p, struct attr *attr,
 
 int
 bgp_withdraw (struct peer *peer, struct prefix *p, struct attr *attr, 
-	     afi_t afi, safi_t safi, int type, int sub_type, 
-	     struct prefix_rd *prd, u_char *tag)
+	     int afi, int safi, int type, int sub_type, struct prefix_rd *prd,
+	      u_char *tag)
 {
   struct bgp *bgp;
   char buf[SU_ADDRSTRLEN];
   struct bgp_node *rn;
   struct bgp_info *ri;
   struct peer *rsclient;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   bgp = peer->bgp;
 
   /* Process the withdraw for each RS-client. */
-  for (ALL_LIST_ELEMENTS (bgp->rsclient, node, nnode, rsclient))
+  LIST_LOOP (bgp->rsclient, rsclient, nn)
     {
       if (CHECK_FLAG (rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
         bgp_withdraw_rsclient (rsclient, afi, safi, peer, p, type, sub_type, prd, tag);
@@ -2346,7 +1963,7 @@ bgp_withdraw (struct peer *peer, struct prefix *p, struct attr *attr,
 
   /* Withdraw specified route from routing table. */
   if (ri && ! CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
-    bgp_rib_withdraw (rn, ri, peer, afi, safi);
+    bgp_rib_withdraw (rn, ri, peer, afi, safi, 0);
   else if (BGP_DEBUG (update, UPDATE_IN))
     zlog (peer->log, LOG_DEBUG, 
 	  "%s Can't find the route %s/%d", peer->host,
@@ -2364,18 +1981,15 @@ bgp_default_originate (struct peer *peer, afi_t afi, safi_t safi, int withdraw)
 {
   struct bgp *bgp;
   struct attr attr;
-  struct aspath *aspath = { 0 };
+  struct aspath *aspath;
   struct prefix p;
   struct bgp_info binfo;
   struct peer *from;
   int ret = RMAP_DENYMATCH;
-  
-  if (!(afi == AFI_IP || afi == AFI_IP6))
-    return;
-  
+
   bgp = peer->bgp;
   from = bgp->peer_self;
-  
+
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
   aspath = attr.aspath;
   attr.local_pref = bgp->default_local_pref;
@@ -2386,30 +2000,26 @@ bgp_default_originate (struct peer *peer, afi_t afi, safi_t safi, int withdraw)
 #ifdef HAVE_IPV6
   else if (afi == AFI_IP6)
     {
-      struct attr_extra *ae;
-      attr.extra = NULL;
-      
-      ae = bgp_attr_extra_get (&attr);
-      attr.extra = ae;
-      
       str2prefix ("::/0", &p);
 
       /* IPv6 global nexthop must be included. */
-      memcpy (&ae->mp_nexthop_global, &peer->nexthop.v6_global, 
+      memcpy (&attr.mp_nexthop_global, &peer->nexthop.v6_global, 
 	      IPV6_MAX_BYTELEN);
-	      ae->mp_nexthop_len = 16;
+	      attr.mp_nexthop_len = 16;
  
       /* If the peer is on shared nextwork and we have link-local
 	 nexthop set it. */
       if (peer->shared_network 
 	  && !IN6_IS_ADDR_UNSPECIFIED (&peer->nexthop.v6_local))
 	{
-	  memcpy (&ae->mp_nexthop_local, &peer->nexthop.v6_local, 
+	  memcpy (&attr.mp_nexthop_local, &peer->nexthop.v6_local, 
 		  IPV6_MAX_BYTELEN);
-	  ae->mp_nexthop_len = 32;
+	  attr.mp_nexthop_len = 32;
 	}
     }
 #endif /* HAVE_IPV6 */
+  else
+    return;
 
   if (peer->default_rmap[afi][safi].name)
     {
@@ -2441,8 +2051,7 @@ bgp_default_originate (struct peer *peer, afi_t afi, safi_t safi, int withdraw)
       SET_FLAG (peer->af_sflags[afi][safi], PEER_STATUS_DEFAULT_ORIGINATE);
       bgp_default_update_send (peer, &attr, afi, safi, from);
     }
-  
-  bgp_attr_extra_free (&attr);
+
   aspath_unintern (aspath);
 }
 
@@ -2453,9 +2062,7 @@ bgp_announce_table (struct peer *peer, afi_t afi, safi_t safi,
   struct bgp_node *rn;
   struct bgp_info *ri;
   struct attr attr;
-  
-  memset (&attr, 0, sizeof (struct attr));
-  
+
   if (! table)
     table = (rsclient) ? peer->rib[afi][safi] : peer->bgp->rib[afi][safi];
 
@@ -2473,8 +2080,6 @@ bgp_announce_table (struct peer *peer, afi_t afi, safi_t safi,
 	    bgp_adj_out_set (rn, peer, &rn->p, &attr, afi, safi, ri);
 	  else
 	    bgp_adj_out_unset (rn, peer, &rn->p, afi, safi);
-          
-          bgp_attr_extra_free (&attr);
 	}
 }
 
@@ -2598,153 +2203,41 @@ bgp_soft_reconfig_in (struct peer *peer, afi_t afi, safi_t safi)
 	bgp_soft_reconfig_table (peer, afi, safi, table);
 }
 
-static wq_item_status
-bgp_clear_route_node (struct work_queue *wq, void *data)
-{
-  struct bgp_node *rn = data;
-  struct peer *peer = wq->spec.data;
-  struct bgp_info *ri;
-  afi_t afi = rn->table->afi;
-  safi_t safi = rn->table->safi;
-  
-  assert (rn && peer);
-  
-  for (ri = rn->info; ri; ri = ri->next)
-    if (ri->peer == peer)
-      {
-        /* graceful restart STALE flag set. */
-        if (CHECK_FLAG (peer->sflags, PEER_STATUS_NSF_WAIT)
-            && peer->nsf[afi][safi]
-            && ! CHECK_FLAG (ri->flags, BGP_INFO_STALE)
-            && ! CHECK_FLAG (ri->flags, BGP_INFO_UNUSEABLE))
-          bgp_info_set_flag (rn, ri, BGP_INFO_STALE);
-        else
-          bgp_rib_remove (rn, ri, peer, afi, safi);
-        break;
-      }
-  return WQ_SUCCESS;
-}
-
-static void
-bgp_clear_node_queue_del (struct work_queue *wq, void *data)
-{
-  struct bgp_node *rn = data;
-  
-  bgp_unlock_node (rn); 
-}
-
-static void
-bgp_clear_node_complete (struct work_queue *wq)
-{
-  struct peer *peer = wq->spec.data;
-  
-  peer_unlock (peer); /* bgp_clear_node_complete */
-  
-  /* Tickle FSM to start moving again */
-  BGP_EVENT_ADD (peer, Clearing_Completed);
-}
-
-static void
-bgp_clear_node_queue_init (struct peer *peer)
-{
-#define CLEAR_QUEUE_NAME_LEN 26 /* "clear 2001:123:123:123::1" */
-  char wname[CLEAR_QUEUE_NAME_LEN];
-  
-  snprintf (wname, CLEAR_QUEUE_NAME_LEN, "clear %s", peer->host);
-#undef CLEAR_QUEUE_NAME_LEN
-
-  if ( (peer->clear_node_queue = work_queue_new (bm->master, wname)) == NULL)
-    {
-      zlog_err ("%s: Failed to allocate work queue", __func__);
-      exit (1);
-    }
-  peer->clear_node_queue->spec.hold = 10;
-  peer->clear_node_queue->spec.workfunc = &bgp_clear_route_node;
-  peer->clear_node_queue->spec.del_item_data = &bgp_clear_node_queue_del;
-  peer->clear_node_queue->spec.completion_func = &bgp_clear_node_complete;
-  peer->clear_node_queue->spec.max_retries = 0;
-  
-  /* we only 'lock' this peer reference when the queue is actually active */
-  peer->clear_node_queue->spec.data = peer;
-}
-
 static void
 bgp_clear_route_table (struct peer *peer, afi_t afi, safi_t safi,
                       struct bgp_table *table, struct peer *rsclient)
 {
   struct bgp_node *rn;
-  
-  
+  struct bgp_adj_in *ain;
+  struct bgp_adj_out *aout;
+  struct bgp_info *ri;
+
   if (! table)
     table = (rsclient) ? rsclient->rib[afi][safi] : peer->bgp->rib[afi][safi];
-  
-  /* If still no table => afi/safi isn't configured at all or smth. */
-  if (! table)
-    return;
-  
+
   for (rn = bgp_table_top (table); rn; rn = bgp_route_next (rn))
     {
-      struct bgp_info *ri;
-      struct bgp_adj_in *ain;
-      struct bgp_adj_out *aout;
-      
-      if (rn->info == NULL)
-        continue;
-
-      /* XXX:TODO: This is suboptimal, every non-empty route_node is
-       * queued for every clearing peer, regardless of whether it is
-       * relevant to the peer at hand.
-       *
-       * Overview: There are 3 different indices which need to be
-       * scrubbed, potentially, when a peer is removed:
-       *
-       * 1 peer's routes visible via the RIB (ie accepted routes)
-       * 2 peer's routes visible by the (optional) peer's adj-in index
-       * 3 other routes visible by the peer's adj-out index
-       *
-       * 3 there is no hurry in scrubbing, once the struct peer is
-       * removed from bgp->peer, we could just GC such deleted peer's
-       * adj-outs at our leisure.
-       *
-       * 1 and 2 must be 'scrubbed' in some way, at least made
-       * invisible via RIB index before peer session is allowed to be
-       * brought back up. So one needs to know when such a 'search' is
-       * complete.
-       *
-       * Ideally:
-       *
-       * - there'd be a single global queue or a single RIB walker
-       * - rather than tracking which route_nodes still need to be
-       *   examined on a peer basis, we'd track which peers still
-       *   aren't cleared
-       *
-       * Given that our per-peer prefix-counts now should be reliable,
-       * this may actually be achievable. It doesn't seem to be a huge
-       * problem at this time,
-       */
       for (ri = rn->info; ri; ri = ri->next)
-        if (ri->peer == peer)
-          {
-            bgp_lock_node (rn); /* unlocked: bgp_clear_node_queue_del */
-            work_queue_add (peer->clear_node_queue, rn);
-          }
-
+	if (ri->peer == peer)
+	  {
+	    bgp_rib_remove (rn, ri, peer, afi, safi);
+	    break;
+	  }
       for (ain = rn->adj_in; ain; ain = ain->next)
-        if (ain->peer == peer)
-          {
-            bgp_adj_in_remove (rn, ain);
-            bgp_unlock_node (rn);
-            break;
-          }
+	if (ain->peer == peer)
+	  {
+	    bgp_adj_in_remove (rn, ain);
+	    bgp_unlock_node (rn);
+	    break;
+	  }
       for (aout = rn->adj_out; aout; aout = aout->next)
-        if (aout->peer == peer)
-          {
-            bgp_adj_out_remove (rn, aout, peer, afi, safi);
-            bgp_unlock_node (rn);
-            break;
-          }
+	if (aout->peer == peer)
+	  {
+	    bgp_adj_out_remove (rn, aout, peer, afi, safi);
+	    bgp_unlock_node (rn);
+	    break;
+	  }
     }
-  return;
 }
 
 void
@@ -2753,26 +2246,8 @@ bgp_clear_route (struct peer *peer, afi_t afi, safi_t safi)
   struct bgp_node *rn;
   struct bgp_table *table;
   struct peer *rsclient;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  if (peer->clear_node_queue == NULL)
-    bgp_clear_node_queue_init (peer);
-  
-  /* bgp_fsm.c keeps sessions in state Clearing, not transitioning to
-   * Idle until it receives a Clearing_Completed event. This protects
-   * against peers which flap faster than we can we clear, which could
-   * lead to:
-   *
-   * a) race with routes from the new session being installed before
-   *    clear_route_node visits the node (to delete the route of that
-   *    peer)
-   * b) resource exhaustion, clear_route_node likely leads to an entry
-   *    on the process_main queue. Fast-flapping could cause that queue
-   *    to grow and grow.
-   */
-  if (!peer->clear_node_queue->thread)
-    peer_lock (peer); /* bgp_clear_node_complete */
-  
   if (safi != SAFI_MPLS_VPN)
     bgp_clear_route_table (peer, afi, safi, NULL, NULL);
   else
@@ -2781,45 +2256,10 @@ bgp_clear_route (struct peer *peer, afi_t afi, safi_t safi)
       if ((table = rn->info) != NULL)
        bgp_clear_route_table (peer, afi, safi, table, NULL);
 
-  for (ALL_LIST_ELEMENTS (peer->bgp->rsclient, node, nnode, rsclient))
+  LIST_LOOP (peer->bgp->rsclient, rsclient, nn)
     {
       if (CHECK_FLAG(rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
         bgp_clear_route_table (peer, afi, safi, NULL, rsclient);
-    }
-  
-  /* If no routes were cleared, nothing was added to workqueue, the
-   * completion function won't be run by workqueue code - call it here. 
-   * XXX: Actually, this assumption doesn't hold, see
-   * bgp_clear_route_table(), we queue all non-empty nodes.
-   *
-   * Additionally, there is a presumption in FSM that clearing is only
-   * really needed if peer state is Established - peers in
-   * pre-Established states shouldn't have any route-update state
-   * associated with them (in or out).
-   *
-   * We still can get here in pre-Established though, through
-   * peer_delete -> bgp_fsm_change_status, so this is a useful sanity
-   * check to ensure the assumption above holds.
-   *
-   * At some future point, this check could be move to the top of the
-   * function, and do a quick early-return when state is
-   * pre-Established, avoiding above list and table scans. Once we're
-   * sure it is safe..
-   */
-  if (!peer->clear_node_queue->thread)
-    bgp_clear_node_complete (peer->clear_node_queue);
-  else
-    {
-      /* clearing queue scheduled. Normal if in Established state
-       * (and about to transition out of it), but otherwise...
-       */
-      if (peer->status != Established)
-        {
-          plog_err (peer->log, "%s [Error] State %s is not Established,"
-                    " but routes were cleared - bug!",
-                    peer->host, LOOKUP (bgp_status_msg, peer->status));
-          assert (peer->status == Established);
-        }
     }
 }
   
@@ -2852,39 +2292,18 @@ bgp_clear_adj_in (struct peer *peer, afi_t afi, safi_t safi)
           break;
 	}
 }
-
-void
-bgp_clear_stale_route (struct peer *peer, afi_t afi, safi_t safi)
-{
-  struct bgp_node *rn;
-  struct bgp_info *ri;
-  struct bgp_table *table;
-
-  table = peer->bgp->rib[afi][safi];
-
-  for (rn = bgp_table_top (table); rn; rn = bgp_route_next (rn))
-    {
-      for (ri = rn->info; ri; ri = ri->next)
-	if (ri->peer == peer)
-	  {
-	    if (CHECK_FLAG (ri->flags, BGP_INFO_STALE))
-	      bgp_rib_remove (rn, ri, peer, afi, safi);
-	    break;
-	  }
-    }
-}
 
 /* Delete all kernel routes. */
 void
 bgp_cleanup_routes ()
 {
   struct bgp *bgp;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct bgp_node *rn;
   struct bgp_table *table;
   struct bgp_info *ri;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
       table = bgp->rib[AFI_IP][SAFI_UNICAST];
 
@@ -3078,7 +2497,7 @@ bgp_nlri_sanity_check (struct peer *peer, int afi, u_char *pnt,
   return 0;
 }
 
-static struct bgp_static *
+struct bgp_static *
 bgp_static_new ()
 {
   struct bgp_static *new;
@@ -3087,7 +2506,7 @@ bgp_static_new ()
   return new;
 }
 
-static void
+void
 bgp_static_free (struct bgp_static *bgp_static)
 {
   if (bgp_static->rmap.name)
@@ -3095,7 +2514,7 @@ bgp_static_free (struct bgp_static *bgp_static)
   XFREE (MTYPE_BGP_STATIC, bgp_static);
 }
 
-static void
+void
 bgp_static_withdraw_rsclient (struct bgp *bgp, struct peer *rsclient,
         struct prefix *p, afi_t afi, safi_t safi)
 {
@@ -3114,51 +2533,52 @@ bgp_static_withdraw_rsclient (struct bgp *bgp, struct peer *rsclient,
   /* Withdraw static BGP route from routing table. */
   if (ri)
     {
-      bgp_info_delete (rn, ri);
+      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
       bgp_process (bgp, rn, afi, safi);
+      bgp_info_delete (rn, ri);
+      bgp_info_free (ri);
+      bgp_unlock_node (rn);
     }
 
   /* Unlock bgp_node_lookup. */
   bgp_unlock_node (rn);
 }
 
-static void
+void
 bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
-                            struct bgp_static *bgp_static,
-                            afi_t afi, safi_t safi)
+        struct bgp_static *bgp_static, afi_t afi, safi_t safi)
 {
   struct bgp_node *rn;
   struct bgp_info *ri;
   struct bgp_info *new;
   struct bgp_info info;
+  struct attr new_attr;
   struct attr *attr_new;
-  struct attr attr = {0 };
-  struct attr new_attr = { .extra = 0 };
+  struct attr attr;
   struct bgp *bgp;
   int ret;
   char buf[SU_ADDRSTRLEN];
 
   bgp = rsclient->bgp;
 
-  assert (bgp_static);
-  if (!bgp_static)
-    return;
-
   rn = bgp_afi_node_get (rsclient->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
+  if (bgp_static)
+    {
+      attr.nexthop = bgp_static->igpnexthop;
+      attr.med = bgp_static->igpmetric;
+      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
+    }
 
-  attr.nexthop = bgp_static->igpnexthop;
-  attr.med = bgp_static->igpmetric;
-  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
+  new_attr = attr;
 
   /* Apply network route-map for export to this rsclient. */
   if (bgp_static->rmap.name)
     {
-      struct attr attr_tmp = attr;
       info.peer = rsclient;
-      info.attr = &attr_tmp;
-      
+      info.attr = &new_attr;
+
       SET_FLAG (rsclient->rmap_type, PEER_RMAP_TYPE_EXPORT);
       SET_FLAG (rsclient->rmap_type, PEER_RMAP_TYPE_NETWORK);
 
@@ -3169,27 +2589,25 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
       if (ret == RMAP_DENYMATCH)
         {
           /* Free uninterned attribute. */
-          bgp_attr_flush (&attr_tmp);
+          bgp_attr_flush (&new_attr);
 
           /* Unintern original. */
           aspath_unintern (attr.aspath);
           bgp_static_withdraw_rsclient (bgp, rsclient, p, afi, safi);
-          bgp_attr_extra_free (&attr);
-          
+
           return;
         }
-      attr_new = bgp_attr_intern (&attr_tmp);
+      attr_new = bgp_attr_intern (&new_attr);
     }
   else
     attr_new = bgp_attr_intern (&attr);
-  
+
   new_attr = *attr_new;
-  
+
   SET_FLAG (bgp->peer_self->rmap_type, PEER_RMAP_TYPE_NETWORK);
 
-  if (bgp_import_modifier (rsclient, bgp->peer_self, p, &new_attr, afi, safi) 
-        == RMAP_DENY)
-    {
+  if (bgp_import_modifier (rsclient, bgp->peer_self, p, &new_attr, afi, safi) == RMAP_DENY)
+{
       /* This BGP update is filtered.  Log the reason then update BGP entry.  */
       if (BGP_DEBUG (update, UPDATE_IN))
               zlog (rsclient->log, LOG_DEBUG,
@@ -3201,12 +2619,11 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
 
       bgp_attr_unintern (attr_new);
       aspath_unintern (attr.aspath);
-      bgp_attr_extra_free (&attr);
 
       bgp_static_withdraw_rsclient (bgp, rsclient, p, afi, safi);
       
       return;
-    }
+	}
 
   bgp->peer_self->rmap_type = 0;
 
@@ -3220,23 +2637,19 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
 
   if (ri)
        {
-      if (attrhash_cmp (ri->attr, attr_new) &&
-	  !CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
+      if (attrhash_cmp (ri->attr, attr_new))
         {
           bgp_unlock_node (rn);
           bgp_attr_unintern (attr_new);
           aspath_unintern (attr.aspath);
-          bgp_attr_extra_free (&attr);
           return;
        }
       else
         {
           /* The attribute is changed. */
-          bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+          SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 
           /* Rewrite BGP route information. */
-	  if (CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
-	    bgp_info_restore(rn, ri);
           bgp_attr_unintern (ri->attr);
           ri->attr = attr_new;
           ri->uptime = time (NULL);
@@ -3245,11 +2658,10 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
           bgp_process (bgp, rn, afi, safi);
           bgp_unlock_node (rn);
           aspath_unintern (attr.aspath);
-          bgp_attr_extra_free (&attr);
           return;
-        }
     }
-  
+}
+
   /* Make new BGP info. */
   new = bgp_info_new ();
   new->type = ZEBRA_ROUTE_BGP;
@@ -3261,19 +2673,15 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
 
   /* Register new BGP information. */
   bgp_info_add (rn, new);
-  
-  /* route_node_get lock */
-  bgp_unlock_node (rn);
-  
+
   /* Process change. */
   bgp_process (bgp, rn, afi, safi);
 
   /* Unintern original. */
   aspath_unintern (attr.aspath);
-  bgp_attr_extra_free (&attr);
 }
 
-static void
+void
 bgp_static_update_main (struct bgp *bgp, struct prefix *p,
 		   struct bgp_static *bgp_static, afi_t afi, safi_t safi)
 {
@@ -3281,26 +2689,25 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   struct bgp_info *ri;
   struct bgp_info *new;
   struct bgp_info info;
-  struct attr attr = { 0 };
+  struct attr attr;
+  struct attr attr_tmp;
   struct attr *attr_new;
   int ret;
-
-  assert (bgp_static);
-  if (!bgp_static)
-    return;
 
   rn = bgp_afi_node_get (bgp->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
-  
-  attr.nexthop = bgp_static->igpnexthop;
-  attr.med = bgp_static->igpmetric;
-  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
+  if (bgp_static)
+    {
+      attr.nexthop = bgp_static->igpnexthop;
+      attr.med = bgp_static->igpmetric;
+      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
+    }
 
   /* Apply route-map. */
   if (bgp_static->rmap.name)
     {
-      struct attr attr_tmp = attr;
+      attr_tmp = attr;
       info.peer = bgp->peer_self;
       info.attr = &attr_tmp;
 
@@ -3317,7 +2724,6 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
 
 	  /* Unintern original. */
 	  aspath_unintern (attr.aspath);
-	  bgp_attr_extra_free (&attr);
 	  bgp_static_withdraw (bgp, p, afi, safi);
 	  return;
 	}
@@ -3333,25 +2739,20 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
 
   if (ri)
     {
-      if (attrhash_cmp (ri->attr, attr_new) &&
-	  !CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
+      if (attrhash_cmp (ri->attr, attr_new))
 	{
 	  bgp_unlock_node (rn);
 	  bgp_attr_unintern (attr_new);
 	  aspath_unintern (attr.aspath);
-	  bgp_attr_extra_free (&attr);
 	  return;
 	}
       else
 	{
 	  /* The attribute is changed. */
-	  bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+	  SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 
 	  /* Rewrite BGP route information. */
-	  if (CHECK_FLAG(ri->flags, BGP_INFO_REMOVED))
-	    bgp_info_restore(rn, ri);
-	  else
-	    bgp_aggregate_decrement (bgp, p, ri, afi, safi);
+	  bgp_aggregate_decrement (bgp, p, ri, afi, safi);
 	  bgp_attr_unintern (ri->attr);
 	  ri->attr = attr_new;
 	  ri->uptime = time (NULL);
@@ -3361,7 +2762,6 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
 	  bgp_process (bgp, rn, afi, safi);
 	  bgp_unlock_node (rn);
 	  aspath_unintern (attr.aspath);
-	  bgp_attr_extra_free (&attr);
 	  return;
 	}
     }
@@ -3380,16 +2780,12 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   
   /* Register new BGP information. */
   bgp_info_add (rn, new);
-  
-  /* route_node_get lock */
-  bgp_unlock_node (rn);
-  
+
   /* Process change. */
   bgp_process (bgp, rn, afi, safi);
 
   /* Unintern original. */
   aspath_unintern (attr.aspath);
-  bgp_attr_extra_free (&attr);
 }
 
 void
@@ -3397,24 +2793,23 @@ bgp_static_update (struct bgp *bgp, struct prefix *p,
                   struct bgp_static *bgp_static, afi_t afi, safi_t safi)
 {
   struct peer *rsclient;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   bgp_static_update_main (bgp, p, bgp_static, afi, safi);
 
-  for (ALL_LIST_ELEMENTS (bgp->rsclient, node, nnode, rsclient))
+  LIST_LOOP(bgp->rsclient, rsclient, nn)
     {
-      if (CHECK_FLAG (rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
-        bgp_static_update_rsclient (rsclient, p, bgp_static, afi, safi);
+      bgp_static_update_rsclient (rsclient, p, bgp_static, afi, safi);
     }
 }
 
-static void
+void
 bgp_static_update_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
 			 u_char safi, struct prefix_rd *prd, u_char *tag)
 {
   struct bgp_node *rn;
   struct bgp_info *new;
-  
+
   rn = bgp_afi_node_get (bgp->rib[afi][safi], afi, safi, p, prd);
 
   /* Make new BGP info. */
@@ -3425,18 +2820,14 @@ bgp_static_update_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
   new->attr = bgp_attr_default_intern (BGP_ORIGIN_IGP);
   SET_FLAG (new->flags, BGP_INFO_VALID);
   new->uptime = time (NULL);
-  new->extra = bgp_info_extra_new();
-  memcpy (new->extra->tag, tag, 3);
+  memcpy (new->tag, tag, 3);
 
   /* Aggregate address increment. */
-  bgp_aggregate_increment (bgp, p, new, afi, safi);
+  bgp_aggregate_increment (bgp, p, (struct bgp_info *) new, afi, safi);
   
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
+  bgp_info_add (rn, (struct bgp_info *) new);
 
-  /* route_node_get lock */
-  bgp_unlock_node (rn);
-  
   /* Process change. */
   bgp_process (bgp, rn, afi, safi);
 }
@@ -3461,8 +2852,11 @@ bgp_static_withdraw (struct bgp *bgp, struct prefix *p, afi_t afi,
   if (ri)
     {
       bgp_aggregate_decrement (bgp, p, ri, afi, safi);
-      bgp_info_delete (rn, ri);
+      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
       bgp_process (bgp, rn, afi, safi);
+      bgp_info_delete (rn, ri);
+      bgp_info_free (ri);
+      bgp_unlock_node (rn);
     }
 
   /* Unlock bgp_node_lookup. */
@@ -3489,7 +2883,7 @@ bgp_check_local_routes_rsclient (struct peer *rsclient, afi_t afi, safi_t safi)
       }
 }
 
-static void
+void
 bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
 			   u_char safi, struct prefix_rd *prd, u_char *tag)
 {
@@ -3509,8 +2903,11 @@ bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
   if (ri)
     {
       bgp_aggregate_decrement (bgp, p, ri, afi, safi);
-      bgp_info_delete (rn, ri);
+      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
       bgp_process (bgp, rn, afi, safi);
+      bgp_info_delete (rn, ri);
+      bgp_info_free (ri);
+      bgp_unlock_node (rn);
     }
 
   /* Unlock bgp_node_lookup. */
@@ -3519,7 +2916,7 @@ bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
 
 /* Configure static BGP network.  When user don't run zebra, static
    route should be installed as valid.  */
-static int
+int
 bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str, 
                 u_int16_t afi, u_char safi, const char *rmap, int backdoor)
 {
@@ -3611,7 +3008,7 @@ bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
 }
 
 /* Configure static BGP network. */
-static int
+int
 bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
 		  u_int16_t afi, u_char safi)
 {
@@ -3746,7 +3143,7 @@ bgp_static_set_vpnv4 (struct vty *vty, const char *ip_str, const char *rd_str,
   prn = bgp_node_get (bgp->route[AFI_IP][SAFI_MPLS_VPN],
 			(struct prefix *)&prd);
   if (prn->info == NULL)
-    prn->info = bgp_table_init (AFI_IP, SAFI_MPLS_VPN);
+    prn->info = bgp_table_init ();
   else
     bgp_unlock_node (prn);
   table = prn->info;
@@ -3815,7 +3212,7 @@ bgp_static_unset_vpnv4 (struct vty *vty, const char *ip_str,
   prn = bgp_node_get (bgp->route[AFI_IP][SAFI_MPLS_VPN],
 			(struct prefix *)&prd);
   if (prn->info == NULL)
-    prn->info = bgp_table_init (AFI_IP, SAFI_MPLS_VPN);
+    prn->info = bgp_table_init ();
   else
     bgp_unlock_node (prn);
   table = prn->info;
@@ -4197,7 +3594,7 @@ struct bgp_aggregate
   safi_t safi;
 };
 
-static struct bgp_aggregate *
+struct bgp_aggregate *
 bgp_aggregate_new ()
 {
   struct bgp_aggregate *new;
@@ -4206,13 +3603,13 @@ bgp_aggregate_new ()
   return new;
 }
 
-static void
+void
 bgp_aggregate_free (struct bgp_aggregate *aggregate)
 {
   XFREE (MTYPE_BGP_AGGREGATE, aggregate);
 }     
 
-static void
+void
 bgp_aggregate_route (struct bgp *bgp, struct prefix *p, struct bgp_info *rinew,
 		     afi_t afi, safi_t safi, struct bgp_info *del, 
 		     struct bgp_aggregate *aggregate)
@@ -4290,8 +3687,8 @@ bgp_aggregate_route (struct bgp *bgp, struct prefix *p, struct bgp_info *rinew,
 	      {
 		if (aggregate->summary_only)
 		  {
-		    (bgp_info_extra_get (ri))->suppress++;
-		    bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+		    ri->suppress++;
+		    SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 		    match++;
 		  }
 
@@ -4336,7 +3733,7 @@ bgp_aggregate_route (struct bgp *bgp, struct prefix *p, struct bgp_info *rinew,
       aggregate->count++;
       
       if (aggregate->summary_only)
-        (bgp_info_extra_get (rinew))->suppress++;
+	rinew->suppress++;
 
       if (aggregate->as_set)
 	{
@@ -4379,7 +3776,6 @@ bgp_aggregate_route (struct bgp *bgp, struct prefix *p, struct bgp_info *rinew,
       new->uptime = time (NULL);
 
       bgp_info_add (rn, new);
-      bgp_unlock_node (rn);
       bgp_process (bgp, rn, afi, safi);
     }
   else
@@ -4451,7 +3847,7 @@ bgp_aggregate_decrement (struct bgp *bgp, struct prefix *p,
   bgp_unlock_node (child);
 }
 
-static void
+void
 bgp_aggregate_add (struct bgp *bgp, struct prefix *p, afi_t afi, safi_t safi,
 		   struct bgp_aggregate *aggregate)
 {
@@ -4493,8 +3889,8 @@ bgp_aggregate_add (struct bgp *bgp, struct prefix *p, afi_t afi, safi_t safi,
 		   route announcement.  */
 		if (aggregate->summary_only)
 		  {
-		    (bgp_info_extra_get (ri))->suppress++;
-		    bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+		    ri->suppress++;
+		    SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 		    match++;
 		  }
 		/* as-set aggregate route generate origin, as path,
@@ -4550,8 +3946,7 @@ bgp_aggregate_add (struct bgp *bgp, struct prefix *p, afi_t afi, safi_t safi,
       new->uptime = time (NULL);
 
       bgp_info_add (rn, new);
-      bgp_unlock_node (rn);
-      
+
       /* Process change. */
       bgp_process (bgp, rn, afi, safi);
     }
@@ -4588,13 +3983,13 @@ bgp_aggregate_delete (struct bgp *bgp, struct prefix *p, afi_t afi,
 
 	    if (ri->sub_type != BGP_ROUTE_AGGREGATE)
 	      {
-		if (aggregate->summary_only && ri->extra)
+		if (aggregate->summary_only)
 		  {
-		    ri->extra->suppress--;
+		    ri->suppress--;
 
-		    if (ri->extra->suppress == 0)
+		    if (ri->suppress == 0)
 		      {
-			bgp_info_set_flag (rn, ri, BGP_INFO_ATTR_CHANGED);
+			SET_FLAG (ri->flags, BGP_INFO_ATTR_CHANGED);
 			match++;
 		      }
 		  }
@@ -4602,7 +3997,7 @@ bgp_aggregate_delete (struct bgp *bgp, struct prefix *p, afi_t afi,
 	      }
 	  }
 
-	/* If this node was suppressed, process the change. */
+	/* If this node is suppressed, process the change. */
 	if (match)
 	  bgp_process (bgp, rn, afi, safi);
       }
@@ -4620,8 +4015,11 @@ bgp_aggregate_delete (struct bgp *bgp, struct prefix *p, afi_t afi,
   /* Withdraw static BGP route from routing table. */
   if (ri)
     {
-      bgp_info_delete (rn, ri);
+      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
       bgp_process (bgp, rn, afi, safi);
+      bgp_info_delete (rn, ri);
+      bgp_info_free (ri);
+      bgp_unlock_node (rn);
     }
 
   /* Unlock bgp_node_lookup. */
@@ -4632,7 +4030,7 @@ bgp_aggregate_delete (struct bgp *bgp, struct prefix *p, afi_t afi,
 #define AGGREGATE_SUMMARY_ONLY 1
 #define AGGREGATE_AS_SET       1
 
-static int
+int
 bgp_aggregate_set (struct vty *vty, const char *prefix_str, 
                    afi_t afi, safi_t safi,
 		   u_char summary_only, u_char as_set)
@@ -4681,7 +4079,7 @@ bgp_aggregate_set (struct vty *vty, const char *prefix_str,
   return CMD_SUCCESS;
 }
 
-static int
+int
 bgp_aggregate_unset (struct vty *vty, const char *prefix_str, 
                      afi_t afi, safi_t safi)
 {
@@ -5069,13 +4467,13 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
 		      u_int32_t metric, u_char type)
 {
   struct bgp *bgp;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct bgp_info *new;
   struct bgp_info *bi;
   struct bgp_info info;
   struct bgp_node *bn;
-  struct attr attr = { 0 };
-  struct attr attr_new = { 0 };
+  struct attr attr;
+  struct attr attr_new;
   struct attr *new_attr;
   afi_t afi;
   int ret;
@@ -5088,14 +4486,14 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
   attr.med = metric;
   attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
       afi = family2afi (p->family);
 
       if (bgp->redist[afi][type])
 	{
 	  /* Copy attribute for modification. */
-	  bgp_attr_dup (&attr_new, &attr);
+	  attr_new = attr;
 
 	  if (bgp->redist_metric_flag[afi][type])
 	    attr_new.med = bgp->redist_metric[afi][type];
@@ -5117,22 +4515,17 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
 		{
 		  /* Free uninterned attribute. */
 		  bgp_attr_flush (&attr_new);
-		  bgp_attr_extra_free (&attr_new);
-		  
+
 		  /* Unintern original. */
 		  aspath_unintern (attr.aspath);
-		  bgp_attr_extra_free (&attr);
 		  bgp_redistribute_delete (p, type);
 		  return;
 		}
 	    }
 
-          bn = bgp_afi_node_get (bgp->rib[afi][SAFI_UNICAST], 
-                                 afi, SAFI_UNICAST, p, NULL);
-          
+         bn = bgp_afi_node_get (bgp->rib[afi][SAFI_UNICAST], afi, SAFI_UNICAST, p, NULL);
 	  new_attr = bgp_attr_intern (&attr_new);
-	  bgp_attr_extra_free (&attr_new);
-	  
+ 
  	  for (bi = bn->info; bi; bi = bi->next)
  	    if (bi->peer == bgp->peer_self
  		&& bi->sub_type == BGP_ROUTE_REDISTRIBUTE)
@@ -5140,25 +4533,20 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
  
  	  if (bi)
  	    {
- 	      if (attrhash_cmp (bi->attr, new_attr) &&
-		  !CHECK_FLAG(bi->flags, BGP_INFO_REMOVED))
+ 	      if (attrhash_cmp (bi->attr, new_attr))
  		{
  		  bgp_attr_unintern (new_attr);
  		  aspath_unintern (attr.aspath);
- 		  bgp_attr_extra_free (&attr);
  		  bgp_unlock_node (bn);
  		  return;
  		}
  	      else
  		{
  		  /* The attribute is changed. */
- 		  bgp_info_set_flag (bn, bi, BGP_INFO_ATTR_CHANGED);
+ 		  SET_FLAG (bi->flags, BGP_INFO_ATTR_CHANGED);
  
  		  /* Rewrite BGP route information. */
-		  if (CHECK_FLAG(bi->flags, BGP_INFO_REMOVED))
-		    bgp_info_restore(bn, bi);
-		  else
-		    bgp_aggregate_decrement (bgp, p, bi, afi, SAFI_UNICAST);
+ 		  bgp_aggregate_decrement (bgp, p, bi, afi, SAFI_UNICAST);
  		  bgp_attr_unintern (bi->attr);
  		  bi->attr = new_attr;
  		  bi->uptime = time (NULL);
@@ -5168,7 +4556,6 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
  		  bgp_process (bgp, bn, afi, SAFI_UNICAST);
  		  bgp_unlock_node (bn);
  		  aspath_unintern (attr.aspath);
- 		  bgp_attr_extra_free (&attr);
  		  return;
  		} 
  	    }
@@ -5183,26 +4570,24 @@ bgp_redistribute_add (struct prefix *p, struct in_addr *nexthop,
 
 	  bgp_aggregate_increment (bgp, p, new, afi, SAFI_UNICAST);
 	  bgp_info_add (bn, new);
-	  bgp_unlock_node (bn);
 	  bgp_process (bgp, bn, afi, SAFI_UNICAST);
 	}
     }
 
   /* Unintern original. */
   aspath_unintern (attr.aspath);
-  bgp_attr_extra_free (&attr);
 }
 
 void
 bgp_redistribute_delete (struct prefix *p, u_char type)
 {
   struct bgp *bgp;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   afi_t afi;
   struct bgp_node *rn;
   struct bgp_info *ri;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
       afi = family2afi (p->family);
 
@@ -5218,8 +4603,11 @@ bgp_redistribute_delete (struct prefix *p, u_char type)
 	  if (ri)
 	    {
 	      bgp_aggregate_decrement (bgp, p, ri, afi, SAFI_UNICAST);
-	      bgp_info_delete (rn, ri);
+	      UNSET_FLAG (ri->flags, BGP_INFO_VALID);
 	      bgp_process (bgp, rn, afi, SAFI_UNICAST);
+	      bgp_info_delete (rn, ri);
+	      bgp_info_free (ri);
+	      bgp_unlock_node (rn);
 	    }
 	  bgp_unlock_node (rn);
 	}
@@ -5246,14 +4634,17 @@ bgp_redistribute_withdraw (struct bgp *bgp, afi_t afi, int type)
       if (ri)
 	{
 	  bgp_aggregate_decrement (bgp, &rn->p, ri, afi, SAFI_UNICAST);
-	  bgp_info_delete (rn, ri);
+	  UNSET_FLAG (ri->flags, BGP_INFO_VALID);
 	  bgp_process (bgp, rn, afi, SAFI_UNICAST);
+	  bgp_info_delete (rn, ri);
+	  bgp_info_free (ri);
+	  bgp_unlock_node (rn);
 	}
     }
 }
 
 /* Static function to display route. */
-static void
+void
 route_vty_out_route (struct prefix *p, struct vty *vty)
 {
   int len;
@@ -5291,16 +4682,15 @@ enum bgp_display_type
   normal_list,
 };
 
-/* Print the short form route status for a bgp_info */
-static void
-route_vty_short_status_out (struct vty *vty, struct bgp_info *binfo)
+/* called from terminal list command */
+void
+route_vty_out (struct vty *vty, struct prefix *p,
+	       struct bgp_info *binfo, int display, safi_t safi)
 {
- /* Route status display. */
-  if (CHECK_FLAG (binfo->flags, BGP_INFO_REMOVED))
-    vty_out (vty, "R");
-  else if (CHECK_FLAG (binfo->flags, BGP_INFO_STALE))
-    vty_out (vty, "S");
-  else if (binfo->extra && binfo->extra->suppress)
+  struct attr *attr;
+
+  /* Route status display. */
+  if (binfo->suppress)
     vty_out (vty, "s");
   else if (! CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
     vty_out (vty, "*");
@@ -5321,18 +4711,7 @@ route_vty_short_status_out (struct vty *vty, struct bgp_info *binfo)
     if ((binfo->peer->as) && (binfo->peer->as == binfo->peer->local_as))
       vty_out (vty, "i");
     else
-      vty_out (vty, " "); 
-}
-
-/* called from terminal list command */
-void
-route_vty_out (struct vty *vty, struct prefix *p,
-	       struct bgp_info *binfo, int display, safi_t safi)
-{
-  struct attr *attr;
-  
-  /* short status lead text */ 
-  route_vty_short_status_out (vty, binfo);
+      vty_out (vty, " ");
   
   /* print prefix and mask */
   if (! display)
@@ -5347,8 +4726,7 @@ route_vty_out (struct vty *vty, struct prefix *p,
       if (p->family == AF_INET)
 	{
 	  if (safi == SAFI_MPLS_VPN)
-	    vty_out (vty, "%-16s",
-                     inet_ntoa (attr->extra->mp_nexthop_global_in));
+	    vty_out (vty, "%-16s", inet_ntoa (attr->mp_nexthop_global_in));
 	  else
 	    vty_out (vty, "%-16s", inet_ntoa (attr->nexthop));
 	}
@@ -5359,8 +4737,7 @@ route_vty_out (struct vty *vty, struct prefix *p,
 	  char buf[BUFSIZ];
 
 	  len = vty_out (vty, "%s", 
-			 inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global,
-			 buf, BUFSIZ));
+			 inet_ntop (AF_INET6, &attr->mp_nexthop_global, buf, BUFSIZ));
 	  len = 16 - len;
 	  if (len < 1)
 	    vty_out (vty, "%s%*s", VTY_NEWLINE, 36, " ");
@@ -5379,15 +4756,18 @@ route_vty_out (struct vty *vty, struct prefix *p,
       else
 	vty_out (vty, "       ");
 
-      vty_out (vty, "%7u ", (attr->extra ? attr->extra->weight : 0));
+      vty_out (vty, "%7u ",attr->weight);
     
-      /* Print aspath */
-      if (attr->aspath)
-        aspath_print_vty (vty, "%s ", attr->aspath);
+    /* Print aspath */
+    if (attr->aspath)
+      aspath_print_vty (vty, attr->aspath);
 
-      /* Print origin */
+    /* Print origin */
+    if (strlen (attr->aspath->str) == 0)
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    }
+    else
+      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+  }
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
 
@@ -5410,8 +4790,7 @@ route_vty_out_tmp (struct vty *vty, struct prefix *p,
       if (p->family == AF_INET)
 	{
 	  if (safi == SAFI_MPLS_VPN)
-	    vty_out (vty, "%-16s",
-                     inet_ntoa (attr->extra->mp_nexthop_global_in));
+	    vty_out (vty, "%-16s", inet_ntoa (attr->mp_nexthop_global_in));
 	  else
 	    vty_out (vty, "%-16s", inet_ntoa (attr->nexthop));
 	}
@@ -5420,12 +4799,9 @@ route_vty_out_tmp (struct vty *vty, struct prefix *p,
         {
           int len;
           char buf[BUFSIZ];
-          
-          assert (attr->extra);
 
           len = vty_out (vty, "%s",
-                         inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global,
-                         buf, BUFSIZ));
+                         inet_ntop (AF_INET6, &attr->mp_nexthop_global, buf, BUFSIZ));
           len = 16 - len;
           if (len < 1)
             vty_out (vty, "%s%*s", VTY_NEWLINE, 36, " ");
@@ -5443,16 +4819,19 @@ route_vty_out_tmp (struct vty *vty, struct prefix *p,
 	vty_out (vty, "%7d", attr->local_pref);
       else
 	vty_out (vty, "       ");
-      
-      vty_out (vty, "%7d ", (attr->extra ? attr->extra->weight : 0));
-      
-      /* Print aspath */
-      if (attr->aspath)
-        aspath_print_vty (vty, "%s ", attr->aspath);
 
-      /* Print origin */
+      vty_out (vty, "%7d ",attr->weight);
+    
+    /* Print aspath */
+    if (attr->aspath)
+      aspath_print_vty (vty, attr->aspath);
+
+    /* Print origin */
+    if (strlen (attr->aspath->str) == 0)
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    }
+    else
+      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+  }
 
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
@@ -5463,13 +4842,31 @@ route_vty_out_tag (struct vty *vty, struct prefix *p,
 {
   struct attr *attr;
   u_int32_t label = 0;
-  
-  if (!binfo->extra)
-    return;
-  
-  /* short status lead text */ 
-  route_vty_short_status_out (vty, binfo);
-    
+
+  /* Route status display. */
+  if (binfo->suppress)
+    vty_out (vty, "s");
+  else if (! CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "*");
+  else
+    vty_out (vty, " ");
+
+  /* Selected */
+  if (CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "h");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
+    vty_out (vty, "d");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_SELECTED))
+    vty_out (vty, ">");
+  else
+    vty_out (vty, " ");
+
+  /* Internal route. */
+    if ((binfo->peer->as) && (binfo->peer->as == binfo->peer->local_as))
+      vty_out (vty, "i");
+    else
+      vty_out (vty, " ");
+
   /* print prefix and mask */
   if (! display)
     route_vty_out_route (p, vty);
@@ -5483,33 +4880,28 @@ route_vty_out_tag (struct vty *vty, struct prefix *p,
       if (p->family == AF_INET)
 	{
 	  if (safi == SAFI_MPLS_VPN)
-	    vty_out (vty, "%-16s",
-                     inet_ntoa (attr->extra->mp_nexthop_global_in));
+	    vty_out (vty, "%-16s", inet_ntoa (attr->mp_nexthop_global_in));
 	  else
 	    vty_out (vty, "%-16s", inet_ntoa (attr->nexthop));
 	}
 #ifdef HAVE_IPV6      
       else if (p->family == AF_INET6)
 	{
-	  assert (attr->extra);
 	  char buf[BUFSIZ];
 	  char buf1[BUFSIZ];
-	  if (attr->extra->mp_nexthop_len == 16)
+	  if (attr->mp_nexthop_len == 16)
 	    vty_out (vty, "%s", 
-		     inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global,
-                     buf, BUFSIZ));
-	  else if (attr->extra->mp_nexthop_len == 32)
+		     inet_ntop (AF_INET6, &attr->mp_nexthop_global, buf, BUFSIZ));
+	  else if (attr->mp_nexthop_len == 32)
 	    vty_out (vty, "%s(%s)",
-		     inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global,
-		                buf, BUFSIZ),
-		     inet_ntop (AF_INET6, &attr->extra->mp_nexthop_local,
-		                buf1, BUFSIZ));
+		     inet_ntop (AF_INET6, &attr->mp_nexthop_global, buf, BUFSIZ),
+		     inet_ntop (AF_INET6, &attr->mp_nexthop_local, buf1, BUFSIZ));
 	  
 	}
 #endif /* HAVE_IPV6 */
     }
 
-  label = decode_label (binfo->extra->tag);
+  label = decode_label (binfo->tag);
 
   vty_out (vty, "notag/%d", label);
 
@@ -5524,9 +4916,26 @@ damp_route_vty_out (struct vty *vty, struct prefix *p,
   struct attr *attr;
   int len;
 
-  /* short status lead text */ 
-  route_vty_short_status_out (vty, binfo);
-  
+  /* Route status display. */
+  if (binfo->suppress)
+    vty_out (vty, "s");
+  else if (! CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "*");
+  else
+    vty_out (vty, " ");
+
+  /* Selected */
+  if (CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "h");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
+    vty_out (vty, "d");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_SELECTED))
+    vty_out (vty, ">");
+  else
+    vty_out (vty, " ");
+
+  vty_out (vty, " ");
+
   /* print prefix and mask */
   if (! display)
     route_vty_out_route (p, vty);
@@ -5548,10 +4957,13 @@ damp_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, "%s ", attr->aspath);
+	aspath_print_vty (vty, attr->aspath);
 
       /* Print origin */
-      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
+      if (strlen (attr->aspath->str) == 0)
+	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
+      else
+	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
@@ -5567,15 +4979,29 @@ flap_route_vty_out (struct vty *vty, struct prefix *p,
   struct bgp_damp_info *bdi;
   char timebuf[BGP_UPTIME_LEN];
   int len;
-  
-  if (!binfo->extra)
-    return;
-  
-  bdi = binfo->extra->damp_info;
 
-  /* short status lead text */
-  route_vty_short_status_out (vty, binfo);
-  
+  bdi = binfo->damp_info;
+
+  /* Route status display. */
+  if (binfo->suppress)
+    vty_out (vty, "s");
+  else if (! CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "*");
+  else
+    vty_out (vty, " ");
+
+  /* Selected */
+  if (CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+    vty_out (vty, "h");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
+    vty_out (vty, "d");
+  else if (CHECK_FLAG (binfo->flags, BGP_INFO_SELECTED))
+    vty_out (vty, ">");
+  else
+    vty_out (vty, " ");
+
+  vty_out (vty, " ");
+
   /* print prefix and mask */
   if (! display)
     route_vty_out_route (p, vty);
@@ -5611,15 +5037,18 @@ flap_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, "%s ", attr->aspath);
+	aspath_print_vty (vty, attr->aspath);
 
       /* Print origin */
-      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
+      if (strlen (attr->aspath->str) == 0)
+	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
+      else
+	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
 
-static void
+void
 route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p, 
 		      struct bgp_info *binfo, afi_t afi, safi_t safi)
 {
@@ -5636,43 +5065,46 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
       if (attr->aspath)
 	{
 	  vty_out (vty, "  ");
-	  if (aspath_count_hops (attr->aspath) == 0)
+	  if (attr->aspath->length == 0)
 	    vty_out (vty, "Local");
 	  else
-	    aspath_print_vty (vty, "%s", attr->aspath);
+	    aspath_print_vty (vty, attr->aspath);
 	}
 
-      if (CHECK_FLAG (binfo->flags, BGP_INFO_REMOVED))
-        vty_out (vty, ", (removed)");
-      if (CHECK_FLAG (binfo->flags, BGP_INFO_STALE))
-	vty_out (vty, ", (stale)");
-      if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR)))
-	vty_out (vty, ", (aggregated by %d %s)", 
-	         attr->extra->aggregator_as,
-		 inet_ntoa (attr->extra->aggregator_addr));
-      if (CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_REFLECTOR_CLIENT))
-	vty_out (vty, ", (Received from a RR-client)");
-      if (CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
-	vty_out (vty, ", (Received from a RS-client)");
-      if (CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
-	vty_out (vty, ", (history entry)");
-      else if (CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
-	vty_out (vty, ", (suppressed due to dampening)");
+      if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR)
+	  || CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_REFLECTOR_CLIENT)
+	  || CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)
+	  || CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY)
+	  || CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
+	{
+	  vty_out (vty, ",");
+
+	  if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR))
+	    vty_out (vty, " (aggregated by %d %s)", attr->aggregator_as,
+		     inet_ntoa (attr->aggregator_addr));
+	  if (CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_REFLECTOR_CLIENT))
+	    vty_out (vty, " (Received from a RR-client)");
+	  if (CHECK_FLAG (binfo->peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
+	    vty_out (vty, " (Received from a RS-client)");
+	  if (CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
+	    vty_out (vty, " (history entry)");
+	  else if (CHECK_FLAG (binfo->flags, BGP_INFO_DAMPED))
+	    vty_out (vty, " (suppressed due to dampening)");
+	}
       vty_out (vty, "%s", VTY_NEWLINE);
 	  
       /* Line2 display Next-hop, Neighbor, Router-id */
       if (p->family == AF_INET)
 	{
 	  vty_out (vty, "    %s", safi == SAFI_MPLS_VPN ?
-		   inet_ntoa (attr->extra->mp_nexthop_global_in) :
+		   inet_ntoa (attr->mp_nexthop_global_in) :
 		   inet_ntoa (attr->nexthop));
 	}
 #ifdef HAVE_IPV6
       else
 	{
-	  assert (attr->extra);
 	  vty_out (vty, "    %s",
-		   inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global,
+		   inet_ntop (AF_INET6, &attr->mp_nexthop_global,
 			      buf, INET6_ADDRSTRLEN));
 	}
 #endif /* HAVE_IPV6 */
@@ -5687,11 +5119,11 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 	{
 	  if (! CHECK_FLAG (binfo->flags, BGP_INFO_VALID))
 	    vty_out (vty, " (inaccessible)"); 
-	  else if (binfo->extra && binfo->extra->igpmetric)
-	    vty_out (vty, " (metric %d)", binfo->extra->igpmetric);
+	  else if (binfo->igpmetric)
+	    vty_out (vty, " (metric %d)", binfo->igpmetric);
 	  vty_out (vty, " from %s", sockunion2str (&binfo->peer->su, buf, SU_ADDRSTRLEN));
 	  if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-	    vty_out (vty, " (%s)", inet_ntoa (attr->extra->originator_id));
+	    vty_out (vty, " (%s)", inet_ntoa (attr->originator_id));
 	  else
 	    vty_out (vty, " (%s)", inet_ntop (AF_INET, &binfo->peer->remote_id, buf1, BUFSIZ));
 	}
@@ -5699,10 +5131,10 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 
 #ifdef HAVE_IPV6
       /* display nexthop local */
-      if (attr->extra && attr->extra->mp_nexthop_len == 32)
+      if (attr->mp_nexthop_len == 32)
 	{
 	  vty_out (vty, "    (%s)%s",
-		   inet_ntop (AF_INET6, &attr->extra->mp_nexthop_local,
+		   inet_ntop (AF_INET6, &attr->mp_nexthop_local,
 			      buf, INET6_ADDRSTRLEN),
 		   VTY_NEWLINE);
 	}
@@ -5719,8 +5151,8 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
       else
 	vty_out (vty, ", localpref %d", bgp->default_local_pref);
 
-      if (attr->extra && attr->extra->weight != 0)
-	vty_out (vty, ", weight %d", attr->extra->weight);
+      if (attr->weight != 0)
+	vty_out (vty, ", weight %d", attr->weight);
 	
       if (! CHECK_FLAG (binfo->flags, BGP_INFO_HISTORY))
 	vty_out (vty, ", valid");
@@ -5755,30 +5187,27 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 	  
       /* Line 5 display Extended-community */
       if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_EXT_COMMUNITIES))
-	vty_out (vty, "      Extended Community: %s%s", 
-	         attr->extra->ecommunity->str, VTY_NEWLINE);
+	vty_out (vty, "      Extended Community: %s%s", attr->ecommunity->str,
+		 VTY_NEWLINE);
 	  
       /* Line 6 display Originator, Cluster-id */
       if ((attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID)) ||
 	  (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_CLUSTER_LIST)))
 	{
-	  assert (attr->extra);
 	  if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-	    vty_out (vty, "      Originator: %s", 
-	             inet_ntoa (attr->extra->originator_id));
+	    vty_out (vty, "      Originator: %s", inet_ntoa (attr->originator_id));
 
 	  if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_CLUSTER_LIST))
 	    {
 	      int i;
 	      vty_out (vty, ", Cluster list: ");
-	      for (i = 0; i < attr->extra->cluster->length / 4; i++)
-		vty_out (vty, "%s ", 
-		         inet_ntoa (attr->extra->cluster->list[i]));
+	      for (i = 0; i < attr->cluster->length / 4; i++)
+		vty_out (vty, "%s ", inet_ntoa (attr->cluster->list[i]));
 	    }
 	  vty_out (vty, "%s", VTY_NEWLINE);
 	}
 
-      if (binfo->extra && binfo->extra->damp_info)
+      if (binfo->damp_info)
 	bgp_damp_info_vty (vty, binfo);
 
       /* Line 7 display Uptime */
@@ -5787,8 +5216,6 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
 
-#define BGP_SHOW_SCODE_HEADER "Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,%s              r RIB-failure, S Stale, R Removed%s"
-#define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s"
 #define BGP_SHOW_HEADER "   Network          Next Hop            Metric LocPrf Weight Path%s"
 #define BGP_SHOW_DAMP_HEADER "   Network          From             Reuse    Path%s"
 #define BGP_SHOW_FLAP_HEADER "   Network          From            Flaps Duration Reuse    Path%s"
@@ -5856,7 +5283,7 @@ bgp_show_table (struct vty *vty, struct bgp_table *table, struct in_addr *router
 		|| type == bgp_show_type_dampend_paths
 		|| type == bgp_show_type_damp_neighbor)
 	      {
-		if (!(ri->extra && ri->extra->damp_info))
+		if (! ri->damp_info)
 		  continue;
 	      }
 	    if (type == bgp_show_type_regexp
@@ -5891,14 +5318,12 @@ bgp_show_table (struct vty *vty, struct bgp_table *table, struct in_addr *router
 		struct attr dummy_attr; 
 		int ret;
 
-		bgp_attr_dup (&dummy_attr, ri->attr);
+		dummy_attr = *ri->attr;
 		binfo.peer = ri->peer;
 		binfo.attr = &dummy_attr;
 
 		ret = route_map_apply (rmap, &rn->p, RMAP_BGP, &binfo);
-		
-		bgp_attr_extra_free (&dummy_attr);
-		
+
 		if (ret == RMAP_DENYMATCH)
 		  continue;
 	      }
@@ -5989,9 +5414,9 @@ bgp_show_table (struct vty *vty, struct bgp_table *table, struct in_addr *router
 
 	    if (header)
 	      {
-		vty_out (vty, "BGP table version is 0, local router ID is %s%s", inet_ntoa (*router_id), VTY_NEWLINE);
-		vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-		vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+               vty_out (vty, "BGP table version is 0, local router ID is %s%s", inet_ntoa (*router_id), VTY_NEWLINE);
+		vty_out (vty, "Status codes: s suppressed, d damped, h history, * valid, > best, i - internal%s", VTY_NEWLINE);
+		vty_out (vty, "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s", VTY_NEWLINE, VTY_NEWLINE);
 		if (type == bgp_show_type_dampend_paths
 		    || type == bgp_show_type_damp_neighbor)
 		  vty_out (vty, BGP_SHOW_DAMP_HEADER, VTY_NEWLINE);
@@ -6069,7 +5494,7 @@ bgp_show (struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 }
 
 /* Header of detailed BGP route information */
-static void
+void
 route_vty_out_detail_header (struct vty *vty, struct bgp *bgp,
 			     struct bgp_node *rn,
                              struct prefix_rd *prd, afi_t afi, safi_t safi)
@@ -6077,7 +5502,7 @@ route_vty_out_detail_header (struct vty *vty, struct bgp *bgp,
   struct bgp_info *ri;
   struct prefix *p;
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   char buf1[INET6_ADDRSTRLEN];
   char buf2[INET6_ADDRSTRLEN];
   int count = 0;
@@ -6102,7 +5527,7 @@ route_vty_out_detail_header (struct vty *vty, struct bgp *bgp,
       if (CHECK_FLAG (ri->flags, BGP_INFO_SELECTED))
 	{
 	  best = count;
-	  if (ri->extra && ri->extra->suppress)
+	  if (ri->suppress)
 	    suppress = 1;
 	  if (ri->attr->community != NULL)
 	    {
@@ -6136,7 +5561,7 @@ route_vty_out_detail_header (struct vty *vty, struct bgp *bgp,
   vty_out (vty, ")%s", VTY_NEWLINE);
 
   /* advertised peer */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (bgp_adj_out_lookup (peer, p, afi, safi, rn))
 	{
@@ -6152,7 +5577,7 @@ route_vty_out_detail_header (struct vty *vty, struct bgp *bgp,
 }
 
 /* Display specified route of BGP table. */
-static int
+int
 bgp_show_route_in_table (struct vty *vty, struct bgp *bgp, 
                          struct bgp_table *rib, const char *ip_str,
                          afi_t afi, safi_t safi, struct prefix_rd *prd,
@@ -6241,7 +5666,7 @@ bgp_show_route_in_table (struct vty *vty, struct bgp *bgp,
 }
 
 /* Display specified route of Main RIB */
-static int
+int
 bgp_show_route (struct vty *vty, const char *view_name, const char *ip_str,
 		afi_t afi, safi_t safi, struct prefix_rd *prd,
 		int prefix_check)
@@ -6678,7 +6103,7 @@ DEFUN (show_ipv6_mbgp_prefix,
 #endif
 
 
-static int
+int
 bgp_show_regexp (struct vty *vty, int argc, const char **argv, afi_t afi,
 		 safi_t safi, enum bgp_show_type type)
 {
@@ -6710,7 +6135,6 @@ bgp_show_regexp (struct vty *vty, int argc, const char **argv, afi_t afi,
   buffer_free (b);
 
   regex = bgp_regcomp (regstr);
-  XFREE(MTYPE_TMP, regstr);
   if (! regex)
     {
       vty_out (vty, "Can't compile regexp %s%s", argv[0],
@@ -6821,7 +6245,7 @@ DEFUN (show_ipv6_mbgp_regexp,
 }
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_prefix_list (struct vty *vty, const char *prefix_list_str, afi_t afi,
 		      safi_t safi, enum bgp_show_type type)
 {
@@ -6936,7 +6360,7 @@ DEFUN (show_ipv6_mbgp_prefix_list,
 }
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_filter_list (struct vty *vty, const char *filter, afi_t afi,
 		      safi_t safi, enum bgp_show_type type)
 {
@@ -7050,7 +6474,7 @@ DEFUN (show_ipv6_mbgp_filter_list,
 }
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_route_map (struct vty *vty, const char *rmap_str, afi_t afi,
 		    safi_t safi, enum bgp_show_type type)
 {
@@ -7257,7 +6681,7 @@ DEFUN (show_ipv6_mbgp_community_all,
 }
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_community (struct vty *vty, int argc, const char **argv, int exact,
                     u_int16_t afi, u_char safi)
 {
@@ -7287,7 +6711,7 @@ bgp_show_community (struct vty *vty, int argc, const char **argv, int exact,
   buffer_free (b);
 
   com = community_str2com (str);
-  XFREE (MTYPE_TMP, str);
+  free (str);
   if (! com)
     {
       vty_out (vty, "%% Community malformed: %s", VTY_NEWLINE);
@@ -8257,13 +7681,13 @@ ALIAS (show_ipv6_mbgp_community_exact,
        "Exact match of the communities")
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_community_list (struct vty *vty, const char *com, int exact,
 			 u_int16_t afi, u_char safi)
 {
   struct community_list *list;
 
-  list = community_list_lookup (bgp_clist, com, COMMUNITY_LIST_MASTER);
+  list = community_list_lookup (bgp_clist, com, COMMUNITY_LIST_AUTO);
   if (list == NULL)
     {
       vty_out (vty, "%% %s is not a valid community-list name%s", com,
@@ -8278,12 +7702,11 @@ bgp_show_community_list (struct vty *vty, const char *com, int exact,
 
 DEFUN (show_ip_bgp_community_list,
        show_ip_bgp_community_list_cmd,
-       "show ip bgp community-list (<1-500>|WORD)",
+       "show ip bgp community-list WORD",
        SHOW_STR
        IP_STR
        BGP_STR
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n")
 {
   return bgp_show_community_list (vty, argv[0], 0, AFI_IP, SAFI_UNICAST);
@@ -8291,7 +7714,7 @@ DEFUN (show_ip_bgp_community_list,
 
 DEFUN (show_ip_bgp_ipv4_community_list,
        show_ip_bgp_ipv4_community_list_cmd,
-       "show ip bgp ipv4 (unicast|multicast) community-list (<1-500>|WORD)",
+       "show ip bgp ipv4 (unicast|multicast) community-list WORD",
        SHOW_STR
        IP_STR
        BGP_STR
@@ -8299,7 +7722,6 @@ DEFUN (show_ip_bgp_ipv4_community_list,
        "Address Family modifier\n"
        "Address Family modifier\n"
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n")
 {
   if (strncmp (argv[0], "m", 1) == 0)
@@ -8310,12 +7732,11 @@ DEFUN (show_ip_bgp_ipv4_community_list,
 
 DEFUN (show_ip_bgp_community_list_exact,
        show_ip_bgp_community_list_exact_cmd,
-       "show ip bgp community-list (<1-500>|WORD) exact-match",
+       "show ip bgp community-list WORD exact-match",
        SHOW_STR
        IP_STR
        BGP_STR
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n"
        "Exact match of the communities\n")
 {
@@ -8324,7 +7745,7 @@ DEFUN (show_ip_bgp_community_list_exact,
 
 DEFUN (show_ip_bgp_ipv4_community_list_exact,
        show_ip_bgp_ipv4_community_list_exact_cmd,
-       "show ip bgp ipv4 (unicast|multicast) community-list (<1-500>|WORD) exact-match",
+       "show ip bgp ipv4 (unicast|multicast) community-list WORD exact-match",
        SHOW_STR
        IP_STR
        BGP_STR
@@ -8332,7 +7753,6 @@ DEFUN (show_ip_bgp_ipv4_community_list_exact,
        "Address Family modifier\n"
        "Address Family modifier\n"
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n"
        "Exact match of the communities\n")
 {
@@ -8345,11 +7765,10 @@ DEFUN (show_ip_bgp_ipv4_community_list_exact,
 #ifdef HAVE_IPV6
 DEFUN (show_bgp_community_list,
        show_bgp_community_list_cmd,
-       "show bgp community-list (<1-500>|WORD)",
+       "show bgp community-list WORD",
        SHOW_STR
        BGP_STR
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n")
 {
   return bgp_show_community_list (vty, argv[0], 0, AFI_IP6, SAFI_UNICAST);
@@ -8357,12 +7776,11 @@ DEFUN (show_bgp_community_list,
 
 ALIAS (show_bgp_community_list,
        show_bgp_ipv6_community_list_cmd,
-       "show bgp ipv6 community-list (<1-500>|WORD)",
+       "show bgp ipv6 community-list WORD",
        SHOW_STR
        BGP_STR
        "Address family\n"
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n")
 
 /* old command */
@@ -8393,11 +7811,10 @@ DEFUN (show_ipv6_mbgp_community_list,
 
 DEFUN (show_bgp_community_list_exact,
        show_bgp_community_list_exact_cmd,
-       "show bgp community-list (<1-500>|WORD) exact-match",
+       "show bgp community-list WORD exact-match",
        SHOW_STR
        BGP_STR
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n"
        "Exact match of the communities\n")
 {
@@ -8406,12 +7823,11 @@ DEFUN (show_bgp_community_list_exact,
 
 ALIAS (show_bgp_community_list_exact,
        show_bgp_ipv6_community_list_exact_cmd,
-       "show bgp ipv6 community-list (<1-500>|WORD) exact-match",
+       "show bgp ipv6 community-list WORD exact-match",
        SHOW_STR
        BGP_STR
        "Address family\n"
        "Display routes matching the community-list\n"
-       "community-list number\n"
        "community-list name\n"
        "Exact match of the communities\n")
 
@@ -8444,7 +7860,7 @@ DEFUN (show_ipv6_mbgp_community_list_exact,
 }
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_prefix_longer (struct vty *vty, const char *prefix, afi_t afi,
 			safi_t safi, enum bgp_show_type type)
 {
@@ -8588,7 +8004,7 @@ DEFUN (show_ipv6_mbgp_prefix_longer,
 }
 #endif /* HAVE_IPV6 */
 
-static struct peer *
+struct peer *
 peer_lookup_in_view (struct vty *vty, const char *view_name, 
                      const char *ip_str)
 {
@@ -8635,600 +8051,8 @@ peer_lookup_in_view (struct vty *vty, const char *view_name,
   
   return peer;
 }
-
-enum bgp_stats
-{
-  BGP_STATS_MAXBITLEN = 0,
-  BGP_STATS_RIB,
-  BGP_STATS_PREFIXES,
-  BGP_STATS_TOTPLEN,
-  BGP_STATS_UNAGGREGATEABLE,
-  BGP_STATS_MAX_AGGREGATEABLE,
-  BGP_STATS_AGGREGATES,
-  BGP_STATS_SPACE,
-  BGP_STATS_ASPATH_COUNT,
-  BGP_STATS_ASPATH_MAXHOPS,
-  BGP_STATS_ASPATH_TOTHOPS,
-  BGP_STATS_ASPATH_MAXSIZE,
-  BGP_STATS_ASPATH_TOTSIZE,
-  BGP_STATS_ASN_HIGHEST,
-  BGP_STATS_MAX,
-};
 
-static const char *table_stats_strs[] =
-{
-  [BGP_STATS_PREFIXES]            = "Total Prefixes",
-  [BGP_STATS_TOTPLEN]             = "Average prefix length",
-  [BGP_STATS_RIB]                 = "Total Advertisements",
-  [BGP_STATS_UNAGGREGATEABLE]     = "Unaggregateable prefixes",
-  [BGP_STATS_MAX_AGGREGATEABLE]   = "Maximum aggregateable prefixes",
-  [BGP_STATS_AGGREGATES]          = "BGP Aggregate advertisements",
-  [BGP_STATS_SPACE]               = "Address space advertised",
-  [BGP_STATS_ASPATH_COUNT]        = "Advertisements with paths",
-  [BGP_STATS_ASPATH_MAXHOPS]      = "Longest AS-Path (hops)",
-  [BGP_STATS_ASPATH_MAXSIZE]      = "Largest AS-Path (bytes)",
-  [BGP_STATS_ASPATH_TOTHOPS]      = "Average AS-Path length (hops)",
-  [BGP_STATS_ASPATH_TOTSIZE]      = "Average AS-Path size (bytes)",
-  [BGP_STATS_ASN_HIGHEST]         = "Highest public ASN",
-  [BGP_STATS_MAX] = NULL,
-};
-
-struct bgp_table_stats
-{
-  struct bgp_table *table;
-  unsigned long long counts[BGP_STATS_MAX];
-};
-
-#if 0
-#define TALLY_SIGFIG 100000
-static unsigned long
-ravg_tally (unsigned long count, unsigned long oldavg, unsigned long newval)
-{
-  unsigned long newtot = (count-1) * oldavg + (newval * TALLY_SIGFIG);
-  unsigned long res = (newtot * TALLY_SIGFIG) / count;
-  unsigned long ret = newtot / count;
-  
-  if ((res % TALLY_SIGFIG) > (TALLY_SIGFIG/2))
-    return ret + 1;
-  else
-    return ret;
-}
-#endif
-
-static int
-bgp_table_stats_walker (struct thread *t)
-{
-  struct bgp_node *rn;
-  struct bgp_node *top;
-  struct bgp_table_stats *ts = THREAD_ARG (t);
-  unsigned int space = 0;
-  
-  if (!(top = bgp_table_top (ts->table)))
-    return 0;
-
-  switch (top->p.family)
-    {
-      case AF_INET:
-        space = IPV4_MAX_BITLEN;
-        break;
-      case AF_INET6:
-        space = IPV6_MAX_BITLEN;
-        break;
-    }
-    
-  ts->counts[BGP_STATS_MAXBITLEN] = space;
-
-  for (rn = top; rn; rn = bgp_route_next (rn))
-    {
-      struct bgp_info *ri;
-      struct bgp_node *prn = rn->parent;
-      unsigned int rinum = 0;
-      
-      if (rn == top)
-        continue;
-      
-      if (!rn->info)
-        continue;
-      
-      ts->counts[BGP_STATS_PREFIXES]++;
-      ts->counts[BGP_STATS_TOTPLEN] += rn->p.prefixlen;
-
-#if 0
-      ts->counts[BGP_STATS_AVGPLEN]
-        = ravg_tally (ts->counts[BGP_STATS_PREFIXES],
-                      ts->counts[BGP_STATS_AVGPLEN],
-                      rn->p.prefixlen);
-#endif
-      
-      /* check if the prefix is included by any other announcements */
-      while (prn && !prn->info)
-        prn = prn->parent;
-      
-      if (prn == NULL || prn == top)
-        {
-          ts->counts[BGP_STATS_UNAGGREGATEABLE]++;
-          /* announced address space */
-          if (space)
-            ts->counts[BGP_STATS_SPACE] += 1 << (space - rn->p.prefixlen);
-        }
-      else if (prn->info)
-        ts->counts[BGP_STATS_MAX_AGGREGATEABLE]++;
-      
-      for (ri = rn->info; ri; ri = ri->next)
-        {
-          rinum++;
-          ts->counts[BGP_STATS_RIB]++;
-          
-          if (ri->attr &&
-              (CHECK_FLAG (ri->attr->flag,
-                           ATTR_FLAG_BIT (BGP_ATTR_ATOMIC_AGGREGATE))))
-            ts->counts[BGP_STATS_AGGREGATES]++;
-          
-          /* as-path stats */
-          if (ri->attr && ri->attr->aspath)
-            {
-              unsigned int hops = aspath_count_hops (ri->attr->aspath);
-              unsigned int size = aspath_size (ri->attr->aspath);
-              as_t highest = aspath_highest (ri->attr->aspath);
-              
-              ts->counts[BGP_STATS_ASPATH_COUNT]++;
-              
-              if (hops > ts->counts[BGP_STATS_ASPATH_MAXHOPS])
-                ts->counts[BGP_STATS_ASPATH_MAXHOPS] = hops;
-              
-              if (size > ts->counts[BGP_STATS_ASPATH_MAXSIZE])
-                ts->counts[BGP_STATS_ASPATH_MAXSIZE] = size;
-              
-              ts->counts[BGP_STATS_ASPATH_TOTHOPS] += hops;
-              ts->counts[BGP_STATS_ASPATH_TOTSIZE] += size;
-#if 0
-              ts->counts[BGP_STATS_ASPATH_AVGHOPS] 
-                = ravg_tally (ts->counts[BGP_STATS_ASPATH_COUNT],
-                              ts->counts[BGP_STATS_ASPATH_AVGHOPS],
-                              hops);
-              ts->counts[BGP_STATS_ASPATH_AVGSIZE]
-                = ravg_tally (ts->counts[BGP_STATS_ASPATH_COUNT],
-                              ts->counts[BGP_STATS_ASPATH_AVGSIZE],
-                              size);
-#endif
-              if (highest > ts->counts[BGP_STATS_ASN_HIGHEST])
-                ts->counts[BGP_STATS_ASN_HIGHEST] = highest;
-            }
-        }
-    }
-  return 0;
-}
-
-static int
-bgp_table_stats (struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi)
-{
-  struct bgp_table_stats ts;
-  unsigned int i;
-  
-  if (!bgp->rib[afi][safi])
-    {
-      vty_out (vty, "%% No RIB exist for the AFI/SAFI%s", VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-  
-  memset (&ts, 0, sizeof (ts));
-  ts.table = bgp->rib[afi][safi];
-  thread_execute (bm->master, bgp_table_stats_walker, &ts, 0);
-
-  vty_out (vty, "BGP %s RIB statistics%s%s",
-           afi_safi_print (afi, safi), VTY_NEWLINE, VTY_NEWLINE);
-  
-  for (i = 0; i < BGP_STATS_MAX; i++)
-    {
-      if (!table_stats_strs[i])
-        continue;
-      
-      switch (i)
-        {
-#if 0
-          case BGP_STATS_ASPATH_AVGHOPS:
-          case BGP_STATS_ASPATH_AVGSIZE:
-          case BGP_STATS_AVGPLEN:
-            vty_out (vty, "%-30s: ", table_stats_strs[i]);
-            vty_out (vty, "%12.2f",
-                     (float)ts.counts[i] / (float)TALLY_SIGFIG);
-            break;
-#endif
-          case BGP_STATS_ASPATH_TOTHOPS:
-          case BGP_STATS_ASPATH_TOTSIZE:
-            vty_out (vty, "%-30s: ", table_stats_strs[i]);
-            vty_out (vty, "%12.2f",
-                     ts.counts[i] ?
-                     (float)ts.counts[i] / 
-                      (float)ts.counts[BGP_STATS_ASPATH_COUNT]
-                     : 0);
-            break;
-          case BGP_STATS_TOTPLEN:
-            vty_out (vty, "%-30s: ", table_stats_strs[i]);
-            vty_out (vty, "%12.2f",
-                     ts.counts[i] ?
-                     (float)ts.counts[i] / 
-                      (float)ts.counts[BGP_STATS_PREFIXES]
-                     : 0);
-            break;
-          case BGP_STATS_SPACE:
-            vty_out (vty, "%-30s: ", table_stats_strs[i]);
-            vty_out (vty, "%12llu%s", ts.counts[i], VTY_NEWLINE);
-            if (ts.counts[BGP_STATS_MAXBITLEN] < 9)
-              break;
-            vty_out (vty, "%30s: ", "\% announced ");
-            vty_out (vty, "%12.2f%s", 
-                     100 * (float)ts.counts[BGP_STATS_SPACE] / 
-                       (float)((uint64_t)1UL << ts.counts[BGP_STATS_MAXBITLEN]),
-                       VTY_NEWLINE);
-            vty_out (vty, "%30s: ", "/8 equivalent ");
-            vty_out (vty, "%12.2f%s", 
-                     (float)ts.counts[BGP_STATS_SPACE] / 
-                       (float)(1UL << (ts.counts[BGP_STATS_MAXBITLEN] - 8)),
-                     VTY_NEWLINE);
-            if (ts.counts[BGP_STATS_MAXBITLEN] < 25)
-              break;
-            vty_out (vty, "%30s: ", "/24 equivalent ");
-            vty_out (vty, "%12.2f", 
-                     (float)ts.counts[BGP_STATS_SPACE] / 
-                       (float)(1UL << (ts.counts[BGP_STATS_MAXBITLEN] - 24)));
-            break;
-          default:
-            vty_out (vty, "%-30s: ", table_stats_strs[i]);
-            vty_out (vty, "%12llu", ts.counts[i]);
-        }
-        
-      vty_out (vty, "%s", VTY_NEWLINE);
-    }
-  return CMD_SUCCESS;
-}
-
-static int
-bgp_table_stats_vty (struct vty *vty, const char *name,
-                     const char *afi_str, const char *safi_str)
-{
-  struct bgp *bgp;
-  afi_t afi;
-  safi_t safi;
-  
- if (name)
-    bgp = bgp_lookup_by_name (name);
-  else
-    bgp = bgp_get_default ();
-
-  if (!bgp)
-    {
-      vty_out (vty, "%% No such BGP instance exist%s", VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-  if (strncmp (afi_str, "ipv", 3) == 0)
-    {
-      if (strncmp (afi_str, "ipv4", 4) == 0)
-        afi = AFI_IP;
-      else if (strncmp (afi_str, "ipv6", 4) == 0)
-        afi = AFI_IP6;
-      else
-        {
-          vty_out (vty, "%% Invalid address family %s%s",
-                   afi_str, VTY_NEWLINE);
-          return CMD_WARNING;
-        }
-      if (strncmp (safi_str, "m", 1) == 0)
-        safi = SAFI_MULTICAST;
-      else if (strncmp (safi_str, "u", 1) == 0)
-        safi = SAFI_UNICAST;
-      else if (strncmp (safi_str, "vpnv4", 5) == 0)
-        safi = BGP_SAFI_VPNV4;
-      else if (strncmp (safi_str, "vpnv6", 6) == 0)
-        safi = BGP_SAFI_VPNV6;
-      else
-        {
-          vty_out (vty, "%% Invalid subsequent address family %s%s",
-                   safi_str, VTY_NEWLINE);
-          return CMD_WARNING;
-        }
-    }
-  else
-    {
-      vty_out (vty, "%% Invalid address family %s%s",
-               afi_str, VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-
-  if ((afi == AFI_IP && safi ==  BGP_SAFI_VPNV6)
-      || (afi == AFI_IP6 && safi == BGP_SAFI_VPNV4))
-    {
-      vty_out (vty, "%% Invalid subsequent address family %s for %s%s",
-               afi_str, safi_str, VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-  return bgp_table_stats (vty, bgp, afi, safi);
-}
-
-DEFUN (show_bgp_statistics,
-       show_bgp_statistics_cmd,
-       "show bgp (ipv4|ipv6) (unicast|multicast) statistics",
-       SHOW_STR
-       BGP_STR
-       "Address family\n"
-       "Address family\n"
-       "Address Family modifier\n"
-       "Address Family modifier\n"
-       "BGP RIB advertisement statistics\n")
-{
-  return bgp_table_stats_vty (vty, NULL, argv[0], argv[1]);
-}
-
-ALIAS (show_bgp_statistics,
-       show_bgp_statistics_vpnv4_cmd,
-       "show bgp (ipv4) (vpnv4) statistics",
-       SHOW_STR
-       BGP_STR
-       "Address family\n"
-       "Address Family modifier\n"
-       "BGP RIB advertisement statistics\n")
-
-DEFUN (show_bgp_statistics_view,
-       show_bgp_statistics_view_cmd,
-       "show bgp view WORD (ipv4|ipv6) (unicast|multicast) statistics",
-       SHOW_STR
-       BGP_STR
-       "BGP view\n"
-       "Address family\n"
-       "Address family\n"
-       "Address Family modifier\n"
-       "Address Family modifier\n"
-       "BGP RIB advertisement statistics\n")
-{
-  return bgp_table_stats_vty (vty, NULL, argv[0], argv[1]);
-}
-
-ALIAS (show_bgp_statistics_view,
-       show_bgp_statistics_view_vpnv4_cmd,
-       "show bgp view WORD (ipv4) (vpnv4) statistics",
-       SHOW_STR
-       BGP_STR
-       "BGP view\n"
-       "Address family\n"
-       "Address Family modifier\n"
-       "BGP RIB advertisement statistics\n")
-
-enum bgp_pcounts
-{
-  PCOUNT_ADJ_IN = 0,
-  PCOUNT_DAMPED,
-  PCOUNT_REMOVED,
-  PCOUNT_HISTORY,
-  PCOUNT_STALE,
-  PCOUNT_VALID,
-  PCOUNT_ALL,
-  PCOUNT_COUNTED,
-  PCOUNT_PFCNT, /* the figure we display to users */
-  PCOUNT_MAX,
-};
-
-static const char *pcount_strs[] =
-{
-  [PCOUNT_ADJ_IN]  = "Adj-in",
-  [PCOUNT_DAMPED]  = "Damped",
-  [PCOUNT_REMOVED] = "Removed",
-  [PCOUNT_HISTORY] = "History",
-  [PCOUNT_STALE]   = "Stale",
-  [PCOUNT_VALID]   = "Valid",
-  [PCOUNT_ALL]     = "All RIB",
-  [PCOUNT_COUNTED] = "PfxCt counted",
-  [PCOUNT_PFCNT]   = "Useable",
-  [PCOUNT_MAX]     = NULL,
-};
-
-struct peer_pcounts
-{
-  unsigned int count[PCOUNT_MAX];
-  const struct peer *peer;
-  const struct bgp_table *table;
-};
-
-static int
-bgp_peer_count_walker (struct thread *t)
-{
-  struct bgp_node *rn;
-  struct peer_pcounts *pc = THREAD_ARG (t);
-  const struct peer *peer = pc->peer;
-  
-  for (rn = bgp_table_top (pc->table); rn; rn = bgp_route_next (rn))
-    {
-      struct bgp_adj_in *ain;
-      struct bgp_info *ri;
-      
-      for (ain = rn->adj_in; ain; ain = ain->next)
-        if (ain->peer == peer)
-          pc->count[PCOUNT_ADJ_IN]++;
-
-      for (ri = rn->info; ri; ri = ri->next)
-        {
-          char buf[SU_ADDRSTRLEN];
-          
-          if (ri->peer != peer)
-            continue;
-          
-          pc->count[PCOUNT_ALL]++;
-          
-          if (CHECK_FLAG (ri->flags, BGP_INFO_DAMPED))
-            pc->count[PCOUNT_DAMPED]++;
-          if (CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
-            pc->count[PCOUNT_HISTORY]++;
-          if (CHECK_FLAG (ri->flags, BGP_INFO_REMOVED))
-            pc->count[PCOUNT_REMOVED]++;
-          if (CHECK_FLAG (ri->flags, BGP_INFO_STALE))
-            pc->count[PCOUNT_STALE]++;
-          if (CHECK_FLAG (ri->flags, BGP_INFO_VALID))
-            pc->count[PCOUNT_VALID]++;
-          if (!CHECK_FLAG (ri->flags, BGP_INFO_UNUSEABLE))
-            pc->count[PCOUNT_PFCNT]++;
-          
-          if (CHECK_FLAG (ri->flags, BGP_INFO_COUNTED))
-            {
-              pc->count[PCOUNT_COUNTED]++;
-              if (CHECK_FLAG (ri->flags, BGP_INFO_UNUSEABLE))
-                plog_warn (peer->log,
-                           "%s [pcount] %s/%d is counted but flags 0x%x",
-                           peer->host,
-                           inet_ntop(rn->p.family, &rn->p.u.prefix,
-                                     buf, SU_ADDRSTRLEN),
-                           rn->p.prefixlen,
-                           ri->flags);
-            }
-          else
-            {
-              if (!CHECK_FLAG (ri->flags, BGP_INFO_UNUSEABLE))
-                plog_warn (peer->log,
-                           "%s [pcount] %s/%d not counted but flags 0x%x",
-                           peer->host,
-                           inet_ntop(rn->p.family, &rn->p.u.prefix,
-                                     buf, SU_ADDRSTRLEN),
-                           rn->p.prefixlen,
-                           ri->flags);
-            }
-        }
-    }
-  return 0;
-}
-
-static int
-bgp_peer_counts (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi)
-{
-  struct peer_pcounts pcounts = { .peer = peer };
-  unsigned int i;
-  
-  if (!peer || !peer->bgp || !peer->afc[afi][safi]
-      || !peer->bgp->rib[afi][safi])
-    {
-      vty_out (vty, "%% No such neighbor or address family%s", VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-  
-  memset (&pcounts, 0, sizeof(pcounts));
-  pcounts.peer = peer;
-  pcounts.table = peer->bgp->rib[afi][safi];
-  
-  /* in-place call via thread subsystem so as to record execution time
-   * stats for the thread-walk (i.e. ensure this can't be blamed on
-   * on just vty_read()).
-   */
-  thread_execute (bm->master, bgp_peer_count_walker, &pcounts, 0);
-  
-  vty_out (vty, "Prefix counts for %s, %s%s", 
-           peer->host, afi_safi_print (afi, safi), VTY_NEWLINE);
-  vty_out (vty, "PfxCt: %ld%s", peer->pcount[afi][safi], VTY_NEWLINE);
-  vty_out (vty, "%sCounts from RIB table walk:%s%s", 
-           VTY_NEWLINE, VTY_NEWLINE, VTY_NEWLINE);
-
-  for (i = 0; i < PCOUNT_MAX; i++)
-      vty_out (vty, "%20s: %-10d%s",
-               pcount_strs[i], pcounts.count[i], VTY_NEWLINE);
-
-  if (pcounts.count[PCOUNT_PFCNT] != peer->pcount[afi][safi])
-    {
-      vty_out (vty, "%s [pcount] PfxCt drift!%s",
-               peer->host, VTY_NEWLINE);
-      vty_out (vty, "Please report this bug, with the above command output%s",
-              VTY_NEWLINE);
-    }
-               
-  return CMD_SUCCESS;
-}
-
-DEFUN (show_ip_bgp_neighbor_prefix_counts,
-       show_ip_bgp_neighbor_prefix_counts_cmd,
-       "show ip bgp neighbors (A.B.C.D|X:X::X:X) prefix-counts",
-       SHOW_STR
-       IP_STR
-       BGP_STR
-       "Detailed information on TCP and BGP neighbor connections\n"
-       "Neighbor to display information about\n"
-       "Neighbor to display information about\n"
-       "Display detailed prefix count information\n")
-{
-  struct peer *peer;
-
-  peer = peer_lookup_in_view (vty, NULL, argv[0]);  
-  if (! peer) 
-    return CMD_WARNING;
- 
-  return bgp_peer_counts (vty, peer, AFI_IP, SAFI_UNICAST);
-}
-
-DEFUN (show_bgp_ipv6_neighbor_prefix_counts,
-       show_bgp_ipv6_neighbor_prefix_counts_cmd,
-       "show bgp ipv6 neighbors (A.B.C.D|X:X::X:X) prefix-counts",
-       SHOW_STR
-       BGP_STR
-       "Address family\n"
-       "Detailed information on TCP and BGP neighbor connections\n"
-       "Neighbor to display information about\n"
-       "Neighbor to display information about\n"
-       "Display detailed prefix count information\n")
-{
-  struct peer *peer;
-
-  peer = peer_lookup_in_view (vty, NULL, argv[0]);  
-  if (! peer) 
-    return CMD_WARNING;
- 
-  return bgp_peer_counts (vty, peer, AFI_IP6, SAFI_UNICAST);
-}
-
-DEFUN (show_ip_bgp_ipv4_neighbor_prefix_counts,
-       show_ip_bgp_ipv4_neighbor_prefix_counts_cmd,
-       "show ip bgp ipv4 (unicast|multicast) neighbors (A.B.C.D|X:X::X:X) prefix-counts",
-       SHOW_STR
-       IP_STR
-       BGP_STR
-       "Address family\n"
-       "Address Family modifier\n"
-       "Address Family modifier\n"
-       "Detailed information on TCP and BGP neighbor connections\n"
-       "Neighbor to display information about\n"
-       "Neighbor to display information about\n"
-       "Display detailed prefix count information\n")
-{
-  struct peer *peer;
-
-  peer = peer_lookup_in_view (vty, NULL, argv[1]);
-  if (! peer)
-    return CMD_WARNING;
-
-  if (strncmp (argv[0], "m", 1) == 0)
-    return bgp_peer_counts (vty, peer, AFI_IP, SAFI_MULTICAST);
-
-  return bgp_peer_counts (vty, peer, AFI_IP, SAFI_UNICAST);
-}
-
-DEFUN (show_ip_bgp_vpnv4_neighbor_prefix_counts,
-       show_ip_bgp_vpnv4_neighbor_prefix_counts_cmd,
-       "show ip bgp vpnv4 all neighbors (A.B.C.D|X:X::X:X) prefix-counts",
-       SHOW_STR
-       IP_STR
-       BGP_STR
-       "Address family\n"
-       "Address Family modifier\n"
-       "Address Family modifier\n"
-       "Detailed information on TCP and BGP neighbor connections\n"
-       "Neighbor to display information about\n"
-       "Neighbor to display information about\n"
-       "Display detailed prefix count information\n")
-{
-  struct peer *peer;
-
-  peer = peer_lookup_in_view (vty, NULL, argv[0]);
-  if (! peer)
-    return CMD_WARNING;
-  
-  return bgp_peer_counts (vty, peer, AFI_IP, SAFI_MPLS_VPN);
-}
-
-
-static void
+void
 show_adj_route (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi,
 		int in)
 {
@@ -9254,8 +8078,8 @@ show_adj_route (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi,
 			  PEER_STATUS_DEFAULT_ORIGINATE))
     {
       vty_out (vty, "BGP table version is 0, local router ID is %s%s", inet_ntoa (bgp->router_id), VTY_NEWLINE);
-      vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-      vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+      vty_out (vty, "Status codes: s suppressed, d damped, h history, * valid, > best, i - internal%s", VTY_NEWLINE);
+      vty_out (vty, "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s", VTY_NEWLINE, VTY_NEWLINE);
 
       vty_out (vty, "Originating default network 0.0.0.0%s%s",
 	       VTY_NEWLINE, VTY_NEWLINE);
@@ -9271,8 +8095,8 @@ show_adj_route (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi,
 	      if (header1)
 		{
 		  vty_out (vty, "BGP table version is 0, local router ID is %s%s", inet_ntoa (bgp->router_id), VTY_NEWLINE);
-		  vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-		  vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+		  vty_out (vty, "Status codes: s suppressed, d damped, h history, * valid, > best, i - internal%s", VTY_NEWLINE);
+		  vty_out (vty, "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s", VTY_NEWLINE, VTY_NEWLINE);
 		  header1 = 0;
 		}
 	      if (header2)
@@ -9295,8 +8119,8 @@ show_adj_route (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi,
 	      if (header1)
 		{
 		  vty_out (vty, "BGP table version is 0, local router ID is %s%s", inet_ntoa (bgp->router_id), VTY_NEWLINE);
-		  vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-		  vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+		  vty_out (vty, "Status codes: s suppressed, d damped, h history, * valid, > best, i - internal%s", VTY_NEWLINE);
+		  vty_out (vty, "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s", VTY_NEWLINE, VTY_NEWLINE);
 		  header1 = 0;
 		}
 	      if (header2)
@@ -9317,7 +8141,7 @@ show_adj_route (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi,
 	     VTY_NEWLINE, output_count, VTY_NEWLINE);
 }
 
-static int
+int
 peer_adj_routes (struct vty *vty, struct peer *peer, afi_t afi, safi_t safi, int in)
 {    
   if (! peer || ! peer->afc[afi][safi])
@@ -9814,7 +8638,7 @@ ALIAS (show_bgp_view_neighbor_received_prefix_filter,
        "Display the prefixlist filter\n")
 #endif /* HAVE_IPV6 */
 
-static int
+int
 bgp_show_neighbor_route (struct vty *vty, struct peer *peer, afi_t afi,
 			 safi_t safi, enum bgp_show_type type)
 {
@@ -10536,7 +9360,7 @@ struct bgp_distance
   char *access_list;
 };
 
-static struct bgp_distance *
+struct bgp_distance *
 bgp_distance_new ()
 {
   struct bgp_distance *new;
@@ -10545,13 +9369,13 @@ bgp_distance_new ()
   return new;
 }
 
-static void
+void
 bgp_distance_free (struct bgp_distance *bdistance)
 {
   XFREE (MTYPE_BGP_DISTANCE, bdistance);
 }
 
-static int
+int
 bgp_distance_set (struct vty *vty, const char *distance_str, 
                   const char *ip_str, const char *access_list_str)
 {
@@ -10598,7 +9422,7 @@ bgp_distance_set (struct vty *vty, const char *distance_str,
   return CMD_SUCCESS;
 }
 
-static int
+int
 bgp_distance_unset (struct vty *vty, const char *distance_str, 
                     const char *ip_str, const char *access_list_str)
 {
@@ -10637,7 +9461,7 @@ bgp_distance_unset (struct vty *vty, const char *distance_str,
   return CMD_SUCCESS;
 }
 
-static void
+void
 bgp_distance_reset ()
 {
   struct bgp_node *rn;
@@ -10918,7 +9742,7 @@ DEFUN (show_ip_bgp_flap_statistics,
 }
 
 /* Display specified route of BGP table. */
-static int
+int
 bgp_clear_damp_route (struct vty *vty, const char *view_name, 
                       const char *ip_str, afi_t afi, safi_t safi, 
                       struct prefix_rd *prd, int prefix_check)
@@ -10976,10 +9800,10 @@ bgp_clear_damp_route (struct vty *vty, const char *view_name,
 		  ri = rm->info;
 		  while (ri)
 		    {
-		      if (ri->extra && ri->extra->damp_info)
+		      if (ri->damp_info)
 			{
 			  ri_temp = ri->next;
-			  bgp_damp_info_free (ri->extra->damp_info, 1);
+			  bgp_damp_info_free (ri->damp_info, 1);
 			  ri = ri_temp;
 			}
 		      else
@@ -10996,10 +9820,10 @@ bgp_clear_damp_route (struct vty *vty, const char *view_name,
 	    ri = rn->info;
 	    while (ri)
 	      {
-		if (ri->extra && ri->extra->damp_info)
+		if (ri->damp_info)
 		  {
 		    ri_temp = ri->next;
-		    bgp_damp_info_free (ri->extra->damp_info, 1);
+		    bgp_damp_info_free (ri->damp_info, 1);
 		    ri = ri_temp;
 		  }
 		else
@@ -11073,7 +9897,7 @@ DEFUN (clear_ip_bgp_dampening_address_mask,
 			       SAFI_UNICAST, NULL, 0);
 }
 
-static int
+int
 bgp_config_write_network_vpnv4 (struct vty *vty, struct bgp *bgp,
 				afi_t afi, safi_t safi, int *write)
 {
@@ -11243,7 +10067,7 @@ void
 bgp_route_init ()
 {
   /* Init BGP distance table. */
-  bgp_distance_table = bgp_table_init (AFI_IP, SAFI_UNICAST);
+  bgp_distance_table = bgp_table_init ();
 
   /* IPv4 BGP commands. */
   install_element (BGP_NODE, &bgp_network_cmd);
@@ -11508,13 +10332,7 @@ bgp_route_init ()
   install_element (ENABLE_NODE, &clear_ip_bgp_dampening_address_cmd);
   install_element (ENABLE_NODE, &clear_ip_bgp_dampening_address_mask_cmd);
 
-  /* prefix count */
-  install_element (ENABLE_NODE, &show_ip_bgp_neighbor_prefix_counts_cmd);
-  install_element (ENABLE_NODE, &show_ip_bgp_ipv4_neighbor_prefix_counts_cmd);
-  install_element (ENABLE_NODE, &show_ip_bgp_vpnv4_neighbor_prefix_counts_cmd);
 #ifdef HAVE_IPV6
-  install_element (ENABLE_NODE, &show_bgp_ipv6_neighbor_prefix_counts_cmd);
-
   /* New config IPv6 BGP commands.  */
   install_element (BGP_IPV6_NODE, &ipv6_bgp_network_cmd);
   install_element (BGP_IPV6_NODE, &ipv6_bgp_network_route_map_cmd);
@@ -11684,13 +10502,7 @@ bgp_route_init ()
   install_element (ENABLE_NODE, &show_bgp_view_rsclient_cmd);
   install_element (ENABLE_NODE, &show_bgp_view_rsclient_route_cmd);
   install_element (ENABLE_NODE, &show_bgp_view_rsclient_prefix_cmd);
-  
-  /* Statistics */
-  install_element (ENABLE_NODE, &show_bgp_statistics_cmd);
-  install_element (ENABLE_NODE, &show_bgp_statistics_vpnv4_cmd);
-  install_element (ENABLE_NODE, &show_bgp_statistics_view_cmd);
-  install_element (ENABLE_NODE, &show_bgp_statistics_view_vpnv4_cmd);
-  
+
   /* old command */
   install_element (VIEW_NODE, &show_ipv6_bgp_cmd);
   install_element (VIEW_NODE, &show_ipv6_bgp_route_cmd);
