@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_DEBUG_H
-#define _QUAGGA_BGP_DEBUG_H
-
 /* sort of packet direction */
 #define DUMP_ON        1
 #define DUMP_SEND      2
@@ -51,10 +48,10 @@ extern int Debug_Radix;
 #define	DETAIL	 6
 
 /* Prototypes. */
-extern void bgp_debug_init (void);
-extern void bgp_packet_dump (struct stream *);
+void bgp_debug_init ();
+void bgp_packet_dump (struct stream *);
 
-extern int debug (unsigned int option);
+int debug (unsigned int option);
 
 extern unsigned long conf_bgp_debug_fsm;
 extern unsigned long conf_bgp_debug_events;
@@ -63,7 +60,6 @@ extern unsigned long conf_bgp_debug_filter;
 extern unsigned long conf_bgp_debug_keepalive;
 extern unsigned long conf_bgp_debug_update;
 extern unsigned long conf_bgp_debug_normal;
-extern unsigned long conf_bgp_debug_zebra;
 
 extern unsigned long term_bgp_debug_fsm;
 extern unsigned long term_bgp_debug_events;
@@ -72,7 +68,6 @@ extern unsigned long term_bgp_debug_filter;
 extern unsigned long term_bgp_debug_keepalive;
 extern unsigned long term_bgp_debug_update;
 extern unsigned long term_bgp_debug_normal;
-extern unsigned long term_bgp_debug_zebra;
 
 #define BGP_DEBUG_FSM                 0x01
 #define BGP_DEBUG_EVENTS              0x01
@@ -82,7 +77,6 @@ extern unsigned long term_bgp_debug_zebra;
 #define BGP_DEBUG_UPDATE_IN           0x01
 #define BGP_DEBUG_UPDATE_OUT          0x02
 #define BGP_DEBUG_NORMAL              0x01
-#define BGP_DEBUG_ZEBRA               0x01
 
 #define BGP_DEBUG_PACKET_SEND         0x01
 #define BGP_DEBUG_PACKET_SEND_DETAIL  0x02
@@ -110,12 +104,10 @@ extern unsigned long term_bgp_debug_zebra;
 #define BGP_DEBUG(a, b)		(term_bgp_debug_ ## a & BGP_DEBUG_ ## b)
 #define CONF_BGP_DEBUG(a, b)    (conf_bgp_debug_ ## a & BGP_DEBUG_ ## b)
 
-const extern char *bgp_type_str[];
+extern char *bgp_type_str[];
 
-extern int bgp_dump_attr (struct peer *, struct attr *, char *, size_t);
-extern void bgp_notify_print (struct peer *, struct bgp_notify *, const char *);
+void bgp_dump_attr (struct peer *, struct attr *, char *, size_t);
+void bgp_notify_print (struct peer *, struct bgp_notify *, char *);
 
 extern struct message bgp_status_msg[];
 extern int bgp_status_msg_max;
-
-#endif /* _QUAGGA_BGP_DEBUG_H */

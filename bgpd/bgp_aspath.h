@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_ASPATH_H
-#define _QUAGGA_BGP_ASPATH_H
-
 /* AS path segment type.  */
 #define AS_SET                       1
 #define AS_SEQUENCE                  2
@@ -28,19 +25,8 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #define AS_CONFED_SET                4
 
 /* Private AS range defined in RFC2270.  */
-#define BGP_PRIVATE_AS_MIN       64512U
-#define BGP_PRIVATE_AS_MAX       65535U
-
-#define BGP_AS_MAX		 65535U
-
-/* AS_PATH segment data in abstracted form, no limit is placed on length */
-struct assegment
-{
-  struct assegment *next;
-  as_t *as;
-  u_short length;
-  u_char type;
-};
+#define BGP_PRIVATE_AS_MIN       64512
+#define BGP_PRIVATE_AS_MAX       65535
 
 /* AS path may be include some AsSegments.  */
 struct aspath 
@@ -48,9 +34,15 @@ struct aspath
   /* Reference count to this aspath.  */
   unsigned long refcnt;
 
-  /* segment data */
-  struct assegment *segments;
-  
+  /* Rawdata length.  */
+  int length;
+
+  /* AS count.  */
+  int count;
+
+  /* Rawdata.  */
+  caddr_t data;
+
   /* String expression of AS path.  This string is used by vty output
      and AS path regular expression match.  */
   char *str;
@@ -59,38 +51,27 @@ struct aspath
 #define ASPATH_STR_DEFAULT_LEN 32
 
 /* Prototypes. */
-extern void aspath_init (void);
-extern void aspath_finish (void);
-extern struct aspath *aspath_parse (struct stream *, size_t);
-extern struct aspath *aspath_dup (struct aspath *);
-extern struct aspath *aspath_aggregate (struct aspath *, struct aspath *);
-extern struct aspath *aspath_prepend (struct aspath *, struct aspath *);
-extern struct aspath *aspath_add_seq (struct aspath *, as_t);
-extern struct aspath *aspath_add_confed_seq (struct aspath *, as_t);
-extern int aspath_cmp_left (struct aspath *, struct aspath *);
-extern int aspath_cmp_left_confed (struct aspath *, struct aspath *);
-extern struct aspath *aspath_delete_confed_seq (struct aspath *);
-extern struct aspath *aspath_empty (void);
-extern struct aspath *aspath_empty_get (void);
-extern struct aspath *aspath_str2aspath (const char *);
-extern void aspath_free (struct aspath *);
-extern struct aspath *aspath_intern (struct aspath *);
-extern void aspath_unintern (struct aspath *);
-extern const char *aspath_print (struct aspath *);
-extern void aspath_print_vty (struct vty *, const char *, struct aspath *);
-extern void aspath_print_all_vty (struct vty *);
-extern unsigned int aspath_key_make (void *);
-extern int aspath_loop_check (struct aspath *, as_t);
-extern int aspath_private_as_check (struct aspath *);
-extern int aspath_firstas_check (struct aspath *, as_t);
-extern unsigned long aspath_count (void);
-extern unsigned int aspath_count_hops (struct aspath *);
-extern unsigned int aspath_count_confeds (struct aspath *);
-extern unsigned int aspath_size (struct aspath *);
-extern as_t aspath_highest (struct aspath *);
-extern void aspath_put (struct stream *, struct aspath *);
-
-/* For SNMP BGP4PATHATTRASPATHSEGMENT, might be useful for debug */
-extern u_char *aspath_snmp_pathseg (struct aspath *, size_t *);
-
-#endif /* _QUAGGA_BGP_ASPATH_H */
+void aspath_init ();
+struct aspath *aspath_parse ();
+struct aspath *aspath_dup (struct aspath *);
+struct aspath *aspath_aggregate (struct aspath *, struct aspath *);
+struct aspath *aspath_prepend (struct aspath *, struct aspath *);
+struct aspath *aspath_add_seq (struct aspath *, as_t);
+struct aspath *aspath_add_confed_seq (struct aspath *, as_t);
+int aspath_cmp_left (struct aspath *, struct aspath *);
+int aspath_cmp_left_confed (struct aspath *, struct aspath *);
+struct aspath *aspath_delete_confed_seq (struct aspath *);
+struct aspath *aspath_empty ();
+struct aspath *aspath_empty_get ();
+struct aspath *aspath_str2aspath (char *);
+void aspath_free (struct aspath *);
+struct aspath *aspath_intern (struct aspath *);
+void aspath_unintern (struct aspath *);
+const char *aspath_print (struct aspath *);
+void aspath_print_vty (struct vty *, struct aspath *);
+void aspath_print_all_vty (struct vty *);
+unsigned int aspath_key_make (struct aspath *);
+int aspath_loop_check (struct aspath *, as_t);
+int aspath_private_as_check (struct aspath *);
+int aspath_firstas_check (struct aspath *, as_t);
+unsigned long aspath_count ();

@@ -1,5 +1,4 @@
 Makefile
-Makefile.in
 *.o
 bgpd
 bgp_btoa
@@ -7,9 +6,3 @@ bgpd.conf
 tags
 TAGS
 .deps
-.nfs*
-*.lo
-*.la
-*.libs
-.arch-inventory
-.arch-ids

@@ -22,24 +22,21 @@
 
 #include <zebra.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "getopt.h"
 #include "vector.h"
 #include "vty.h"
 #include "command.h"
-#include "memory.h"
 #include "thread.h"
 #include "log.h"
 #include "prefix.h"
 #include "if.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "ripngd/ripngd.h"
 
 /* Configuration filename and directory. */
+char config_current[] = RIPNG_DEFAULT_CONFIG;
 char config_default[] = SYSCONFDIR RIPNG_DEFAULT_CONFIG;
-char *config_file = NULL;
 
 /* RIPngd options. */
 struct option longopts[] = 
@@ -48,57 +45,24 @@ struct option longopts[] =
   { "config_file", required_argument, NULL, 'f'},
   { "pid_file",    required_argument, NULL, 'i'},
   { "log_mode",    no_argument,       NULL, 'l'},
-  { "dryrun",      no_argument,       NULL, 'C'},
   { "help",        no_argument,       NULL, 'h'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
   { "retain",      no_argument,       NULL, 'r'},
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
   { 0 }
 };
-
-/* ripngd privileges */
-zebra_capabilities_t _caps_p [] = 
-{
-  ZCAP_NET_RAW,
-  ZCAP_BIND
-};
-
-struct zebra_privs_t ripngd_privs =
-{
-#if defined(QUAGGA_USER)
-  .user = QUAGGA_USER,
-#endif
-#if defined QUAGGA_GROUP
-  .group = QUAGGA_GROUP,
-#endif
-#ifdef VTY_GROUP
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = 2,
-  .cap_num_i = 0
-};
-
 
 /* RIPngd program name */
 
 /* Route retain mode flag. */
 int retain_mode = 0;
 
-/* RIPng VTY bind address. */
-char *vty_addr = NULL;
-
-/* RIPng VTY connection port. */
-int vty_port = RIPNG_VTY_PORT;
-
 /* Master of threads. */
 struct thread_master *master;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_RIPNGD_PID;
+char *pid_file = PATH_RIPNGD_PID;
 
 /* Help information display. */
 static void
@@ -117,10 +81,7 @@ Daemon which manages RIPng.\n\n\
 -A, --vty_addr     Set vty's bind address\n\
 -P, --vty_port     Set vty's port number\n\
 -r, --retain       When program terminates, retain added route by ripngd.\n\
--u, --user         User to run as\n\
--g, --group        Group to run as\n\
 -v, --version      Print program version\n\
--C, --dryrun       Check configuration for validity and exit\n\
 -h, --help         Display this help and exit\n\
 \n\
 Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
@@ -130,69 +91,75 @@ Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
 
 /* SIGHUP handler. */
 void 
-sighup (void)
+sighup (int sig)
 {
-  zlog_info ("SIGHUP received");
-  ripng_clean ();
-  ripng_reset ();
-
-  /* Reload config file. */
-  vty_read_config (config_file, config_default);
-  /* Create VTY's socket */
-  vty_serv_sock (vty_addr, vty_port, RIPNG_VTYSH_PATH);
-
-  /* Try to return to normal operation. */
+  zlog (NULL, LOG_INFO, "SIGHUP received");
 }
 
 /* SIGINT handler. */
 void
-sigint (void)
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal");
+  zlog (NULL, LOG_INFO, "Terminating on signal");
 
   if (! retain_mode)
-    ripng_clean ();
+    ripng_terminate ();
 
   exit (0);
 }
 
 /* SIGUSR1 handler. */
 void
-sigusr1 (void)
+sigusr1 (int sig)
 {
   zlog_rotate (NULL);
 }
 
-struct quagga_signal_t ripng_signals[] =
+/* Signale wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
 {
-  { 
-    .signal = SIGHUP, 
-    .handler = &sighup,
-  },
-  {
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigint,
-  },
-};
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
+
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
+/* Initialization of signal handles. */
+void
+signal_init ()
+{
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigint);
+  signal_set (SIGPIPE, SIG_IGN);
+  signal_set (SIGUSR1, sigusr1);
+}
 
 /* RIPngd main routine. */
 int
 main (int argc, char **argv)
 {
   char *p;
-  int vty_port = RIPNG_VTY_PORT;
+  char *vty_addr = NULL;
+  int vty_port = 0;
   int daemon_mode = 0;
+  char *config_file = NULL;
   char *progname;
   struct thread thread;
-  int dryrun = 0;
 
   /* Set umask before anything for security */
   umask (0027);
@@ -200,14 +167,14 @@ main (int argc, char **argv)
   /* get program name */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  zlog_default = openzlog(progname, ZLOG_RIPNG,
+  zlog_default = openzlog(progname, ZLOG_NOLOG, ZLOG_RIPNG,
 			  LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
   while (1) 
     {
       int opt;
 
-      opt = getopt_long (argc, argv, "dlf:i:hA:P:u:g:vC", longopts, 0);
+      opt = getopt_long (argc, argv, "dlf:hA:P:v", longopts, 0);
     
       if (opt == EOF)
 	break;
@@ -230,33 +197,16 @@ main (int argc, char **argv)
 	  break;
         case 'i':
           pid_file = optarg;
-          break; 
-	case 'P':
-          /* Deal with atoi() returning 0 on failure, and ripngd not
-             listening on ripngd port... */
-          if (strcmp(optarg, "0") == 0) 
-            {
-              vty_port = 0;
-              break;
-            } 
-          vty_port = atoi (optarg);
-          vty_port = (vty_port ? vty_port : RIPNG_VTY_PORT);
           break;
+	case 'P':
+	  vty_port = atoi (optarg);
+	  break;
 	case 'r':
 	  retain_mode = 1;
-	  break;
-	case 'u':
-	  ripngd_privs.user = optarg;
-	  break;
-	case 'g':
-	  ripngd_privs.group = optarg;
 	  break;
 	case 'v':
 	  print_version (progname);
 	  exit (0);
-	  break;
-	case 'C':
-	  dryrun = 1;
 	  break;
 	case 'h':
 	  usage (progname, 0);
@@ -270,44 +220,33 @@ main (int argc, char **argv)
   master = thread_master_create ();
 
   /* Library inits. */
-  zprivs_init (&ripngd_privs);
-  signal_init (master, Q_SIGC(ripng_signals), ripng_signals);
+  signal_init ();
   cmd_init (1);
-  vty_init (master);
-  memory_init ();
+  vty_init ();
 
   /* RIPngd inits. */
   ripng_init ();
   zebra_init ();
-  ripng_peer_init ();
-
-  /* Sort all installed commands. */
   sort_node ();
 
   /* Get configuration file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Start execution only if not in dry-run mode */
-  if(dryrun)
-    return(0);
-  
   /* Change to the daemon program. */
   if (daemon_mode)
     daemon (0, 0);
 
   /* Create VTY socket */
-  vty_serv_sock (vty_addr, vty_port, RIPNG_VTYSH_PATH);
+  vty_serv_sock (vty_addr,
+		 vty_port ? vty_port : RIPNG_VTY_PORT, RIPNG_VTYSH_PATH);
 
   /* Process id file create. */
   pid_output (pid_file);
-
-  /* Print banner. */
-  zlog_notice ("RIPNGd %s starting: vty@%d", QUAGGA_VERSION, vty_port);
 
   /* Fetch next active thread. */
   while (thread_fetch (master, &thread))
     thread_call (&thread);
 
   /* Not reached. */
-  return 0;
+  exit (0);
 }

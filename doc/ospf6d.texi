@@ -1,4 +1,5 @@
-@node OSPFv3
+@node OSPFv3, BGP, OSPFv2, Top
+@comment  node-name,  next,  previous,  up
 @chapter OSPFv3
 
 @command{ospf6d} is a daemon support OSPF version 3 for IPv6 network.
@@ -10,10 +11,10 @@ OSPF for IPv6 is described in RFC2740.
 * OSPF6 interface::             
 * Redistribute routes to OSPF6::  
 * Showing OSPF6 information::   
-* OSPF6 Configuration Examples::
 @end menu
 
-@node OSPF6 router
+@node OSPF6 router, OSPF6 area, OSPFv3, OSPFv3
+@comment  node-name,  next,  previous,  up
 @section OSPF6 router
 
 @deffn {Command} {router ospf6} {}
@@ -28,12 +29,14 @@ Bind interface to specified area, and start sending OSPF packets.  @var{area} ca
 be specified as 0.
 @end deffn
 
-@node OSPF6 area
+@node OSPF6 area, OSPF6 interface, OSPF6 router, OSPFv3
+@comment  node-name,  next,  previous,  up
 @section OSPF6 area
 
 Area support for OSPFv3 is not yet implemented.
 
-@node OSPF6 interface
+@node OSPF6 interface, Redistribute routes to OSPF6, OSPF6 area, OSPFv3
+@comment  node-name,  next,  previous,  up
 @section OSPF6 interface
 
 @deffn {Interface Command} {ipv6 ospf6 cost COST} {}
@@ -60,7 +63,8 @@ Sets interface's Router Priority.  Default value is 1.
 Sets interface's Inf-Trans-Delay.  Default value is 1.
 @end deffn
 
-@node Redistribute routes to OSPF6
+@node Redistribute routes to OSPF6, Showing OSPF6 information, OSPF6 interface, OSPFv3
+@comment  node-name,  next,  previous,  up
 @section Redistribute routes to OSPF6
 
 @deffn {OSPF6 Command} {redistribute static} {}
@@ -68,7 +72,8 @@ Sets interface's Inf-Trans-Delay.  Default value is 1.
 @deffnx {OSPF6 Command} {redistribute ripng} {}
 @end deffn
 
-@node Showing OSPF6 information
+@node Showing OSPF6 information,  , Redistribute routes to OSPF6, OSPFv3
+@comment  node-name,  next,  previous,  up
 @section Showing OSPF6 information
 
 @deffn {Command} {show ipv6 ospf6 [INSTANCE_ID]} {}
@@ -95,19 +100,3 @@ Shows requestlist of neighbor.
 @deffn {Command} {show ipv6 route ospf6} {}
 This command shows internal routing table.
 @end deffn
-
-@node OSPF6 Configuration Examples
-@section OSPF6 Configuration Examples
-
-Example of ospf6d configured on one interface and area:
-
-@example
-interface eth0
- ipv6 ospf6 instance-id 0
-!
-router ospf6
- router-id 212.17.55.53
- area 0.0.0.0 range 2001:770:105:2::/64
- interface eth0 area 0.0.0.0
-!
-@end example

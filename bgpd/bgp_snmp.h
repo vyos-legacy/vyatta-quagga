@@ -18,11 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_SNMP_H
-#define _QUAGGA_BGP_SNMP_H
-
-extern void bgp_snmp_init (void);
-extern void bgpTrapEstablished (struct peer *);
-extern void bgpTrapBackwardTransition (struct peer *);
-
-#endif /* _QUAGGA_BGP_SNMP_H */
+void bgp_snmp_init ();
+void bgpTrapEstablished (struct peer *);
+void bgpTrapBackwardTransition (struct peer *);

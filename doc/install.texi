@@ -1,22 +1,23 @@
-@node  Installation
+@node  Installation, Basic commands, Overview, Top
+@comment  node-name,  next,  previous,  up
 @chapter Installation
 
-@cindex How to install Quagga
+@cindex How to install Zebra
 @cindex Installation
-@cindex Installing Quagga
+@cindex Installing Zebra
 @cindex Building the system
-@cindex Making Quagga
+@cindex Making Zebra
 
-There are three steps for installing the software: configuration,
+  There are three steps for installing the software: configuration,
 compilation, and installation.
 
 @menu
-* Configure the Software::
-* Build the Software::
-* Install the Software::
+* Configure the Software::      
+* Build the Software::          
+* Install the Software::        
 @end menu
 
-The easiest way to get Quagga running is to issue the following
+  The easiest way to get Zebra running is to issue the following
 commands:
 
 @example
@@ -25,17 +26,9 @@ commands:
 % make install
 @end example
 
-@node Configure the Software
+@node Configure the Software, Build the Software, Installation, Installation
+@comment  node-name,  next,  previous,  up
 @section Configure the Software
-
-@menu
-* The Configure script and its options::
-* Least-Privilege support::
-* Linux notes::
-@end menu
-
-@node The Configure script and its options
-@subsection The Configure script and its options
 
 @cindex Configuration options
 @cindex Options for configuring
@@ -43,10 +36,10 @@ commands:
 @cindex Distribution configuration
 @cindex Options to @code{./configure}
  
-Quagga has an excellent configure script which automatically detects most
-host configurations.  There are several additional configure options you can
-use to turn off IPv6 support, to disable the compilation of specific
-daemons, and to enable SNMP support.
+  Zebra has an excellent configure script which
+automatically detects most host configurations.  There are several
+additional configure options you can use to turn off IPv6 support, to
+disable the compilation of specific daemons, and to enable SNMP support.
 
 @table @option
 @item --enable-guile
@@ -54,9 +47,9 @@ Turn on compilation of the zebra-guile interpreter.  You will need the
 guile library to make this.  zebra-guile implementation is not yet
 finished.  So this option is only useful for zebra-guile developers.
 @item --disable-ipv6
-Turn off IPv6 related features and daemons.  Quagga configure script
+Turn off IPv6 related features and daemons.  Zebra configure script
 automatically detects IPv6 stack.  But sometimes you might want to
-disable IPv6 support of Quagga.
+disable IPv6 support of Zebra.
 @item --disable-zebra
 Do not build zebra daemon.
 @item --disable-ripd
@@ -73,27 +66,12 @@ Do not build bgpd.
 Make @command{bgpd} which does not make bgp announcements at all.  This
 feature is good for using @command{bgpd} as a BGP announcement listener.
 @item --enable-netlink
-Force to enable @sc{gnu}/Linux netlink interface.  Quagga configure
+Force to enable @sc{gnu}/Linux netlink interface.  Zebra configure
 script detects netlink interface by checking a header file.  When the header
 file does not match to the current running kernel, configure script will
 not turn on netlink support.
 @item --enable-snmp
 Enable SNMP support.  By default, SNMP support is disabled.
-@item --enable-opaque-lsa
-Enable support for Opaque LSAs (RFC2370) in ospfd.
-@item --disable-ospfapi
-Disable support for OSPF-API, an API to interface directly with ospfd.
-OSPF-API is enabled if --enable-opaque-lsa is set.
-@item --disable-ospfclient
-Disable building of the example OSPF-API client.
-@item --enable-ospf-te
-Enable support for OSPF Traffic Engineering Extension (internet-draft) this
-requires support for Opaque LSAs.
-@item --enable-multipath=@var{ARG}
-Enable support for Equal Cost Multipath. @var{ARG} is the maximum number
-of ECMP paths to allow, set to 0 to allow unlimited number of paths.
-@item --enable-rtadv
-Enable support IPV6 router advertisement in zebra.
 @end table
 
 You may specify any combination of the above options to the configure
@@ -106,11 +84,7 @@ options to the configuration script.
 @item --prefix=@var{prefix}
 Install architecture-independent files in @var{prefix} [/usr/local].
 @item --sysconfdir=@var{dir}
-Look for configuration files in @var{dir} [@var{prefix}/etc]. Note
-that sample configuration files will be installed here.
-@item --localstatedir=@var{dir}
-Configure zebra to use @var{dir} for local state files, such
-as pid files and unix sockets.
+Read-only sample configuration file in @var{dir} [@var{prefix}/etc].
 @end table
 
 @example
@@ -119,62 +93,23 @@ as pid files and unix sockets.
 
 This command will configure zebra and the routing daemons.
 
-@node Least-Privilege support
-@subsection Least-Privilege support
-
-@cindex Quagga Least-Privileges
-@cindex Quagga Privileges
-
-Additionally, you may configure zebra to drop its elevated privileges
-shortly after startup and switch to another user. The configure script will
-automatically try to configure this support. There are three configure
-options to control the behaviour of Quagga daemons.
-
-@table @option
-@item --enable-user=@var{user}
-Switch to user @var{ARG} shortly after startup, and run as user @var{ARG}
-in normal operation.
-@item --enable-group=@var{group}
-Switch real and effective group to @var{group} shortly after
-startup. 
-@item --enable-vty-group=@var{group}
-Create Unix Vty sockets (for use with vtysh) with group owndership set to
-@var{group}. This allows one to create a seperate group which is
-restricted to accessing only the Vty sockets, hence allowing one to
-delegate this group to individual users, or to run vtysh setgid to
-this group.
-@end table
-
-The default user and group which will be configured is 'quagga' if no user
-or group is specified. Note that this user or group requires write access to
-the local state directory (see --localstatedir) and requires at least read
-access, and write access if you wish to allow daemons to write out their
-configuration, to the configuration directory (see --sysconfdir).
-
-On systems which have the 'libcap' capabilities manipulation library
-(currently only linux), the quagga system will retain only minimal
-capabilities required, further it will only raise these capabilities for
-brief periods. On systems without libcap, quagga will run as the user
-specified and only raise its uid back to uid 0 for brief periods.
-
-@node Linux notes
-@subsection Linux Notes
-
-@cindex Configuring Quagga
+@cindex Configuring Zebra
+@cindex Configuration the software build
 @cindex Building on Linux boxes
 @cindex Linux configurations
 
 There are several options available only to @sc{gnu}/Linux systems:
-@footnote{@sc{gnu}/Linux has very flexible kernel configuration features}.  If
-you use @sc{gnu}/Linux, make sure that the current kernel configuration is
-what you want.  Quagga will run with any kernel configuration but some
+@footnote{GNU/Linux has very flexible kernel configuration features.  If
+you use GNU/Linux, make sure that the current kernel configuration is
+what you want.  Zebra will run with any kernel configuration but some
 recommendations do exist.
 
 @table @var
 
 @item CONFIG_NETLINK
-Kernel/User netlink socket. This is a brand new feature which enables an
-advanced interface between the Linux kernel and zebra (@pxref{Kernel Interface}).
+Kernel/User netlink socket.  
+This is a brand new feature which enables
+an advanced interface between the Linux kernel and Zebra (@pxref{Kernel Interface}).
 
 @item CONFIG_RTNETLINK
 Routing messages.
@@ -184,13 +119,13 @@ updates directly from the kernel (@pxref{Kernel Interface}).
 
 @item CONFIG_IP_MULTICAST
 IP: multicasting.  
-This option should be specified when you use @command{ripd} (@pxref{RIP}) or
-@command{ospfd} (@pxref{OSPFv2}) because these protocols use multicast.
+This option should be specified when you use @command{ripd} or
+@command{ospfd} because these protocols use multicast.
 
 @end table
 
 IPv6 support has been added in @sc{gnu}/Linux kernel version 2.2.  If you
-try to use the Quagga IPv6 feature on a @sc{gnu}/Linux kernel, please
+try to use the Zebra IPv6 feature on a @sc{gnu}/Linux kernel, please
 make sure the following libraries have been installed.  Please note that
 these libraries will not be needed when you uses @sc{gnu} C library 2.1
 or upper.
@@ -202,18 +137,20 @@ The @code{inet6-apps} package includes basic IPv6 related libraries such
 as @code{inet_ntop} and @code{inet_pton}.  Some basic IPv6 programs such
 as @command{ping}, @command{ftp}, and @command{inetd} are also
 included. The @code{inet-apps} can be found at
-@uref{ftp://ftp.inner.net/pub/ipv6/}.
+@url{ftp://ftp.inner.net/pub/ipv6/}.
 
 @item net-tools
 The @code{net-tools} package provides an IPv6 enabled interface and
 routing utility.  It contains @command{ifconfig}, @command{route},
 @command{netstat}, and other tools.  @code{net-tools} may be found at
-@uref{http://www.tazenda.demon.co.uk/phil/net-tools/}.
+@url{http://www.tazenda.demon.co.uk/phil/net-tools/}.
 
 @end table
 @c A - end of footnote 
+}.
 
-@node Build the Software
+@node Build the Software, Install the Software, Configure the Software, Installation
+@comment  node-name,  next,  previous,  up
 @section Build the Software
 
 After configuring the software, you will need to compile it for your
@@ -235,7 +172,7 @@ at this stage, be certain to send a bug report @xref{Bug Reports}.
 @c A - End of node, Building the Software
 
 
-@node Install the Software
+@node Install the Software,  , Build the Software, Installation
 @comment  node-name,  next,  previous,  up
 @section Install the Software
 
@@ -244,7 +181,7 @@ programs and supporting files to a standard location. After the
 installation process has completed, these files have been copied
 from your work directory to @file{/usr/local/bin}, and @file{/usr/local/etc}.
 
-To install the Quagga suite, issue the following command at your shell
+To install the Zebra suite, issue the following command at your shell
 prompt: @command{make install}.
 
 @example
@@ -253,7 +190,12 @@ prompt: @command{make install}.
 %
 @end example
 
-Quagga daemons have their own terminal interface or VTY.  After
+@c A - removed this section and placed it with Install the Software
+@c @node Additional Notes,  , Install the Software, Installation
+@comment  node-name,  next,  previous,  up
+@c @section Additional Notes
+
+Zebra daemons have their own terminal interface or VTY.  After
 installation, you have to setup each beast's port number to connect to
 them.  Please add the following entries to @file{/etc/services}.
 
@@ -265,8 +207,6 @@ ripngd        2603/tcp		  # RIPngd vty
 ospfd         2604/tcp		  # OSPFd vty
 bgpd          2605/tcp		  # BGPd vty
 ospf6d        2606/tcp		  # OSPF6d vty
-ospfapi       2607/tcp		  # ospfapi
-isisd         2608/tcp		  # ISISd vty
 @end example
 
 If you use a FreeBSD newer than 2.2.8, the above entries are already

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003 Yasuhiro Ohara
+ * Copyright (C) 1999 Yasuhiro Ohara
  *
  * This file is part of GNU Zebra.
  *
@@ -19,1387 +19,1112 @@
  * Boston, MA 02111-1307, USA.  
  */
 
-#include <zebra.h>
-
-#include "log.h"
-#include "memory.h"
-#include "prefix.h"
-#include "table.h"
-#include "vty.h"
-#include "command.h"
-#include "linklist.h"
-
-#include "ospf6_proto.h"
-#include "ospf6_lsa.h"
-#include "ospf6_lsdb.h"
-#include "ospf6_route.h"
-#include "ospf6_top.h"
-#include "ospf6_area.h"
-#include "ospf6_interface.h"
 #include "ospf6d.h"
 
-unsigned char conf_debug_ospf6_route = 0;
-
-static char *
-ospf6_route_table_name (struct ospf6_route_table *table)
+char *
+dtype_name[OSPF6_DEST_TYPE_MAX] =
 {
-  static char name[32];
-  switch (table->scope_type)
+  "Unknown", "Router", "Network", "Discard"
+};
+#define DTYPE_NAME(x) \
+  (0 < (x) && (x) < sizeof (dtype_name) ? \
+   dtype_name[(x)] : dtype_name[0])
+
+char *
+dtype_abname[OSPF6_DEST_TYPE_MAX] =
+{
+  "?", "R", "N", "D"
+};
+#define DTYPE_ABNAME(x) \
+  (0 < (x) && (x) < sizeof (dtype_abname) ? \
+   dtype_abname[(x)] : dtype_abname[0])
+
+char *
+ptype_name[OSPF6_PATH_TYPE_MAX] =
+{
+  "Unknown", "Intra", "Inter", "External-1", "External-2",
+  "System", "Kernel", "Connect", "Static", "RIP", "RIPng",
+  "OSPF", "OSPF6", "BGP"
+};
+#define PTYPE_NAME(x) \
+  (0 < (x) && (x) < sizeof (ptype_name) ? \
+   ptype_name[(x)] : ptype_name[0])
+
+char *
+ptype_abname[OSPF6_PATH_TYPE_MAX] =
+{
+  "??", "Ia", "Ie", "E1", "E2",
+  "-X", "-K", "-C", "-S", "-R", "-R",
+  "-O", "-O", "-B"
+};
+#define PTYPE_ABNAME(x) \
+  (0 < (x) && (x) < sizeof (ptype_abname) ? \
+   ptype_abname[(x)] : ptype_abname[0])
+
+
+
+int
+ospf6_path_cmp (void *arg1, void *arg2)
+{
+  struct ospf6_path_node *pn1 = arg1;
+  struct ospf6_path_node *pn2 = arg2;
+  struct ospf6_path *p1 = &pn1->path;
+  struct ospf6_path *p2 = &pn2->path;
+
+  if (p1->type < p2->type)
+    return -1;
+  else if (p1->type > p2->type)
+    return 1;
+
+  if (p1->type == OSPF6_PATH_TYPE_EXTERNAL2)
     {
-      case OSPF6_SCOPE_TYPE_GLOBAL:
-        {
-          switch (table->table_type)
-            {
-              case OSPF6_TABLE_TYPE_ROUTES:
-                snprintf (name, sizeof (name), "global route table");
-                break;
-              case OSPF6_TABLE_TYPE_BORDER_ROUTERS:
-                snprintf (name, sizeof (name), "global brouter table");
-                break;
-              case OSPF6_TABLE_TYPE_EXTERNAL_ROUTES:
-                snprintf (name, sizeof (name), "global external table");
-                break;
-              default:
-                snprintf (name, sizeof (name), "global unknown table");
-                break;
-            }
-        }
-        break;
-
-      case OSPF6_SCOPE_TYPE_AREA:
-        {
-          struct ospf6_area *oa = (struct ospf6_area *) table->scope;
-          switch (table->table_type)
-            {
-              case OSPF6_TABLE_TYPE_SPF_RESULTS:
-                snprintf (name, sizeof (name),
-                          "area %s spf table", oa->name);
-                break;
-              case OSPF6_TABLE_TYPE_ROUTES:
-                snprintf (name, sizeof (name),
-                          "area %s route table", oa->name);
-                break;
-              case OSPF6_TABLE_TYPE_PREFIX_RANGES:
-                snprintf (name, sizeof (name),
-                          "area %s range table", oa->name);
-                break;
-              case OSPF6_TABLE_TYPE_SUMMARY_PREFIXES:
-                snprintf (name, sizeof (name),
-                          "area %s summary prefix table", oa->name);
-                break;
-              case OSPF6_TABLE_TYPE_SUMMARY_ROUTERS:
-                snprintf (name, sizeof (name),
-                          "area %s summary router table", oa->name);
-                break;
-              default:
-                snprintf (name, sizeof (name),
-                          "area %s unknown table", oa->name);
-                break;
-            }
-        }
-        break;
-
-      case OSPF6_SCOPE_TYPE_INTERFACE:
-        {
-          struct ospf6_interface *oi = (struct ospf6_interface *) table->scope;
-          switch (table->table_type)
-            {
-              case OSPF6_TABLE_TYPE_CONNECTED_ROUTES:
-                snprintf (name, sizeof (name), "interface %s connected table",
-                          oi->interface->name);
-                break;
-              default:
-                snprintf (name, sizeof (name), "interface %s unknown table",
-                          oi->interface->name);
-                break;
-            }
-        }
-        break;
-
-      default:
-        {
-          switch (table->table_type)
-            {
-              case OSPF6_TABLE_TYPE_SPF_RESULTS:
-                snprintf (name, sizeof (name), "temporary spf table");
-                break;
-              default:
-                snprintf (name, sizeof (name), "temporary unknown table");
-                break;
-            }
-        }
-        break;
-    }
-  return name;
-}
-
-void
-ospf6_linkstate_prefix (u_int32_t adv_router, u_int32_t id,
-                        struct prefix *prefix)
-{
-  memset (prefix, 0, sizeof (struct prefix));
-  prefix->family = AF_INET6;
-  prefix->prefixlen = 64;
-  memcpy (&prefix->u.prefix6.s6_addr[0], &adv_router, 4);
-  memcpy (&prefix->u.prefix6.s6_addr[4], &id, 4);
-}
-
-void
-ospf6_linkstate_prefix2str (struct prefix *prefix, char *buf, int size)
-{
-  u_int32_t adv_router, id;
-  char adv_router_str[16], id_str[16];
-  memcpy (&adv_router, &prefix->u.prefix6.s6_addr[0], 4);
-  memcpy (&id, &prefix->u.prefix6.s6_addr[4], 4);
-  inet_ntop (AF_INET, &adv_router, adv_router_str, sizeof (adv_router_str));
-  inet_ntop (AF_INET, &id, id_str, sizeof (id_str));
-  if (ntohl (id))
-    snprintf (buf, size, "%s Net-ID: %s", adv_router_str, id_str);
-  else
-    snprintf (buf, size, "%s", adv_router_str);
-}
-
-/* Global strings for logging */
-const char *ospf6_dest_type_str[OSPF6_DEST_TYPE_MAX] =
-{ "Unknown", "Router", "Network", "Discard", "Linkstate", "AddressRange", };
-
-const char *ospf6_dest_type_substr[OSPF6_DEST_TYPE_MAX] =
-{ "?", "R", "N", "D", "L", "A", };
-
-const char *ospf6_path_type_str[OSPF6_PATH_TYPE_MAX] =
-{ "Unknown", "Intra-Area", "Inter-Area", "External-1", "External-2", };
-
-const char *ospf6_path_type_substr[OSPF6_PATH_TYPE_MAX] =
-{ "??", "IA", "IE", "E1", "E2", };
-
-
-struct ospf6_route *
-ospf6_route_create ()
-{
-  struct ospf6_route *route;
-  route = XCALLOC (MTYPE_OSPF6_ROUTE, sizeof (struct ospf6_route));
-  return route;
-}
-
-void
-ospf6_route_delete (struct ospf6_route *route)
-{
-  XFREE (MTYPE_OSPF6_ROUTE, route);
-}
-
-struct ospf6_route *
-ospf6_route_copy (struct ospf6_route *route)
-{
-  struct ospf6_route *new;
-
-  new = ospf6_route_create ();
-  memcpy (new, route, sizeof (struct ospf6_route));
-  new->rnode = NULL;
-  new->prev = NULL;
-  new->next = NULL;
-  new->table = NULL;
-  new->lock = 0;
-  return new;
-}
-
-void
-ospf6_route_lock (struct ospf6_route *route)
-{
-  route->lock++;
-}
-
-void
-ospf6_route_unlock (struct ospf6_route *route)
-{
-  assert (route->lock > 0);
-  route->lock--;
-  if (route->lock == 0)
-    {
-      /* Can't detach from the table until here
-         because ospf6_route_next () will use
-         the 'route->table' pointer for logging */
-      route->table = NULL;
-      ospf6_route_delete (route);
-    }
-}
-
-/* Route compare function. If ra is more preferred, it returns
-   less than 0. If rb is more preferred returns greater than 0.
-   Otherwise (neither one is preferred), returns 0 */
-static int
-ospf6_route_cmp (struct ospf6_route *ra, struct ospf6_route *rb)
-{
-  assert (ospf6_route_is_same (ra, rb));
-  assert (OSPF6_PATH_TYPE_NONE < ra->path.type &&
-          ra->path.type < OSPF6_PATH_TYPE_MAX);
-  assert (OSPF6_PATH_TYPE_NONE < rb->path.type &&
-          rb->path.type < OSPF6_PATH_TYPE_MAX);
-
-  if (ra->type != rb->type)
-    return (ra->type - rb->type);
-
-  if (ra->path.area_id != rb->path.area_id)
-    return (ntohl (ra->path.area_id) - ntohl (rb->path.area_id));
-
-  if (ra->path.type != rb->path.type)
-    return (ra->path.type - rb->path.type);
-
-  if (ra->path.type == OSPF6_PATH_TYPE_EXTERNAL2)
-    {
-      if (ra->path.cost_e2 != rb->path.cost_e2)
-        return (ra->path.cost_e2 - rb->path.cost_e2);
-    }
-  else
-    {
-      if (ra->path.cost != rb->path.cost)
-        return (ra->path.cost - rb->path.cost);
+      if (p1->cost_e2 < p2->cost_e2)
+        return -1;
+      else if (p1->cost_e2 > p2->cost_e2)
+        return 1;
     }
 
-  return 0;
+  if (p1->cost < p2->cost)
+    return -1;
+  else if (p1->cost > p2->cost)
+    return 1;
+
+  /* if from the same source, recognize as identical
+     (and treat this as update) */
+  if (! memcmp (&p1->origin, &p2->origin, sizeof (struct ls_origin)) &&
+      p1->area_id == p2->area_id)
+    return 0;
+
+  /* else, always prefer left */
+  return -1;
 }
 
-struct ospf6_route *
-ospf6_route_lookup (struct prefix *prefix,
+int
+ospf6_nexthop_cmp (void *arg1, void *arg2)
+{
+  int i, ret = 0;
+  struct ospf6_nexthop_node *nn1 = arg1;
+  struct ospf6_nexthop_node *nn2 = arg2;
+  struct ospf6_nexthop *n1 = &nn1->nexthop;
+  struct ospf6_nexthop *n2 = &nn2->nexthop;
+
+  if (memcmp (n1, n2, sizeof (struct ospf6_nexthop)) == 0)
+    return 0;
+
+  for (i = 0; i < sizeof (struct in6_addr); i++)
+    {
+      if (nn1->nexthop.address.s6_addr[i] != nn2->nexthop.address.s6_addr[i])
+        {
+          ret = nn1->nexthop.address.s6_addr[i] -
+                nn2->nexthop.address.s6_addr[i];
+          break;
+        }
+    }
+
+  if (ret == 0)
+    ret = -1;
+
+  return ret;
+}
+
+static void
+ospf6_route_request (struct ospf6_route_req *request,
+                     struct ospf6_route_node   *rn,
+                     struct ospf6_path_node    *pn,
+                     struct ospf6_nexthop_node *nn)
+{
+  assert (request);
+  assert (rn && pn && nn);
+
+  request->route_node = rn->route_node;
+
+  linklist_head (rn->path_list, &request->path_lnode);
+  while (request->path_lnode.data != pn)
+    {
+      //assert (! linklist_end (&request->path_lnode));
+      if (linklist_end (&request->path_lnode))
+        {
+          struct linklist_node node;
+
+          zlog_info ("rn: %p, pn: %p", rn, pn);
+          zlog_info ("origin: %hx %x %x bits: %x opt: %x%x%x popt: %x area: %x type: %d cost  %d %d %d",
+          pn->path.origin.type, pn->path.origin.id, pn->path.origin.adv_router, (int)pn->path.router_bits, (int)pn->path.capability[0],
+          (int)pn->path.capability[1], (int)pn->path.capability[2],
+          (int)pn->path.prefix_options, pn->path.area_id,
+          pn->path.type, pn->path.metric_type, pn->path.cost, pn->path.cost_e2);
+
+          for (linklist_head (rn->path_list, &node); ! linklist_end (&node);
+               linklist_next (&node))
+            {
+              struct ospf6_path_node *pn2 = node.data;
+
+              zlog_info (" %p: path data with pn(%p): %s", pn2, pn,
+                         (memcmp (&pn->path, &pn2->path,
+                                  sizeof (struct ospf6_path)) ?
+                          "different" : "same"));
+
+          zlog_info ("  origin: %hx %x %x bits: %x opt: %x%x%x popt: %x area: %x type: %d cost  %d %d %d",
+          pn2->path.origin.type, pn2->path.origin.id, pn2->path.origin.adv_router, (int)pn2->path.router_bits, (int)pn2->path.capability[0],
+          (int)pn2->path.capability[1], (int)pn2->path.capability[2],
+          (int)pn2->path.prefix_options, pn2->path.area_id,
+          pn2->path.type, pn2->path.metric_type, pn2->path.cost, pn2->path.cost_e2);
+
+              if (! memcmp (&pn->path, &pn2->path, sizeof (struct ospf6_path)))
+                {
+                  pn = pn2;
+                  request->nexthop_lnode.data = pn2;
+                }
+            }
+          break;
+        }
+      linklist_next (&request->path_lnode);
+    }
+  assert (request->path_lnode.data == pn);
+
+  linklist_head (pn->nexthop_list, &request->nexthop_lnode);
+  while (request->nexthop_lnode.data != nn)
+    {
+      assert (! linklist_end (&request->nexthop_lnode));
+      linklist_next (&request->nexthop_lnode);
+    }
+  assert (request->nexthop_lnode.data == nn);
+
+  request->table = rn->table;
+  request->count = rn->count;
+  request->route_id = rn->route_id;
+  memcpy (&request->route,   &rn->route,   sizeof (struct ospf6_route));
+  memcpy (&request->path,    &pn->path,    sizeof (struct ospf6_path));
+  memcpy (&request->nexthop, &nn->nexthop, sizeof (struct ospf6_nexthop));
+}
+
+int
+ospf6_route_count (struct ospf6_route_req *request)
+{
+  return request->count;
+}
+
+int
+ospf6_route_lookup (struct ospf6_route_req *request,
+                    struct prefix *prefix,
                     struct ospf6_route_table *table)
 {
   struct route_node *node;
-  struct ospf6_route *route;
+  struct ospf6_route_node   *rn = NULL;
+  struct ospf6_path_node    *pn = NULL;
+  struct ospf6_nexthop_node *nn = NULL;
+  struct linklist_node lnode;
+
+  if (request)
+    memset ((void *) request, 0, sizeof (struct ospf6_route_req));
 
   node = route_node_lookup (table->table, prefix);
-  if (node == NULL)
-    return NULL;
+  if (! node)
+    return 0;
 
-  route = (struct ospf6_route *) node->info;
-  return route;
+  rn = (struct ospf6_route_node *) node->info;
+  if (! rn)
+    return 0;
+
+  if (request)
+    {
+      linklist_head (rn->path_list, &lnode);
+      pn = lnode.data;
+      linklist_head (pn->nexthop_list, &lnode);
+      nn = lnode.data;
+
+      ospf6_route_request (request, rn, pn, nn);
+    }
+
+  return 1;
 }
 
-struct ospf6_route *
-ospf6_route_lookup_identical (struct ospf6_route *route,
-                              struct ospf6_route_table *table)
+void
+ospf6_route_head (struct ospf6_route_req *request,
+                  struct ospf6_route_table *table)
 {
-  struct ospf6_route *target;
+  struct route_node *node;
+  struct ospf6_route_node   *rn = NULL;
+  struct ospf6_path_node    *pn = NULL;
+  struct ospf6_nexthop_node *nn = NULL;
+  struct linklist_node lnode;
 
-  for (target = ospf6_route_lookup (&route->prefix, table);
-       target; target = target->next)
+  if (request)
+    memset (request, 0, sizeof (struct ospf6_route_req));
+
+  node = route_top (table->table);
+  if (! node)
+    return;
+
+  while (node && node->info == NULL)
+    node = route_next (node);
+  if (! node)
+    return;
+
+  rn = (struct ospf6_route_node *) node->info;
+  linklist_head (rn->path_list, &lnode);
+  pn = lnode.data;
+  linklist_head (pn->nexthop_list, &lnode);
+  nn = lnode.data;
+
+  ospf6_route_request (request, rn, pn, nn);
+}
+
+int
+ospf6_route_end (struct ospf6_route_req *request)
+{
+  if (request->route_node == NULL &&
+      linklist_end (&request->path_lnode) &&
+      linklist_end (&request->nexthop_lnode) &&
+      request->nexthop.ifindex == 0 &&
+      IN6_IS_ADDR_UNSPECIFIED (&request->nexthop.address))
+    return 1;
+  return 0;
+}
+
+void
+ospf6_route_next (struct ospf6_route_req *request)
+{
+  struct ospf6_route_node   *route_node = NULL;
+  struct ospf6_path_node    *path_node = NULL;
+  struct ospf6_nexthop_node *nexthop_node = NULL;
+
+  linklist_next (&request->nexthop_lnode);
+  if (linklist_end (&request->nexthop_lnode))
     {
-      if (ospf6_route_is_identical (target, route))
-        return target;
+      linklist_next (&request->path_lnode);
+      if (linklist_end (&request->path_lnode))
+        {
+          request->route_node = route_next (request->route_node);
+          while (request->route_node && request->route_node->info == NULL)
+            request->route_node = route_next (request->route_node);
+          if (request->route_node)
+            {
+              route_node = request->route_node->info;
+              if (route_node)
+                linklist_head (route_node->path_list, &request->path_lnode);
+            }
+        }
+
+      path_node = request->path_lnode.data;
+      if (path_node)
+        linklist_head (path_node->nexthop_list, &request->nexthop_lnode);
+    }
+
+  nexthop_node = request->nexthop_lnode.data;
+
+  if (nexthop_node == NULL)
+    {
+      assert (path_node == NULL);
+      assert (route_node == NULL);
+
+      memset (&request->route,   0, sizeof (struct ospf6_route));
+      memset (&request->path,    0, sizeof (struct ospf6_path));
+      memset (&request->nexthop, 0, sizeof (struct ospf6_nexthop));
+    }
+  else
+    {
+      path_node = request->path_lnode.data;
+      route_node = request->route_node->info;
+
+      assert (path_node != NULL);
+      assert (route_node != NULL);
+
+      memcpy (&request->route,   &route_node->route,
+              sizeof (struct ospf6_route));
+      memcpy (&request->path,    &path_node->path,
+              sizeof (struct ospf6_path));
+      memcpy (&request->nexthop, &nexthop_node->nexthop,
+              sizeof (struct ospf6_nexthop));
+    }
+}
+
+#define ADD    0
+#define CHANGE 1
+#define REMOVE 2
+
+void
+ospf6_route_hook_call (int type,
+                       struct ospf6_route_req *request,
+                       struct ospf6_route_table *table)
+{
+  struct linklist_node node;
+  void (*func) (struct ospf6_route_req *);
+
+  for (linklist_head (table->hook_list[type], &node);
+       ! linklist_end (&node);
+       linklist_next (&node))
+    {
+      func = node.data;
+      (*func) (request);
+    }
+}
+
+void
+ospf6_route_hook_register (void (*add)    (struct ospf6_route_req *),
+                           void (*change) (struct ospf6_route_req *),
+                           void (*remove) (struct ospf6_route_req *),
+                           struct ospf6_route_table *table)
+{
+  linklist_add (add,    table->hook_list[ADD]);
+  linklist_add (change, table->hook_list[CHANGE]);
+  linklist_add (remove, table->hook_list[REMOVE]);
+}
+
+void
+ospf6_route_hook_unregister (void (*add)    (struct ospf6_route_req *),
+                             void (*change) (struct ospf6_route_req *),
+                             void (*remove) (struct ospf6_route_req *),
+                             struct ospf6_route_table *table)
+{
+  linklist_remove (add,    table->hook_list[ADD]);
+  linklist_remove (change, table->hook_list[CHANGE]);
+  linklist_remove (remove, table->hook_list[REMOVE]);
+}
+
+
+int
+prefix_ls2str (struct prefix *p, char *str, int size)
+{
+  char id[BUFSIZ], adv_router[BUFSIZ];
+  struct prefix_ls *pl = (struct prefix_ls *) p;
+
+  inet_ntop (AF_INET, &pl->id, id, BUFSIZ);
+  inet_ntop (AF_INET, &pl->adv_router, adv_router, BUFSIZ);
+  snprintf (str, size, "%s-%s", adv_router, id);
+  return 0;
+}
+
+void
+ospf6_route_log_request (char *what, char *where,
+                         struct ospf6_route_req *request)
+{
+  char prefix[64];
+  char area_id[16];
+  char type[16], id[16], adv[16];
+  char address[64], ifname[IFNAMSIZ];
+
+  if (request->route.prefix.family != AF_INET &&
+      request->route.prefix.family != AF_INET6)
+    prefix_ls2str (&request->route.prefix, prefix, sizeof (prefix));
+  else
+    prefix2str (&request->route.prefix, prefix, sizeof (prefix));
+
+  inet_ntop (AF_INET, &request->path.area_id, area_id, sizeof (area_id));
+
+  ospf6_lsa_type_string (request->path.origin.type, type, sizeof (type));
+  inet_ntop (AF_INET, &request->path.origin.id, id, sizeof (id));
+  inet_ntop (AF_INET, &request->path.origin.adv_router, adv, sizeof (adv));
+
+  inet_ntop (AF_INET6, &request->nexthop.address, address, sizeof (address));
+
+  zlog_info ("ROUTE: %s %s %s %s %s",
+             what, DTYPE_ABNAME (request->route.type), prefix,
+             ((strcmp ("Add", what) == 0) ? "to" : "from"), where);
+  zlog_info ("ROUTE:     Area: %s type: %s cost: %lu (E2: %lu)",
+             area_id, PTYPE_NAME (request->path.type),
+             (u_long) request->path.cost, (u_long) request->path.cost_e2);
+  zlog_info ("ROUTE:     Origin: Type: %s", type);
+  zlog_info ("ROUTE:     Origin: Id: %s Adv: %s", id, adv);
+  zlog_info ("ROUTE:     Nexthop: %s", address);
+  zlog_info ("ROUTE:     Nexthop: Ifindex: %u (%s)",
+             request->nexthop.ifindex,
+             if_indextoname (request->nexthop.ifindex, ifname));
+}
+
+struct ospf6_path_node *
+ospf6_route_find_path_node (struct ospf6_route_req *request,
+                            struct ospf6_route_node *rn)
+{
+  struct linklist_node node;
+
+  for (linklist_head (rn->path_list, &node); ! linklist_end (&node);
+       linklist_next (&node))
+    {
+      struct ospf6_path_node *path_node = node.data;
+
+      if (path_node->path.area_id == request->path.area_id &&
+          path_node->path.origin.type == request->path.origin.type &&
+          path_node->path.origin.id == request->path.origin.id &&
+          path_node->path.origin.adv_router == request->path.origin.adv_router)
+        return path_node;
+    }
+
+#if 0
+  zlog_info ("req path : area: %#x origin: type: %d, id: %d, adv_router: %#x",
+             request->path.area_id, request->path.origin.type,
+             request->path.origin.id, request->path.origin.adv_router);
+  for (linklist_head (rn->path_list, &node); ! linklist_end (&node);
+       linklist_next (&node))
+    {
+      struct ospf6_path_node *path_node = node.data;
+      zlog_info ("  path : area: %#x origin: type: %d, id: %d, adv_router: %#x",
+                 path_node->path.area_id, path_node->path.origin.type,
+                 path_node->path.origin.id, path_node->path.origin.adv_router);
+    }
+#endif
+
+  return NULL;
+}
+
+struct ospf6_nexthop_node *
+ospf6_route_find_nexthop_node (struct ospf6_route_req *request,
+                               struct ospf6_path_node *pn)
+{
+  struct linklist_node node;
+  for (linklist_head (pn->nexthop_list, &node); ! linklist_end (&node);
+       linklist_next (&node))
+    {
+      struct ospf6_nexthop_node *nexthop_node = node.data;
+
+      if (! memcmp (&nexthop_node->nexthop, &request->nexthop,
+          sizeof (struct ospf6_nexthop)))
+        return nexthop_node;
     }
   return NULL;
 }
 
-struct ospf6_route *
-ospf6_route_lookup_bestmatch (struct prefix *prefix,
-                              struct ospf6_route_table *table)
-{
-  struct route_node *node;
-  struct ospf6_route *route;
-
-  node = route_node_match (table->table, prefix);
-  if (node == NULL)
-    return NULL;
-  route_unlock_node (node);
-
-  route = (struct ospf6_route *) node->info;
-  return route;
-}
-
-#ifndef NDEBUG
-static void
-route_table_assert (struct ospf6_route_table *table)
-{
-  struct ospf6_route *prev, *r, *next;
-  char buf[64];
-  unsigned int link_error = 0, num = 0;
-  
-  r = ospf6_route_head (table);
-  prev = NULL;
-  while (r)
-    {
-      if (r->prev != prev)
-        link_error++;
-      
-      next = ospf6_route_next (r);
-      
-      if (r->next != next)
-        link_error++;
-      
-      prev = r;
-      r = next;
-    }
-  
-  for (r = ospf6_route_head (table); r; r = ospf6_route_next (r))
-    num++;
-  
-  if (link_error == 0 && num == table->count)
-    return;
-
-  zlog_err ("PANIC !!");
-  zlog_err ("Something has gone wrong with ospf6_route_table[%p]", table);
-  zlog_debug ("table count = %d, real number = %d", table->count, num);
-  zlog_debug ("DUMP START");
-  for (r = ospf6_route_head (table); r; r = ospf6_route_next (r))
-    {
-      prefix2str (&r->prefix, buf, sizeof (buf));
-      zlog_info ("%p<-[%p]->%p : %s", r->prev, r, r->next, buf);
-    }
-  zlog_debug ("DUMP END");
-
-  assert (link_error == 0 && num == table->count);
-}
-#define ospf6_route_table_assert(t) (route_table_assert (t))
-#else
-#define ospf6_route_table_assert(t) ((void) 0)
-#endif /*NDEBUG*/
-
-struct ospf6_route *
-ospf6_route_add (struct ospf6_route *route,
+void
+ospf6_route_add (struct ospf6_route_req *request,
                  struct ospf6_route_table *table)
 {
-  struct route_node *node, *nextnode, *prevnode;
-  struct ospf6_route *current = NULL;
-  struct ospf6_route *prev = NULL, *old = NULL, *next = NULL;
-  char buf[64];
-  struct timeval now;
+  struct ospf6_route_node   *rn;
+  struct ospf6_path_node    *pn;
+  struct ospf6_nexthop_node *nn;
+  struct route_node *route_node;
 
-  assert (route->rnode == NULL);
-  assert (route->lock == 0);
-  assert (route->next == NULL);
-  assert (route->prev == NULL);
+  struct ospf6_route_req route;
 
-  if (route->type == OSPF6_DEST_TYPE_LINKSTATE)
-    ospf6_linkstate_prefix2str (&route->prefix, buf, sizeof (buf));
-  else
-    prefix2str (&route->prefix, buf, sizeof (buf));
+  int route_change   = 0;
+  int path_change    = 0;
+  int nexthop_change = 0;
 
-  if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-    zlog_debug ("%s %p: route add %p: %s", ospf6_route_table_name (table),
-                table, route, buf);
-  else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-    zlog_debug ("%s: route add: %s", ospf6_route_table_name (table), buf);
+  /* find the requested route */
+  route_node = route_node_get (table->table, &request->route.prefix);
+  rn = (struct ospf6_route_node *) route_node->info;
 
-  gettimeofday (&now, NULL);
-
-  node = route_node_get (table->table, &route->prefix);
-  route->rnode = node;
-
-  /* find place to insert */
-  for (current = node->info; current; current = current->next)
+  if (rn)
     {
-      if (! ospf6_route_is_same (current, route))
-        next = current;
-      else if (current->type != route->type)
-        prev = current;
-      else if (ospf6_route_is_same_origin (current, route))
-        old = current;
-      else if (ospf6_route_cmp (current, route) > 0)
-        next = current;
-      else
-        prev = current;
-
-      if (old || next)
-        break;
-    }
-
-  if (old)
-    {
-      /* if route does not actually change, return unchanged */
-      if (ospf6_route_is_identical (old, route))
+      if (memcmp (&rn->route, &request->route, sizeof (struct ospf6_route)))
         {
-          if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-            zlog_debug ("%s %p: route add %p: needless update of %p",
-                        ospf6_route_table_name (table), table, route, old);
-          else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-            zlog_debug ("%s: route add: needless update",
-                        ospf6_route_table_name (table));
-
-          ospf6_route_delete (route);
-          SET_FLAG (old->flag, OSPF6_ROUTE_ADD);
-          ospf6_route_table_assert (table);
-
-          return old;
+          memcpy (&rn->route, &request->route, sizeof (struct ospf6_route));
+          route_change++;
         }
-
-      if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-        zlog_debug ("%s %p: route add %p: update of %p",
-                    ospf6_route_table_name (table), table, route, old);
-      else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-        zlog_debug ("%s: route add: update",
-                    ospf6_route_table_name (table));
-
-      /* replace old one if exists */
-      if (node->info == old)
-        {
-          node->info = route;
-          SET_FLAG (route->flag, OSPF6_ROUTE_BEST);
-        }
-
-      if (old->prev)
-        old->prev->next = route;
-      route->prev = old->prev;
-      if (old->next)
-        old->next->prev = route;
-      route->next = old->next;
-
-      route->installed = old->installed;
-      route->changed = now;
-      assert (route->table == NULL);
-      route->table = table;
-
-      ospf6_route_unlock (old); /* will be deleted later */
-      ospf6_route_lock (route);
-
-      SET_FLAG (route->flag, OSPF6_ROUTE_CHANGE);
-      ospf6_route_table_assert (table);
-
-      if (table->hook_add)
-        (*table->hook_add) (route);
-
-      return route;
     }
-
-  /* insert if previous or next node found */
-  if (prev || next)
-    {
-      if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-        zlog_debug ("%s %p: route add %p: another path: prev %p, next %p",
-                   ospf6_route_table_name (table), table, route, prev, next);
-      else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-        zlog_debug ("%s: route add: another path found",
-                    ospf6_route_table_name (table));
-
-      if (prev == NULL)
-        prev = next->prev;
-      if (next == NULL)
-        next = prev->next;
-
-      if (prev)
-        prev->next = route;
-      route->prev = prev;
-      if (next)
-        next->prev = route;
-      route->next = next;
-
-      if (node->info == next)
-        {
-          assert (next->rnode == node);
-          node->info = route;
-          UNSET_FLAG (next->flag, OSPF6_ROUTE_BEST);
-          SET_FLAG (route->flag, OSPF6_ROUTE_BEST);
-          if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-            zlog_info ("%s %p: route add %p: replacing previous best: %p",
-                       ospf6_route_table_name (table), table, route, next);
-        }
-
-      route->installed = now;
-      route->changed = now;
-      assert (route->table == NULL);
-      route->table = table;
-
-      ospf6_route_lock (route);
-      table->count++;
-      ospf6_route_table_assert (table);
-
-      SET_FLAG (route->flag, OSPF6_ROUTE_ADD);
-      if (table->hook_add)
-        (*table->hook_add) (route);
-
-      return route;
-    }
-
-  /* Else, this is the brand new route regarding to the prefix */
-  if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-    zlog_debug ("%s %p: route add %p: brand new route",
-                ospf6_route_table_name (table), table, route);
-  else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-    zlog_debug ("%s: route add: brand new route",
-                ospf6_route_table_name (table));
-
-  assert (node->info == NULL);
-  node->info = route;
-  SET_FLAG (route->flag, OSPF6_ROUTE_BEST);
-  ospf6_route_lock (route);
-  route->installed = now;
-  route->changed = now;
-  assert (route->table == NULL);
-  route->table = table;
-
-  /* lookup real existing next route */
-  nextnode = node;
-  route_lock_node (nextnode);
-  do {
-    nextnode = route_next (nextnode);
-  } while (nextnode && nextnode->info == NULL);
-
-  /* set next link */
-  if (nextnode == NULL)
-    route->next = NULL;
   else
     {
-      route_unlock_node (nextnode);
-
-      next = nextnode->info;
-      route->next = next;
-      next->prev = route;
+      rn = XCALLOC (MTYPE_OSPF6_ROUTE, sizeof (struct ospf6_route_node));
+      rn->table = table;
+      rn->route_node = route_node;
+      rn->route_id = table->route_id++;
+      rn->path_list = linklist_create ();
+      rn->path_list->cmp = ospf6_path_cmp;
+      memcpy (&rn->route, &request->route, sizeof (struct ospf6_route));
+      route_node->info = rn;
     }
 
-  /* lookup real existing prev route */
-  prevnode = node;
-  route_lock_node (prevnode);
-  do {
-    prevnode = route_prev (prevnode);
-  } while (prevnode && prevnode->info == NULL);
+  /* find the same path */
+  pn = ospf6_route_find_path_node (request, rn);
 
-  /* set prev link */
-  if (prevnode == NULL)
-    route->prev = NULL;
+  if (pn)
+    {
+      if (memcmp (&pn->path, &request->path, sizeof (struct ospf6_path)))
+        {
+          memcpy (&pn->path, &request->path, sizeof (struct ospf6_path));
+          path_change++;
+        }
+    }
   else
     {
-      route_unlock_node (prevnode);
-
-      prev = prevnode->info;
-      while (prev->next && ospf6_route_is_same (prev, prev->next))
-        prev = prev->next;
-      route->prev = prev;
-      prev->next = route;
+      pn = XCALLOC (MTYPE_OSPF6_ROUTE, sizeof (struct ospf6_path_node));
+      pn->route_node = rn;
+      pn->nexthop_list = linklist_create ();
+      pn->nexthop_list->cmp = ospf6_nexthop_cmp;
+      memcpy (&pn->path, &request->path, sizeof (struct ospf6_path));
+      linklist_add (pn, rn->path_list);
     }
 
-  table->count++;
-  ospf6_route_table_assert (table);
+  /* find the same nexthop */
+  nn = ospf6_route_find_nexthop_node (request, pn);
 
-  SET_FLAG (route->flag, OSPF6_ROUTE_ADD);
-  if (table->hook_add)
-    (*table->hook_add) (route);
+  if (nn)
+    {
+      if (memcmp (&nn->nexthop, &request->nexthop,
+                  sizeof (struct ospf6_nexthop)))
+        {
+          memcpy (&nn->nexthop, &request->nexthop,
+                  sizeof (struct ospf6_nexthop));
+          nexthop_change++;
+          gettimeofday (&nn->installed, (struct timezone *) NULL);
+        }
+    }
+  else
+    {
+      nn = XCALLOC (MTYPE_OSPF6_ROUTE, sizeof (struct ospf6_nexthop_node));
+      nn->path_node = pn;
+      memcpy (&nn->nexthop, &request->nexthop, sizeof (struct ospf6_nexthop));
+      linklist_add (nn, pn->nexthop_list);
+      rn->count++;
+      gettimeofday (&nn->installed, (struct timezone *) NULL);
+    }
 
-  return route;
+  SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ADD);
+  if (route_change)
+    SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ROUTE_CHANGE);
+  if (path_change)
+    SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_PATH_CHANGE);
+  if (nexthop_change)
+    SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE);
+
+  if (table->freeze)
+    return;
+
+  if (IS_OSPF6_DUMP_ROUTE)
+    {
+      ospf6_route_log_request ("Add", table->name, request);
+
+      if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ROUTE_CHANGE))
+        zlog_info ("ROUTE:   route attribute change");
+      if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_PATH_CHANGE))
+        zlog_info ("ROUTE:   path attribute change");
+      if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE))
+        zlog_info ("ROUTE:   nexthop attribute change");
+    }
+
+  if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ROUTE_CHANGE) ||
+      CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_PATH_CHANGE))
+    SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE);
+
+  /* Call hooks */
+  ospf6_route_request (&route, rn, pn, nn);
+  if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ADD))
+    ospf6_route_hook_call (ADD, &route, table);
+  else if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE))
+    ospf6_route_hook_call (CHANGE, &route, table);
+
+  if (table->hook_add &&
+      CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ADD))
+    (*table->hook_add) (&route);
+  else if (table->hook_change &&
+           CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE))
+    (*table->hook_change) (&route);
+
+  /* clear flag */
+  nn->flag = 0;
 }
 
 void
-ospf6_route_remove (struct ospf6_route *route,
+ospf6_route_remove (struct ospf6_route_req *request,
                     struct ospf6_route_table *table)
 {
-  struct route_node *node;
-  struct ospf6_route *current;
-  char buf[64];
+  struct ospf6_route_node   *rn;
+  struct ospf6_path_node    *pn;
+  struct ospf6_nexthop_node *nn;
+  struct route_node *route_node;
+  struct ospf6_route_req route;
 
-  if (route->type == OSPF6_DEST_TYPE_LINKSTATE)
-    ospf6_linkstate_prefix2str (&route->prefix, buf, sizeof (buf));
-  else
-    prefix2str (&route->prefix, buf, sizeof (buf));
+  /* find the requested route */
+  route_node = route_node_get (table->table, &request->route.prefix);
+  rn = (struct ospf6_route_node *) route_node->info;
 
-  if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-    zlog_debug ("%s %p: route remove %p: %s",
-                ospf6_route_table_name (table), table, route, buf);
-  else if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-    zlog_debug ("%s: route remove: %s", ospf6_route_table_name (table), buf);
-
-  node = route_node_lookup (table->table, &route->prefix);
-  assert (node);
-
-  /* find the route to remove, making sure that the route pointer
-     is from the route table. */
-  current = node->info;
-  while (current && ospf6_route_is_same (current, route))
+  if (! rn)
     {
-      if (current == route)
-        break;
-      current = current->next;
-    }
-  assert (current == route);
-
-  /* adjust doubly linked list */
-  if (route->prev)
-    route->prev->next = route->next;
-  if (route->next)
-    route->next->prev = route->prev;
-
-  if (node->info == route)
-    {
-      if (route->next && ospf6_route_is_same (route->next, route))
+      if (IS_OSPF6_DUMP_ROUTE)
         {
-          node->info = route->next;
-          SET_FLAG (route->next->flag, OSPF6_ROUTE_BEST);
+          ospf6_route_log_request ("Remove", table->name, request);
+          zlog_info ("ROUTE:   Can't remove: No such route");
         }
-      else
-        node->info = NULL; /* should unlock route_node here ? */
+      return;
     }
 
-  table->count--;
-  ospf6_route_table_assert (table);
-
-  SET_FLAG (route->flag, OSPF6_ROUTE_WAS_REMOVED);
-
-  if (table->hook_remove)
-    (*table->hook_remove) (route);
-
-  ospf6_route_unlock (route);
-}
-
-struct ospf6_route *
-ospf6_route_head (struct ospf6_route_table *table)
-{
-  struct route_node *node;
-  struct ospf6_route *route;
-
-  node = route_top (table->table);
-  if (node == NULL)
-    return NULL;
-
-  /* skip to the real existing entry */
-  while (node && node->info == NULL)
-    node = route_next (node);
-  if (node == NULL)
-    return NULL;
-
-  route_unlock_node (node);
-  assert (node->info);
-
-  route = (struct ospf6_route *) node->info;
-  assert (route->prev == NULL);
-  assert (route->table == table);
-  ospf6_route_lock (route);
-
-  if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-    zlog_info ("%s %p: route head: %p<-[%p]->%p",
-               ospf6_route_table_name (table), table,
-               route->prev, route, route->next);
-
-  return route;
-}
-
-struct ospf6_route *
-ospf6_route_next (struct ospf6_route *route)
-{
-  struct ospf6_route *next = route->next;
-
-  if (IS_OSPF6_DEBUG_ROUTE (MEMORY))
-    zlog_info ("%s %p: route next: %p<-[%p]->%p",
-               ospf6_route_table_name (route->table), route->table,
-               route->prev, route, route->next);
-
-  ospf6_route_unlock (route);
-  if (next)
-    ospf6_route_lock (next);
-
-  return next;
-}
-
-struct ospf6_route *
-ospf6_route_best_next (struct ospf6_route *route)
-{
-  struct route_node *rnode;
-  struct ospf6_route *next;
-
-  rnode = route->rnode;
-  route_lock_node (rnode);
-  rnode = route_next (rnode);
-  while (rnode && rnode->info == NULL)
-    rnode = route_next (rnode);
-  if (rnode == NULL)
-    return NULL;
-  route_unlock_node (rnode);
-
-  assert (rnode->info);
-  next = (struct ospf6_route *) rnode->info;
-  ospf6_route_unlock (route);
-  ospf6_route_lock (next);
-  return next;
-}
-
-/* Macro version of check_bit (). */
-#define CHECK_BIT(X,P) ((((u_char *)(X))[(P) / 8]) >> (7 - ((P) % 8)) & 1)
-
-struct ospf6_route *
-ospf6_route_match_head (struct prefix *prefix,
-                        struct ospf6_route_table *table)
-{
-  struct route_node *node;
-  struct ospf6_route *route;
-
-  /* Walk down tree. */
-  node = table->table->top;
-  while (node && node->p.prefixlen < prefix->prefixlen &&
-	 prefix_match (&node->p, prefix))
-    node = node->link[CHECK_BIT(&prefix->u.prefix, node->p.prefixlen)];
-
-  if (node)
-    route_lock_node (node);
-  while (node && node->info == NULL)
-    node = route_next (node);
-  if (node == NULL)
-    return NULL;
-  route_unlock_node (node);
-
-  if (! prefix_match (prefix, &node->p))
-    return NULL;
-
-  route = node->info;
-  ospf6_route_lock (route);
-  return route;
-}
-
-struct ospf6_route *
-ospf6_route_match_next (struct prefix *prefix,
-                        struct ospf6_route *route)
-{
-  struct ospf6_route *next;
-
-  next = ospf6_route_next (route);
-  if (next && ! prefix_match (prefix, &next->prefix))
+  pn = ospf6_route_find_path_node (request, rn);
+  if (! pn)
     {
-      ospf6_route_unlock (next);
-      next = NULL;
+      if (IS_OSPF6_DUMP_ROUTE)
+        {
+          ospf6_route_log_request ("Remove", table->name, request);
+          zlog_info ("ROUTE:   Can't remove: No such path");
+        }
+      return;
     }
 
-  return next;
+  if (pn->path.area_id != request->path.area_id ||
+      pn->path.origin.type != request->path.origin.type ||
+      pn->path.origin.id != request->path.origin.id ||
+      pn->path.origin.adv_router != request->path.origin.adv_router)
+    {
+      if (IS_OSPF6_DUMP_ROUTE)
+        {
+          ospf6_route_log_request ("Remove", table->name, request);
+          zlog_info ("ROUTE:   Can't remove: Path differ");
+          {
+            char *s, *e, *c;
+            char line[512], *p;
+
+            p = line;
+            s = (char *) &pn->path;
+            e = s + sizeof (struct ospf6_path);
+            for (c = s; c < e; c++)
+              {
+                if ((c - s) % 4 == 0)
+                  snprintf (p++, line + sizeof (line) - p, " ");
+                snprintf (p, line + sizeof (line) - p, "%02x", *c);
+                p += 2;
+              }
+            zlog_info ("ROUTE:     path: %s", line);
+
+            p = line;
+            s = (char *) &request->path;
+            e = s + sizeof (struct ospf6_path);
+            for (c = s; c < e; c++)
+              {
+                if ((c - s) % 4 == 0)
+                  snprintf (p++, line + sizeof (line) - p, " ");
+                snprintf (p, line + sizeof (line) - p, "%02x", *c);
+                p += 2;
+              }
+            zlog_info ("ROUTE:     req : %s", line);
+
+          }
+        }
+      return;
+    }
+
+  nn = ospf6_route_find_nexthop_node (request, pn);
+  if (! nn)
+    {
+      if (IS_OSPF6_DUMP_ROUTE)
+        {
+          ospf6_route_log_request ("Remove", table->name, request);
+          zlog_info ("ROUTE:   Can't remove: No such nexthop");
+        }
+      return;
+    }
+
+  if (memcmp (&nn->nexthop, &request->nexthop, sizeof (struct ospf6_nexthop)))
+    {
+      if (IS_OSPF6_DUMP_ROUTE)
+        {
+          ospf6_route_log_request ("Remove", table->name, request);
+          zlog_info ("ROUTE:   Can't remove: Nexthop differ");
+        }
+      return;
+    }
+
+  SET_FLAG (nn->flag, OSPF6_ROUTE_FLAG_REMOVE);
+
+  if (table->freeze)
+    return;
+
+  if (IS_OSPF6_DUMP_ROUTE)
+    ospf6_route_log_request ("Remove", table->name, request);
+
+  ospf6_route_request (&route, rn, pn, nn);
+  ospf6_route_hook_call (REMOVE, &route, table);
+  if (table->hook_remove)
+    (*table->hook_remove) (&route);
+
+  /* clear flag */
+  nn->flag = 0;
+
+  /* remove nexthop */
+  linklist_remove (nn, pn->nexthop_list);
+  rn->count--;
+  XFREE (MTYPE_OSPF6_ROUTE, nn);
+
+  /* remove path if there's no nexthop for the path */
+  if (pn->nexthop_list->count != 0)
+    return;
+  linklist_remove (pn, rn->path_list);
+  linklist_delete (pn->nexthop_list);
+  XFREE (MTYPE_OSPF6_ROUTE, pn);
+
+  /* remove route if there's no path for the route */
+  if (rn->path_list->count != 0)
+    return;
+  route_node->info = NULL;
+  linklist_delete (rn->path_list);
+  XFREE (MTYPE_OSPF6_ROUTE, rn);
 }
 
 void
 ospf6_route_remove_all (struct ospf6_route_table *table)
 {
-  struct ospf6_route *route;
-  for (route = ospf6_route_head (table); route;
-       route = ospf6_route_next (route))
-    ospf6_route_remove (route, table);
+  struct ospf6_route_req request;
+
+  for (ospf6_route_head (&request, table); ! ospf6_route_end (&request);
+       ospf6_route_next (&request))
+    ospf6_route_remove (&request, table);
 }
 
+
 struct ospf6_route_table *
-ospf6_route_table_create (int s, int t)
+ospf6_route_table_create (char *name)
 {
+  int i;
   struct ospf6_route_table *new;
+
   new = XCALLOC (MTYPE_OSPF6_ROUTE, sizeof (struct ospf6_route_table));
+  snprintf (new->name, sizeof (new->name), "%s", name);
+
   new->table = route_table_init ();
-  new->scope_type = s;
-  new->table_type = t;
+  for (i = 0; i < 3; i++)
+    new->hook_list[i] = linklist_create ();
+
   return new;
 }
 
 void
 ospf6_route_table_delete (struct ospf6_route_table *table)
 {
+  int i;
+
   ospf6_route_remove_all (table);
   route_table_finish (table->table);
+  for (i = 0; i < 3; i++)
+    linklist_delete (table->hook_list[i]);
   XFREE (MTYPE_OSPF6_ROUTE, table);
+}
+
+void
+ospf6_route_table_freeze (struct ospf6_route_table *route_table)
+{
+  if (IS_OSPF6_DUMP_ROUTE)
+    zlog_info ("ROUTE: Table freeze: %s", route_table->name);
+  assert (route_table->freeze == 0);
+  route_table->freeze = 1;
+}
+
+void
+ospf6_route_table_thaw (struct ospf6_route_table *route_table)
+{
+  struct route_node *node;
+  struct linklist_node pnode;
+  struct linklist_node nnode;
+
+  struct ospf6_route_node   *rn;
+  struct ospf6_path_node    *pn;
+  struct ospf6_nexthop_node *nn;
+
+  struct ospf6_route_req request;
+
+  if (IS_OSPF6_DUMP_ROUTE)
+    zlog_info ("ROUTE: Table thaw: %s", route_table->name);
+
+  assert (route_table->freeze == 1);
+  route_table->freeze = 0;
+
+  for (node = route_top (route_table->table); node;
+       node = route_next (node))
+    {
+      rn = node->info;
+      if (! rn)
+        continue;
+
+      for (linklist_head (rn->path_list, &pnode);
+           ! linklist_end (&pnode);
+           linklist_next (&pnode))
+        {
+          pn = pnode.data;
+
+          for (linklist_head (pn->nexthop_list, &nnode);
+               ! linklist_end (&nnode);
+               linklist_next (&nnode))
+            {
+              nn = nnode.data;
+
+              /* if the add and remove flag set without change flag,
+                 do nothing with this route */
+              if (! CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE) &&
+                  CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ADD) &&
+                  CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_REMOVE))
+                {
+                  nn->flag = 0;
+                  continue;
+                }
+
+              memset (&request, 0, sizeof (request));
+              memcpy (&request.route, &rn->route, sizeof (rn->route));
+              memcpy (&request.path, &pn->path, sizeof (pn->path));
+              memcpy (&request.nexthop, &nn->nexthop, sizeof (nn->nexthop));
+
+              if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_ADD) ||
+                  CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_CHANGE))
+                ospf6_route_add (&request, route_table);
+              else if (CHECK_FLAG (nn->flag, OSPF6_ROUTE_FLAG_REMOVE))
+                ospf6_route_remove (&request, route_table);
+            }
+        }
+    }
 }
 
 
 /* VTY commands */
-void
-ospf6_route_show (struct vty *vty, struct ospf6_route *route)
-{
-  int i;
-  char destination[64], nexthop[64];
-  char duration[16], ifname[IFNAMSIZ];
-  struct timeval now, res;
-
-  gettimeofday (&now, (struct timezone *) NULL);
-  timersub (&now, &route->changed, &res);
-  timerstring (&res, duration, sizeof (duration));
-
-  /* destination */
-  if (route->type == OSPF6_DEST_TYPE_LINKSTATE)
-    ospf6_linkstate_prefix2str (&route->prefix, destination,
-                                sizeof (destination));
-  else if (route->type == OSPF6_DEST_TYPE_ROUTER)
-    inet_ntop (route->prefix.family, &route->prefix.u.prefix,
-               destination, sizeof (destination));
-  else
-    prefix2str (&route->prefix, destination, sizeof (destination));
-
-  /* nexthop */
-  inet_ntop (AF_INET6, &route->nexthop[0].address, nexthop,
-             sizeof (nexthop));
-  if (! if_indextoname (route->nexthop[0].ifindex, ifname))
-    snprintf (ifname, sizeof (ifname), "%d", route->nexthop[0].ifindex);
-
-  vty_out (vty, "%c%1s %2s %-30s %-25s %6.*s %s%s",
-           (ospf6_route_is_best (route) ? '*' : ' '),
-           OSPF6_DEST_TYPE_SUBSTR (route->type),
-           OSPF6_PATH_TYPE_SUBSTR (route->path.type),
-           destination, nexthop, IFNAMSIZ, ifname, duration, VNL);
-
-  for (i = 1; ospf6_nexthop_is_set (&route->nexthop[i]) &&
-       i < OSPF6_MULTI_PATH_LIMIT; i++)
-    {
-      /* nexthop */
-      inet_ntop (AF_INET6, &route->nexthop[i].address, nexthop,
-                 sizeof (nexthop));
-      if (! if_indextoname (route->nexthop[i].ifindex, ifname))
-        snprintf (ifname, sizeof (ifname), "%d", route->nexthop[i].ifindex);
-
-      vty_out (vty, "%c%1s %2s %-30s %-25s %6.*s %s%s",
-               ' ', "", "", "", nexthop, IFNAMSIZ, ifname, "", VNL);
-    }
-}
 
 void
-ospf6_route_show_detail (struct vty *vty, struct ospf6_route *route)
+ospf6_route_show (struct vty *vty, struct ospf6_route_node *rn)
 {
-  char destination[64], nexthop[64], ifname[IFNAMSIZ];
-  char area_id[16], id[16], adv_router[16], capa[16], options[16];
+  struct linklist_node pnode;
+  struct linklist_node nnode;
+  struct ospf6_path_node    *pn;
+  struct ospf6_nexthop_node *nn;
+
   struct timeval now, res;
   char duration[16];
-  int i;
+
+  u_int pc = 0;
+  u_int nc = 0;
+#define HEAD (pc == 0 && nc == 0)
+
+  char prefix[64], nexthop[64], ifname[IFNAMSIZ];
 
   gettimeofday (&now, (struct timezone *) NULL);
 
   /* destination */
-  if (route->type == OSPF6_DEST_TYPE_LINKSTATE)
-    ospf6_linkstate_prefix2str (&route->prefix, destination,
-                                sizeof (destination));
-  else if (route->type == OSPF6_DEST_TYPE_ROUTER)
-    inet_ntop (route->prefix.family, &route->prefix.u.prefix,
-               destination, sizeof (destination));
+  if (rn->route.prefix.family == AF_INET ||
+      rn->route.prefix.family == AF_INET6)
+    prefix2str (&rn->route.prefix, prefix, sizeof (prefix));
   else
-    prefix2str (&route->prefix, destination, sizeof (destination));
-  vty_out (vty, "Destination: %s%s", destination, VNL);
+    prefix_ls2str (&rn->route.prefix, prefix, sizeof (prefix));
 
-  /* destination type */
-  vty_out (vty, "Destination type: %s%s",
-           OSPF6_DEST_TYPE_NAME (route->type),
-           VNL);
-
-  /* Time */
-  timersub (&now, &route->installed, &res);
-  timerstring (&res, duration, sizeof (duration));
-  vty_out (vty, "Installed Time: %s ago%s", duration, VNL);
-
-  timersub (&now, &route->changed, &res);
-  timerstring (&res, duration, sizeof (duration));
-  vty_out (vty, "  Changed Time: %s ago%s", duration, VNL);
-
-  /* Debugging info */
-  vty_out (vty, "Lock: %d Flags: %s%s%s%s%s", route->lock,
-           (CHECK_FLAG (route->flag, OSPF6_ROUTE_BEST)   ? "B" : "-"),
-           (CHECK_FLAG (route->flag, OSPF6_ROUTE_ADD)    ? "A" : "-"),
-           (CHECK_FLAG (route->flag, OSPF6_ROUTE_REMOVE) ? "R" : "-"),
-           (CHECK_FLAG (route->flag, OSPF6_ROUTE_CHANGE) ? "C" : "-"),
-           VNL);
-  vty_out (vty, "Memory: prev: %p this: %p next: %p%s",
-           route->prev, route, route->next, VNL);
-
-  /* Path section */
-
-  /* Area-ID */
-  inet_ntop (AF_INET, &route->path.area_id, area_id, sizeof (area_id));
-  vty_out (vty, "Associated Area: %s%s", area_id, VNL);
-
-  /* Path type */
-  vty_out (vty, "Path Type: %s%s",
-           OSPF6_PATH_TYPE_NAME (route->path.type), VNL);
-
-  /* LS Origin */
-  inet_ntop (AF_INET, &route->path.origin.id, id, sizeof (id));
-  inet_ntop (AF_INET, &route->path.origin.adv_router, adv_router,
-             sizeof (adv_router));
-  vty_out (vty, "LS Origin: %s Id: %s Adv: %s%s",
-           ospf6_lstype_name (route->path.origin.type),
-           id, adv_router, VNL);
-
-  /* Options */
-  ospf6_options_printbuf (route->path.options, options, sizeof (options));
-  vty_out (vty, "Options: %s%s", options, VNL);
-
-  /* Router Bits */
-  ospf6_capability_printbuf (route->path.router_bits, capa, sizeof (capa));
-  vty_out (vty, "Router Bits: %s%s", capa, VNL);
-
-  /* Prefix Options */
-  vty_out (vty, "Prefix Options: xxx%s", VNL);
-
-  /* Metrics */
-  vty_out (vty, "Metric Type: %d%s", route->path.metric_type,
-           VNL);
-  vty_out (vty, "Metric: %d (%d)%s",
-           route->path.cost, route->path.cost_e2, VNL);
-
-  /* Nexthops */
-  vty_out (vty, "Nexthop:%s", VNL);
-  for (i = 0; ospf6_nexthop_is_set (&route->nexthop[i]) &&
-       i < OSPF6_MULTI_PATH_LIMIT; i++)
+  for (linklist_head (rn->path_list, &pnode); ! linklist_end (&pnode);
+       linklist_next (&pnode))
     {
-      /* nexthop */
-      inet_ntop (AF_INET6, &route->nexthop[i].address, nexthop,
-                 sizeof (nexthop));
-      if (! if_indextoname (route->nexthop[i].ifindex, ifname))
-        snprintf (ifname, sizeof (ifname), "%d", route->nexthop[i].ifindex);
-      vty_out (vty, "  %s %.*s%s", nexthop, IFNAMSIZ, ifname, VNL);
-    }
-  vty_out (vty, "%s", VNL);
-}
+      pn = pnode.data;
 
-void
-ospf6_route_show_table_summary (struct vty *vty,
-                                struct ospf6_route_table *table)
-{
-  struct ospf6_route *route, *prev = NULL;
-  int i, pathtype[OSPF6_PATH_TYPE_MAX];
-  unsigned int number = 0;
-  int nhinval = 0, ecmp = 0;
-  int alternative = 0, destination = 0;
-
-  for (i = 0; i < OSPF6_PATH_TYPE_MAX; i++)
-    pathtype[i] = 0;
-
-  for (route = ospf6_route_head (table); route;
-       route = ospf6_route_next (route))
-    {
-      if (prev == NULL || ! ospf6_route_is_same (prev, route))
-        destination++;
-      else
-        alternative++;
-      if (! ospf6_nexthop_is_set (&route->nexthop[0]))
-        nhinval++;
-      else if (ospf6_nexthop_is_set (&route->nexthop[1]))
-        ecmp++;
-      pathtype[route->path.type]++;
-      number++;
-
-      prev = route;
-    }
-
-  assert (number == table->count);
-
-  vty_out (vty, "Number of OSPFv3 routes: %d%s", number, VNL);
-  vty_out (vty, "Number of Destination: %d%s", destination, VNL);
-  vty_out (vty, "Number of Alternative routes: %d%s", alternative, VNL);
-  vty_out (vty, "Number of Equal Cost Multi Path: %d%s", ecmp, VNL);
-  for (i = OSPF6_PATH_TYPE_INTRA; i <= OSPF6_PATH_TYPE_EXTERNAL2; i++)
-    {
-      vty_out (vty, "Number of %s routes: %d%s",
-               OSPF6_PATH_TYPE_NAME (i), pathtype[i], VNL);
-    }
-}
-
-void
-ospf6_route_show_table_prefix (struct vty *vty,
-                               struct prefix *prefix,
-                               struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
-
-  route = ospf6_route_lookup (prefix, table);
-  if (route == NULL)
-    return;
-
-  ospf6_route_lock (route);
-  while (route && ospf6_route_is_prefix (prefix, route))
-    {
-      /* Specifying a prefix will always display details */
-      ospf6_route_show_detail (vty, route);
-      route = ospf6_route_next (route);
-    }
-  if (route)
-    ospf6_route_unlock (route);
-}
-
-void
-ospf6_route_show_table_address (struct vty *vty,
-                                struct prefix *prefix,
-                                struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
-
-  route = ospf6_route_lookup_bestmatch (prefix, table);
-  if (route == NULL)
-    return;
-
-  prefix = &route->prefix;
-  ospf6_route_lock (route);
-  while (route && ospf6_route_is_prefix (prefix, route))
-    {
-      /* Specifying a prefix will always display details */
-      ospf6_route_show_detail (vty, route);
-      route = ospf6_route_next (route);
-    }
-  if (route)
-    ospf6_route_unlock (route);
-}
-
-void
-ospf6_route_show_table_match (struct vty *vty, int detail,
-                              struct prefix *prefix,
-                              struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
-  assert (prefix->family);
-
-  route = ospf6_route_match_head (prefix, table);
-  while (route)
-    {
-      if (detail)
-        ospf6_route_show_detail (vty, route);
-      else
-        ospf6_route_show (vty, route);
-      route = ospf6_route_match_next (prefix, route);
-    }
-}
-
-void
-ospf6_route_show_table_type (struct vty *vty, int detail, u_char type,
-                             struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
-
-  route = ospf6_route_head (table);
-  while (route)
-    {
-      if (route->path.type == type)
+      for (linklist_head (pn->nexthop_list, &nnode); ! linklist_end (&nnode);
+           linklist_next (&nnode))
         {
-          if (detail)
-            ospf6_route_show_detail (vty, route);
-          else
-            ospf6_route_show (vty, route);
+          nn = nnode.data;
+
+          inet_ntop (AF_INET6, &nn->nexthop.address, nexthop,
+                     sizeof (nexthop));
+          if (! if_indextoname (nn->nexthop.ifindex, ifname))
+            snprintf (ifname, sizeof (ifname), "%d", nn->nexthop.ifindex);
+
+          ospf6_timeval_sub (&now, &nn->installed, &res);
+          ospf6_timeval_string_summary (&res, duration, sizeof (duration));
+
+          vty_out (vty, "%c%1s %2s %-30s %-25s %6s %s%s",
+                   (HEAD ? '*' : ' '),
+                   DTYPE_ABNAME (rn->route.type),
+                   PTYPE_ABNAME (pn->path.type),
+                   prefix, nexthop, ifname, duration, VTY_NEWLINE);
+
+          nc++;
         }
-      route = ospf6_route_next (route);
+      pc++;
     }
 }
 
 void
-ospf6_route_show_table (struct vty *vty, int detail,
-                        struct ospf6_route_table *table)
+ospf6_route_show_detail (struct vty *vty, struct ospf6_route_node *rn)
 {
-  struct ospf6_route *route;
+  struct linklist_node pnode;
+  struct linklist_node nnode;
+  struct ospf6_path_node    *pn;
+  struct ospf6_nexthop_node *nn;
 
-  route = ospf6_route_head (table);
-  while (route)
+  u_int pc = 0;
+  u_int nc = 0;
+
+  char prefix[64], nexthop[64], ifname[IFNAMSIZ];
+  char area_id[16], type[16], id[16], adv[16];
+  char capa[64];
+
+  /* destination */
+  if (rn->route.prefix.family == AF_INET ||
+      rn->route.prefix.family == AF_INET6)
+    prefix2str (&rn->route.prefix, prefix, sizeof (prefix));
+  else
+    prefix_ls2str (&rn->route.prefix, prefix, sizeof (prefix));
+
+  vty_out (vty, "%s%s%s", VTY_NEWLINE, prefix, VTY_NEWLINE);
+  vty_out (vty, "    Destination Type: %s%s",
+           DTYPE_NAME (rn->route.type), VTY_NEWLINE);
+
+  for (linklist_head (rn->path_list, &pnode); ! linklist_end (&pnode);
+       linklist_next (&pnode))
     {
-      if (detail)
-        ospf6_route_show_detail (vty, route);
-      else
-        ospf6_route_show (vty, route);
-      route = ospf6_route_next (route);
+      pn = pnode.data;
+
+      inet_ntop (AF_INET, &pn->path.area_id, area_id, sizeof (area_id));
+      ospf6_lsa_type_string (pn->path.origin.type, type, sizeof (type));
+      inet_ntop (AF_INET, &pn->path.origin.id, id, sizeof (id));
+      inet_ntop (AF_INET, &pn->path.origin.adv_router, adv, sizeof (adv));
+      ospf6_options_string (pn->path.capability, capa, sizeof (capa));
+
+      vty_out (vty, "  Path:%s", VTY_NEWLINE);
+      vty_out (vty, "    Associated Area: %s%s", area_id, VTY_NEWLINE);
+      vty_out (vty, "    LS Origin: %s ID: %s Adv: %s%s",
+               type, id, adv, VTY_NEWLINE);
+      vty_out (vty, "    Path Type: %s%s",
+               PTYPE_NAME (pn->path.type), VTY_NEWLINE);
+      vty_out (vty, "    Metric Type: %d%s",
+               pn->path.metric_type, VTY_NEWLINE);
+      vty_out (vty, "    Cost: Type-1: %lu Type-2: %lu%s",
+               (u_long) pn->path.cost, (u_long) pn->path.cost_e2,
+               VTY_NEWLINE);
+      vty_out (vty, "    Router Bits: %s|%s|%s|%s%s",
+               (CHECK_FLAG (pn->path.router_bits, OSPF6_ROUTER_LSA_BIT_W) ?
+                "W" : "-"),
+               (CHECK_FLAG (pn->path.router_bits, OSPF6_ROUTER_LSA_BIT_V) ?
+                "V" : "-"),
+               (CHECK_FLAG (pn->path.router_bits, OSPF6_ROUTER_LSA_BIT_E) ?
+                "E" : "-"),
+               (CHECK_FLAG (pn->path.router_bits, OSPF6_ROUTER_LSA_BIT_B) ?
+                "B" : "-"), VTY_NEWLINE);
+      vty_out (vty, "    Optional Capabilities: %s%s", capa, VTY_NEWLINE);
+      vty_out (vty, "    Prefix Options: %s%s", "xxx", VTY_NEWLINE);
+      vty_out (vty, "    Next Hops:%s", VTY_NEWLINE);
+
+      for (linklist_head (pn->nexthop_list, &nnode); ! linklist_end (&nnode);
+           linklist_next (&nnode))
+        {
+          nn = nnode.data;
+
+          inet_ntop (AF_INET6, &nn->nexthop.address, nexthop,
+                     sizeof (nexthop));
+          if (! if_indextoname (nn->nexthop.ifindex, ifname))
+            snprintf (ifname, sizeof (ifname), "%d", nn->nexthop.ifindex);
+
+          vty_out (vty, "       %c%s%%%s%s",
+                   (HEAD ? '*' : ' '), nexthop, ifname, VTY_NEWLINE);
+
+          nc++;
+        }
+      pc++;
     }
+  vty_out (vty, "%s", VTY_NEWLINE);
 }
 
 int
-ospf6_route_table_show (struct vty *vty, int argc, const char *argv[],
+ospf6_route_table_show (struct vty *vty, int argc, char **argv,
                         struct ospf6_route_table *table)
 {
-  int summary = 0;
-  int match = 0;
-  int detail = 0;
-  int slash = 0;
-  int isprefix = 0;
   int i, ret;
+  unsigned long ret_ul;
+  char *endptr;
   struct prefix prefix;
-  u_char type = 0;
+  int detail = 0;
+  int arg_ipv6  = 0;
+  int arg_ipv4  = 0;
+  int arg_digit = 0;
+  struct prefix_ipv6 *p6 = (struct prefix_ipv6 *) &prefix;
+  struct prefix_ls   *pl = (struct prefix_ls *) &prefix;
+  struct route_node *node;
+
+  u_int route_count = 0;
+  u_int path_count = 0;
+  u_int route_redundant = 0;
 
   memset (&prefix, 0, sizeof (struct prefix));
 
   for (i = 0; i < argc; i++)
     {
-      if (! strcmp (argv[i], "summary"))
-        {
-          summary++;
-          continue;
-        }
-
-      if (! strcmp (argv[i], "intra-area"))
-        {
-          type = OSPF6_PATH_TYPE_INTRA;
-          continue;
-        }
-
-      if (! strcmp (argv[i], "inter-area"))
-        {
-          type = OSPF6_PATH_TYPE_INTER;
-          continue;
-        }
-
-      if (! strcmp (argv[i], "external-1"))
-        {
-          type = OSPF6_PATH_TYPE_EXTERNAL1;
-          continue;
-        }
-
-      if (! strcmp (argv[i], "external-2"))
-        {
-          type = OSPF6_PATH_TYPE_EXTERNAL2;
-          continue;
-        }
-
       if (! strcmp (argv[i], "detail"))
         {
           detail++;
-          continue;
+          break;
         }
 
-      if (! strcmp (argv[i], "match"))
+      if (! arg_ipv6 && ! arg_ipv4 && ! arg_digit)
         {
-          match++;
-          continue;
+
+          if ((ret = inet_pton (AF_INET6, argv[i], &p6->prefix)) == 1)
+            {
+              p6->family = AF_INET6;
+              p6->prefixlen = 128;
+              arg_ipv6++;
+              continue;
+            }
+          else if ((ret = inet_pton (AF_INET, argv[i], &pl->adv_router)) == 1)
+            {
+              pl->family = AF_UNSPEC;
+              pl->prefixlen = 64; /* xxx */
+              arg_ipv4++;
+              continue;
+            }
+          else
+            {
+              ret_ul = strtoul (argv[i], &endptr, 10);
+              if (*endptr == '\0')
+                {
+                  pl->adv_router.s_addr = htonl (ret_ul);
+                  pl->family = AF_UNSPEC;
+                  pl->prefixlen = 64; /* xxx */
+                  arg_digit++;
+                  continue;
+                }
+              else
+                {
+                  vty_out (vty, "Malformed argument: %s%s",
+                           argv[i], VTY_NEWLINE);
+                  return CMD_SUCCESS;
+                }
+            }
         }
 
-      ret = str2prefix (argv[i], &prefix);
-      if (ret == 1 && prefix.family == AF_INET6)
+      if (arg_ipv4 || arg_digit)
         {
-          isprefix++;
-          if (strchr (argv[i], '/'))
-            slash++;
-          continue;
+          if ((ret = inet_pton (AF_INET, argv[i], &pl->id)) == 1)
+            {
+              arg_ipv4++;
+            }
+          else
+            {
+              ret_ul = strtoul (argv[i], &endptr, 10);
+              if (*endptr == '\0')
+                {
+                  pl->id.s_addr = htonl (ret_ul);
+                  arg_digit++;
+                }
+              else
+                {
+                  vty_out (vty, "Malformed argument: %s%s",
+                           argv[i], VTY_NEWLINE);
+                  return CMD_SUCCESS;
+                }
+            }
         }
+    }
 
-      vty_out (vty, "Malformed argument: %s%s", argv[i], VNL);
+  if (arg_ipv4 || arg_ipv6 || arg_digit)
+    {
+      node = route_node_match (table->table, &prefix);
+      if (node && node->info)
+        ospf6_route_show_detail (vty, node->info);
       return CMD_SUCCESS;
     }
-
-  /* Give summary of this route table */
-  if (summary)
-    {
-      ospf6_route_show_table_summary (vty, table);
-      return CMD_SUCCESS;
-    }
-
-  /* Give exact prefix-match route */
-  if (isprefix && ! match)
-    {
-      /* If exact address, give best matching route */
-      if (! slash)
-        ospf6_route_show_table_address (vty, &prefix, table);
-      else
-        ospf6_route_show_table_prefix (vty, &prefix, table);
-
-      return CMD_SUCCESS;
-    }
-
-  if (match)
-    ospf6_route_show_table_match (vty, detail, &prefix, table);
-  else if (type)
-    ospf6_route_show_table_type (vty, detail, type, table);
-  else
-    ospf6_route_show_table (vty, detail, table);
-
-  return CMD_SUCCESS;
-}
-
-void
-ospf6_linkstate_show_header (struct vty *vty)
-{
-  vty_out (vty, "%-7s %-15s %-15s %-8s %-14s %s%s",
-           "Type", "Router-ID", "Net-ID", "Rtr-Bits", "Options", "Cost", VNL);
-}
-
-void
-ospf6_linkstate_show (struct vty *vty, struct ospf6_route *route)
-{
-  u_int32_t router, id;
-  char routername[16], idname[16], rbits[16], options[16];
-
-  router = ospf6_linkstate_prefix_adv_router (&route->prefix);
-  inet_ntop (AF_INET, &router, routername, sizeof (routername));
-  id = ospf6_linkstate_prefix_id (&route->prefix);
-  inet_ntop (AF_INET, &id, idname, sizeof (idname));
-
-  ospf6_capability_printbuf (route->path.router_bits, rbits, sizeof (rbits));
-  ospf6_options_printbuf (route->path.options, options, sizeof (options));
-
-  if (ntohl (id))
-    vty_out (vty, "%-7s %-15s %-15s %-8s %-14s %lu%s",
-             "Network", routername, idname, rbits, options,
-             (unsigned long) route->path.cost, VNL);
-  else
-    vty_out (vty, "%-7s %-15s %-15s %-8s %-14s %lu%s",
-             "Router", routername, idname, rbits, options,
-             (unsigned long) route->path.cost, VNL);
-}
-
-
-void
-ospf6_linkstate_show_table_exact (struct vty *vty,
-                                  struct prefix *prefix,
-                                  struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
-
-  route = ospf6_route_lookup (prefix, table);
-  if (route == NULL)
-    return;
-
-  ospf6_route_lock (route);
-  while (route && ospf6_route_is_prefix (prefix, route))
-    {
-      /* Specifying a prefix will always display details */
-      ospf6_route_show_detail (vty, route);
-      route = ospf6_route_next (route);
-    }
-  if (route)
-    ospf6_route_unlock (route);
-}
-
-void
-ospf6_linkstate_show_table (struct vty *vty, int detail,
-                            struct ospf6_route_table *table)
-{
-  struct ospf6_route *route;
 
   if (! detail)
-    ospf6_linkstate_show_header (vty);
-
-  route = ospf6_route_head (table);
-  while (route)
     {
+      vty_out (vty, "%s%c%1s %2s %-30s %-25s %6s%s", VTY_NEWLINE,
+               ' ', " ", " ", "Destination", "Gateway", "I/F", VTY_NEWLINE);
+      vty_out (vty, "---------------------------%s", VTY_NEWLINE);
+    }
+
+  for (node = route_top (table->table); node; node = route_next (node))
+    {
+      struct ospf6_route_node *route = node->info;
+
+      if (! route)
+        continue;
+
       if (detail)
         ospf6_route_show_detail (vty, route);
       else
-        ospf6_linkstate_show (vty, route);
-      route = ospf6_route_next (route);
-    }
-}
+        ospf6_route_show (vty, route);
 
-int
-ospf6_linkstate_table_show (struct vty *vty, int argc, const char *argv[],
-                            struct ospf6_route_table *table)
-{
-  int detail = 0;
-  int is_id = 0;
-  int is_router = 0;
-  int i, ret;
-  struct prefix router, id, prefix;
-
-  memset (&router, 0, sizeof (struct prefix));
-  memset (&id, 0, sizeof (struct prefix));
-  memset (&prefix, 0, sizeof (struct prefix));
-
-  for (i = 0; i < argc; i++)
-    {
-      if (! strcmp (argv[i], "detail"))
-        {
-          detail++;
-          continue;
-        }
-
-      if (! is_router)
-        {
-          ret = str2prefix (argv[i], &router);
-          if (ret == 1 && router.family == AF_INET)
-            {
-              is_router++;
-              continue;
-            }
-          vty_out (vty, "Malformed argument: %s%s", argv[i], VNL);
-          return CMD_SUCCESS;
-        }
-
-      if (! is_id)
-        {
-          ret = str2prefix (argv[i], &id);
-          if (ret == 1 && id.family == AF_INET)
-            {
-              is_id++;
-              continue;
-            }
-          vty_out (vty, "Malformed argument: %s%s", argv[i], VNL);
-          return CMD_SUCCESS;
-        }
-
-      vty_out (vty, "Malformed argument: %s%s", argv[i], VNL);
-      return CMD_SUCCESS;
+      route_count++;
+      path_count += route->path_list->count;
+      if (route->path_list->count > 1)
+        route_redundant++;
     }
 
-  if (is_router)
-    ospf6_linkstate_prefix (router.u.prefix4.s_addr,
-                            id.u.prefix4.s_addr, &prefix);
-
-  if (prefix.family)
-    ospf6_linkstate_show_table_exact (vty, &prefix, table);
-  else
-    ospf6_linkstate_show_table (vty, detail, table);
+  vty_out (vty, "===========%s", VTY_NEWLINE);
+  vty_out (vty, "Route: %d Path: %d Redundant: %d%s",
+           route_count, path_count, route_redundant, VTY_NEWLINE);
 
   return CMD_SUCCESS;
 }
-
-
-void
-ospf6_brouter_show_header (struct vty *vty)
-{
-  vty_out (vty, "%-15s %-8s %-14s %-10s %-15s%s",
-           "Router-ID", "Rtr-Bits", "Options", "Path-Type", "Area", VNL);
-}
-
-void
-ospf6_brouter_show (struct vty *vty, struct ospf6_route *route)
-{
-  u_int32_t adv_router;
-  char adv[16], rbits[16], options[16], area[16];
-
-  adv_router = ospf6_linkstate_prefix_adv_router (&route->prefix);
-  inet_ntop (AF_INET, &adv_router, adv, sizeof (adv));
-  ospf6_capability_printbuf (route->path.router_bits, rbits, sizeof (rbits));
-  ospf6_options_printbuf (route->path.options, options, sizeof (options));
-  inet_ntop (AF_INET, &route->path.area_id, area, sizeof (area));
-
-  /* vty_out (vty, "%-15s %-8s %-14s %-10s %-15s%s",
-           "Router-ID", "Rtr-Bits", "Options", "Path-Type", "Area", VNL); */
-  vty_out (vty, "%-15s %-8s %-14s %-10s %-15s%s",
-           adv, rbits, options, OSPF6_PATH_TYPE_NAME (route->path.type),
-           area, VNL);
-}
-
-DEFUN (debug_ospf6_route,
-       debug_ospf6_route_cmd,
-       "debug ospf6 route (table|intra-area|inter-area)",
-       DEBUG_STR
-       OSPF6_STR
-       "Debug route table calculation\n"
-       "Debug detail\n"
-       "Debug intra-area route calculation\n"
-       "Debug inter-area route calculation\n"
-       )
-{
-  unsigned char level = 0;
-
-  if (! strncmp (argv[0], "table", 5))
-    level = OSPF6_DEBUG_ROUTE_TABLE;
-  else if (! strncmp (argv[0], "intra", 5))
-    level = OSPF6_DEBUG_ROUTE_INTRA;
-  else if (! strncmp (argv[0], "inter", 5))
-    level = OSPF6_DEBUG_ROUTE_INTER;
-  OSPF6_DEBUG_ROUTE_ON (level);
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_debug_ospf6_route,
-       no_debug_ospf6_route_cmd,
-       "no debug ospf6 route (table|intra-area|inter-area)",
-       NO_STR
-       DEBUG_STR
-       OSPF6_STR
-       "Debug route table calculation\n"
-       "Debug intra-area route calculation\n")
-{
-  unsigned char level = 0;
-
-  if (! strncmp (argv[0], "table", 5))
-    level = OSPF6_DEBUG_ROUTE_TABLE;
-  else if (! strncmp (argv[0], "intra", 5))
-    level = OSPF6_DEBUG_ROUTE_INTRA;
-  else if (! strncmp (argv[0], "inter", 5))
-    level = OSPF6_DEBUG_ROUTE_INTER;
-  OSPF6_DEBUG_ROUTE_OFF (level);
-  return CMD_SUCCESS;
-}
-
-int
-config_write_ospf6_debug_route (struct vty *vty)
-{
-  if (IS_OSPF6_DEBUG_ROUTE (TABLE))
-    vty_out (vty, "debug ospf6 route table%s", VNL);
-  if (IS_OSPF6_DEBUG_ROUTE (INTRA))
-    vty_out (vty, "debug ospf6 route intra-area%s", VNL);
-  if (IS_OSPF6_DEBUG_ROUTE (INTER))
-    vty_out (vty, "debug ospf6 route inter-area%s", VNL);
-  return 0;
-}
-
-void
-install_element_ospf6_debug_route ()
-{
-  install_element (ENABLE_NODE, &debug_ospf6_route_cmd);
-  install_element (ENABLE_NODE, &no_debug_ospf6_route_cmd);
-  install_element (CONFIG_NODE, &debug_ospf6_route_cmd);
-  install_element (CONFIG_NODE, &no_debug_ospf6_route_cmd);
-}
-
-
 

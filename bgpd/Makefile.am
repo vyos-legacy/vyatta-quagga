@@ -1,6 +1,6 @@
 ## Process this file with automake to produce Makefile.in.
 
-INCLUDES = @INCLUDES@ -I.. -I$(top_srcdir) -I$(top_srcdir)/lib @SNMP_INCLUDES@
+INCLUDES = @INCLUDES@ -I.. -I$(top_srcdir) -I$(top_srcdir)/lib
 DEFS = @DEFS@ -DSYSCONFDIR=\"$(sysconfdir)/\"
 INSTALL_SDATA=@INSTALL@ -m 600
 
@@ -21,11 +21,24 @@ noinst_HEADERS = \
 	bgp_ecommunity.h bgp_mplsvpn.h bgp_nexthop.h bgp_damp.h bgp_table.h \
 	bgp_advertise.h bgp_snmp.h bgp_vty.h
 
-bgpd_SOURCES = bgp_main.c
-bgpd_LDADD = libbgp.a ../lib/libzebra.la @LIBCAP@ @LIBM@
+bgpd_SOURCES = \
+	bgp_main.c $(libbgp_a_SOURCES)
 
-examplesdir = $(exampledir)
-dist_examples_DATA = bgpd.conf.sample bgpd.conf.sample2
+bgpd_LDADD = ../lib/libzebra.a
 
-EXTRA_DIST = BGP4-MIB.txt
+sysconf_DATA = bgpd.conf.sample bgpd.conf.sample2
 
+EXTRA_DIST = $(sysconf_DATA) BGP4-MIB.txt
+
+install-sysconfDATA: $(sysconf_DATA)
+	@$(NORMAL_INSTALL)
+	$(mkinstalldirs) $(DESTDIR)$(sysconfdir)
+	@list='$(sysconf_DATA)'; for p in $$list; do \
+	  if test -f $(srcdir)/$$p; then \
+	    echo " $(INSTALL_SDATA) $(srcdir)/$$p $(DESTDIR)$(sysconfdir)/$$p"; \
+	    $(INSTALL_SDATA) $(srcdir)/$$p $(DESTDIR)$(sysconfdir)/$$p; \
+	  else if test -f $$p; then \
+	    echo " $(INSTALL_SDATA) $$p $(DESTDIR)$(sysconfdir)/$$p"; \
+	    $(INSTALL_SDATA) $$p $(DESTDIR)$(sysconfdir)/$$p; \
+	  fi; fi; \
+	done

@@ -23,32 +23,37 @@
 #ifndef _ZEBRA_CONNECTED_H
 #define _ZEBRA_CONNECTED_H
 
-extern struct connected *
-connected_check (struct interface *ifp, struct prefix *p);
+struct connected *
+connected_check_ipv4 (struct interface *ifp, struct prefix *p);
 
-extern void
+void
 connected_add_ipv4 (struct interface *ifp, int flags, struct in_addr *addr, 
-		    u_char prefixlen, struct in_addr *broad, 
-		    const char *label);
+		    int prefixlen, struct in_addr *broad, char *label);
 
-extern void
+void
 connected_delete_ipv4 (struct interface *ifp, int flags, struct in_addr *addr,
-		       u_char prefixlen, struct in_addr *broad);
+		       int prefixlen, struct in_addr *broad, char *label);
 
-extern void connected_up_ipv4 (struct interface *, struct connected *);
-extern void connected_down_ipv4 (struct interface *, struct connected *);
+void
+connected_up_ipv4 (struct interface *, struct connected *);
+void
+connected_down_ipv4 (struct interface *, struct connected *);
 
 #ifdef HAVE_IPV6
-extern void
-connected_add_ipv6 (struct interface *ifp, int flags, struct in6_addr *address,
-		    u_char prefixlen, struct in6_addr *broad,
-		    const char *label);
-extern void
-connected_delete_ipv6 (struct interface *ifp, struct in6_addr *address,
-		       u_char prefixlen, struct in6_addr *broad);
+struct connected *
+connected_check_ipv6 (struct interface *ifp, struct prefix *p);
 
-extern void connected_up_ipv6 (struct interface *, struct connected *);
-extern void connected_down_ipv6 (struct interface *ifp, struct connected *);
+void
+connected_add_ipv6 (struct interface *ifp, struct in6_addr *address,
+		    int prefixlen, struct in6_addr *broad);
+void
+connected_delete_ipv6 (struct interface *ifp, struct in6_addr *address,
+		       int prefixlen, struct in6_addr *broad);
+void
+connected_up_ipv6 (struct interface *, struct connected *);
+
+void
+connected_down_ipv6 (struct interface *ifp, struct connected *);
 
 #endif /* HAVE_IPV6 */
 

@@ -36,55 +36,80 @@ Boston, MA 02111-1307, USA.  */
 #include "bgpd/bgp_nexthop.h"
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_fsm.h"
-#include "bgpd/bgp_debug.h"
 
 /* All information about zebra. */
 static struct zclient *zclient = NULL;
-struct in_addr router_id_zebra;
 
-/* Router-id update message from zebra. */
-static int
-bgp_router_id_update (int command, struct zclient *zclient, zebra_size_t length)
+/* Update default router id. */
+int
+bgp_if_update (struct interface *ifp)
 {
-  struct prefix router_id;
-  struct listnode *node, *nnode;
   struct bgp *bgp;
+  listnode cn;
+  struct listnode *nn;
+  struct listnode *nm;
+  struct peer *peer;
 
-  zebra_router_id_update_read(zclient->ibuf,&router_id);
-
-  if (BGP_DEBUG(zebra, ZEBRA))
+  for (cn = listhead (ifp->connected); cn; nextnode (cn))
     {
-      char buf[128];
-      prefix2str(&router_id, buf, sizeof(buf));
-      zlog_debug("Zebra rcvd: router id update %s", buf);
+      struct connected *co;
+      struct in_addr addr;
+
+      co = getdata (cn);
+
+      if (co->address->family == AF_INET)
+	{
+	  addr = co->address->u.prefix4;
+
+	  /* Ignore NET127. */
+	  if (IPV4_NET127 (ntohl (addr.s_addr)))
+	    continue;
+
+	  LIST_LOOP (bm->bgp, bgp, nn)
+	    {
+	      /* Respect configured router id */
+	      if (! (bgp->config & BGP_CONFIG_ROUTER_ID))
+		if (ntohl (bgp->router_id.s_addr) < ntohl (addr.s_addr))
+		  {
+		    bgp->router_id = addr;
+		    LIST_LOOP (bgp->peer, peer, nm)
+		      {
+			peer->local_id = addr;
+		      }
+		  }
+	    }
+	}
     }
+  return 0;
+}
 
-  router_id_zebra = router_id.u.prefix4;
+int
+bgp_if_update_all ()
+{
+  listnode node;
+  struct interface *ifp;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  for (node = listhead (iflist); node; node = nextnode (node))
     {
-      if (!bgp->router_id_static.s_addr)
-        bgp_router_id_set (bgp, &router_id.u.prefix4);
+      ifp = getdata (node);
+      bgp_if_update (ifp);
     }
-
   return 0;
 }
 
 /* Inteface addition message from zebra. */
-static int
+int
 bgp_interface_add (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct interface *ifp;
 
   ifp = zebra_interface_add_read (zclient->ibuf);
-
-  if (BGP_DEBUG(zebra, ZEBRA) && ifp)
-    zlog_debug("Zebra rcvd: interface add %s", ifp->name);
+  bgp_if_update (ifp);
 
   return 0;
 }
 
-static int
+int
 bgp_interface_delete (int command, struct zclient *zclient,
 		      zebra_size_t length)
 {
@@ -93,21 +118,17 @@ bgp_interface_delete (int command, struct zclient *zclient,
 
   s = zclient->ibuf;
   ifp = zebra_interface_state_read (s);
-  ifp->ifindex = IFINDEX_INTERNAL;
-
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra rcvd: interface delete %s", ifp->name);
 
   return 0;
 }
 
-static int
+int
 bgp_interface_up (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct stream *s;
   struct interface *ifp;
   struct connected *c;
-  struct listnode *node, *nnode;
+  listnode node;
 
   s = zclient->ibuf;
   ifp = zebra_interface_state_read (s);
@@ -115,47 +136,47 @@ bgp_interface_up (int command, struct zclient *zclient, zebra_size_t length)
   if (! ifp)
     return 0;
 
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra rcvd: interface %s up", ifp->name);
-
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-    bgp_connected_add (c);
+  for (node = listhead (ifp->connected); node; nextnode (node))
+    {
+      c = getdata (node);
+      bgp_connected_add (c);
+    }
 
   return 0;
 }
 
-static int
+int
 bgp_interface_down (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct stream *s;
   struct interface *ifp;
   struct connected *c;
-  struct listnode *node, *nnode;
+  listnode node;
 
   s = zclient->ibuf;
   ifp = zebra_interface_state_read (s);
   if (! ifp)
     return 0;
 
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra rcvd: interface %s down", ifp->name);
-
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-    bgp_connected_delete (c);
+  for (node = listhead (ifp->connected); node; nextnode (node))
+    {
+      c = getdata (node);
+      bgp_connected_delete (c);
+    }
 
   /* Fast external-failover (Currently IPv4 only) */
   {
-    struct listnode *mnode;
+    struct listnode *nn, *nm;
     struct bgp *bgp;
     struct peer *peer;
     struct interface *peer_if;
 
-    for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp))
+    LIST_LOOP (bm->bgp, bgp, nn)
       {
 	if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
 	  continue;
 
-	for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+	LIST_LOOP (bgp->peer, peer, nm)
 	  {
 	    if (peer->ttl != 1)
 	      continue;
@@ -174,51 +195,39 @@ bgp_interface_down (int command, struct zclient *zclient, zebra_size_t length)
   return 0;
 }
 
-static int
+int
 bgp_interface_address_add (int command, struct zclient *zclient,
 			   zebra_size_t length)
 {
   struct connected *ifc;
 
-  ifc = zebra_interface_address_read (command, zclient->ibuf);
+  ifc = zebra_interface_address_add_read (zclient->ibuf);
 
   if (ifc == NULL)
     return 0;
 
-  if (BGP_DEBUG(zebra, ZEBRA))
-    {
-      char buf[128];
-      prefix2str(ifc->address, buf, sizeof(buf));
-      zlog_debug("Zebra rcvd: interface %s address add %s",
-		 ifc->ifp->name, buf);
-    }
+  bgp_if_update (ifc->ifp);
 
-  if (if_is_operative (ifc->ifp))
+  if (if_is_up (ifc->ifp))
     bgp_connected_add (ifc);
 
   return 0;
 }
 
-static int
+int
 bgp_interface_address_delete (int command, struct zclient *zclient,
 			      zebra_size_t length)
 {
   struct connected *ifc;
 
-  ifc = zebra_interface_address_read (command, zclient->ibuf);
+  ifc = zebra_interface_address_delete_read (zclient->ibuf);
 
   if (ifc == NULL)
     return 0;
 
-  if (BGP_DEBUG(zebra, ZEBRA))
-    {
-      char buf[128];
-      prefix2str(ifc->address, buf, sizeof(buf));
-      zlog_debug("Zebra rcvd: interface %s address delete %s",
-		 ifc->ifp->name, buf);
-    }
+  bgp_if_update (ifc->ifp);
 
-  if (if_is_operative (ifc->ifp))
+  if (if_is_up (ifc->ifp))
     bgp_connected_delete (ifc);
 
   connected_free (ifc);
@@ -227,7 +236,7 @@ bgp_interface_address_delete (int command, struct zclient *zclient,
 }
 
 /* Zebra route add and delete treatment. */
-static int
+int
 zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct stream *s;
@@ -270,41 +279,16 @@ zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
     api.metric = 0;
 
   if (command == ZEBRA_IPV4_ROUTE_ADD)
-    {
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET_ADDRSTRLEN];
-	  zlog_debug("Zebra rcvd: IPv4 route add %s %s/%d nexthop %s metric %u",
-		     zebra_route_string(api.type),
-		     inet_ntop(AF_INET, &p.prefix, buf[0], sizeof(buf[0])),
-		     p.prefixlen,
-		     inet_ntop(AF_INET, &nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-      bgp_redistribute_add((struct prefix *)&p, &nexthop, api.metric, api.type);
-    }
+    bgp_redistribute_add ((struct prefix *)&p, &nexthop, api.metric, api.type);
   else
-    {
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET_ADDRSTRLEN];
-	  zlog_debug("Zebra rcvd: IPv4 route delete %s %s/%d "
-		     "nexthop %s metric %u",
-		     zebra_route_string(api.type),
-		     inet_ntop(AF_INET, &p.prefix, buf[0], sizeof(buf[0])),
-		     p.prefixlen,
-		     inet_ntop(AF_INET, &nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-      bgp_redistribute_delete((struct prefix *)&p, api.type);
-    }
+    bgp_redistribute_delete ((struct prefix *)&p, api.type);
 
   return 0;
 }
 
 #ifdef HAVE_IPV6
 /* Zebra route add and delete treatment. */
-static int
+int
 zebra_read_ipv6 (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct stream *s;
@@ -353,29 +337,9 @@ zebra_read_ipv6 (int command, struct zclient *zclient, zebra_size_t length)
     return 0;
 
   if (command == ZEBRA_IPV6_ROUTE_ADD)
-    {
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[INET6_ADDRSTRLEN];
-	  zlog_debug("Zebra rcvd: IPv6 route add %s %s/%d metric %u",
-		     zebra_route_string(api.type),
-		     inet_ntop(AF_INET6, &p.prefix, buf, sizeof(buf)),
-		     p.prefixlen, api.metric);
-	}
-      bgp_redistribute_add ((struct prefix *)&p, NULL, api.metric, api.type);
-    }
+    bgp_redistribute_add ((struct prefix *)&p, NULL, api.metric, api.type);
   else
-    {
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[INET6_ADDRSTRLEN];
-	  zlog_debug("Zebra rcvd: IPv6 route delete %s %s/%d metric %u",
-		     zebra_route_string(api.type),
-		     inet_ntop(AF_INET6, &p.prefix, buf, sizeof(buf)),
-		     p.prefixlen, api.metric);
-	}
-      bgp_redistribute_delete ((struct prefix *) &p, api.type);
-    }
+    bgp_redistribute_delete ((struct prefix *) &p, api.type);
   
   return 0;
 }
@@ -384,8 +348,8 @@ zebra_read_ipv6 (int command, struct zclient *zclient, zebra_size_t length)
 struct interface *
 if_lookup_by_ipv4 (struct in_addr *addr)
 {
-  struct listnode *ifnode;
-  struct listnode *cnode;
+  listnode ifnode;
+  listnode cnode;
   struct interface *ifp;
   struct connected *connected;
   struct prefix_ipv4 p;
@@ -395,10 +359,13 @@ if_lookup_by_ipv4 (struct in_addr *addr)
   p.prefix = *addr;
   p.prefixlen = IPV4_MAX_BITLEN;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, ifnode, ifp))
+  for (ifnode = listhead (iflist); ifnode; nextnode (ifnode))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (ifnode);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  connected = getdata (cnode);
 	  cp = connected->address;
 	    
 	  if (cp->family == AF_INET)
@@ -412,16 +379,19 @@ if_lookup_by_ipv4 (struct in_addr *addr)
 struct interface *
 if_lookup_by_ipv4_exact (struct in_addr *addr)
 {
-  struct listnode *ifnode;
-  struct listnode *cnode;
+  listnode ifnode;
+  listnode cnode;
   struct interface *ifp;
   struct connected *connected;
   struct prefix *cp; 
   
-  for (ALL_LIST_ELEMENTS_RO (iflist, ifnode, ifp))
+  for (ifnode = listhead (iflist); ifnode; nextnode (ifnode))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (ifnode);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  connected = getdata (cnode);
 	  cp = connected->address;
 	    
 	  if (cp->family == AF_INET)
@@ -436,8 +406,8 @@ if_lookup_by_ipv4_exact (struct in_addr *addr)
 struct interface *
 if_lookup_by_ipv6 (struct in6_addr *addr)
 {
-  struct listnode *ifnode;
-  struct listnode *cnode;
+  listnode ifnode;
+  listnode cnode;
   struct interface *ifp;
   struct connected *connected;
   struct prefix_ipv6 p;
@@ -447,10 +417,13 @@ if_lookup_by_ipv6 (struct in6_addr *addr)
   p.prefix = *addr;
   p.prefixlen = IPV6_MAX_BITLEN;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, ifnode, ifp))
+  for (ifnode = listhead (iflist); ifnode; nextnode (ifnode))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (ifnode);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  connected = getdata (cnode);
 	  cp = connected->address;
 	    
 	  if (cp->family == AF_INET6)
@@ -464,16 +437,19 @@ if_lookup_by_ipv6 (struct in6_addr *addr)
 struct interface *
 if_lookup_by_ipv6_exact (struct in6_addr *addr)
 {
-  struct listnode *ifnode;
-  struct listnode *cnode;
+  listnode ifnode;
+  listnode cnode;
   struct interface *ifp;
   struct connected *connected;
   struct prefix *cp; 
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, ifnode, ifp))
+  for (ifnode = listhead (iflist); ifnode; nextnode (ifnode))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (ifnode);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  connected = getdata (cnode);
 	  cp = connected->address;
 	    
 	  if (cp->family == AF_INET6)
@@ -484,15 +460,16 @@ if_lookup_by_ipv6_exact (struct in6_addr *addr)
   return NULL;
 }
 
-static int
+int
 if_get_ipv6_global (struct interface *ifp, struct in6_addr *addr)
 {
-  struct listnode *cnode;
+  listnode cnode;
   struct connected *connected;
   struct prefix *cp; 
   
-  for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+  for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
     {
+      connected = getdata (cnode);
       cp = connected->address;
 	    
       if (cp->family == AF_INET6)
@@ -505,15 +482,16 @@ if_get_ipv6_global (struct interface *ifp, struct in6_addr *addr)
   return 0;
 }
 
-static int
+int
 if_get_ipv6_local (struct interface *ifp, struct in6_addr *addr)
 {
-  struct listnode *cnode;
+  listnode cnode;
   struct connected *connected;
   struct prefix *cp; 
   
-  for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+  for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
     {
+      connected = getdata (cnode);
       cp = connected->address;
 	    
       if (cp->family == AF_INET6)
@@ -640,11 +618,11 @@ bgp_nexthop_set (union sockunion *local, union sockunion *remote,
 }
 
 #ifdef HAVE_IPV6
-static unsigned int
+unsigned int
 bgp_ifindex_by_nexthop (struct in6_addr *addr)
 {
-  struct listnode *ifnode;
-  struct listnode *cnode;
+  listnode ifnode;
+  listnode cnode;
   struct interface *ifp;
   struct connected *connected;
   struct prefix_ipv6 p;
@@ -653,12 +631,15 @@ bgp_ifindex_by_nexthop (struct in6_addr *addr)
   p.prefix = *addr;
   p.prefixlen = IPV6_MAX_BITLEN;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, ifnode, ifp))
+  for (ifnode = listhead (iflist); ifnode; nextnode (ifnode))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (ifnode);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
 	  struct prefix *cp; 
 
+	  connected = getdata (cnode);
 	  cp = connected->address;
 	    
 	  if (cp->family == AF_INET6)
@@ -695,7 +676,7 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp)
     }
 
   if ((peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
-      || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+      || CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP))
     SET_FLAG (flags, ZEBRA_FLAG_INTERNAL);
 
   if (p->family == AF_INET)
@@ -722,19 +703,7 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp)
 	  SET_FLAG (api.message, ZAPI_MESSAGE_DISTANCE);
 	  api.distance = distance;
 	}
-
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET_ADDRSTRLEN];
-	  zlog_debug("Zebra send: IPv4 route add %s/%d nexthop %s metric %u",
-		     inet_ntop(AF_INET, &p->u.prefix4, buf[0], sizeof(buf[0])),
-		     p->prefixlen,
-		     inet_ntop(AF_INET, nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_ADD, zclient, 
-                       (struct prefix_ipv4 *) p, &api);
+      zapi_ipv4_add (zclient, (struct prefix_ipv4 *) p, &api);
     }
 #ifdef HAVE_IPV6
   /* We have to think about a IPv6 link-local address curse. */
@@ -746,22 +715,20 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp)
 
       ifindex = 0;
       nexthop = NULL;
-      
-      assert (info->attr->extra);
-      
+
       /* Only global address nexthop exists. */
-      if (info->attr->extra->mp_nexthop_len == 16)
-	nexthop = &info->attr->extra->mp_nexthop_global;
+      if (info->attr->mp_nexthop_len == 16)
+	nexthop = &info->attr->mp_nexthop_global;
       
       /* If both global and link-local address present. */
-      if (info->attr->extra->mp_nexthop_len == 32)
+      if (info->attr->mp_nexthop_len == 32)
 	{
 	  /* Workaround for Cisco's nexthop bug.  */
-	  if (IN6_IS_ADDR_UNSPECIFIED (&info->attr->extra->mp_nexthop_global)
+	  if (IN6_IS_ADDR_UNSPECIFIED (&info->attr->mp_nexthop_global)
 	      && peer->su_remote->sa.sa_family == AF_INET6)
 	    nexthop = &peer->su_remote->sin6.sin6_addr;
 	  else
-	    nexthop = &info->attr->extra->mp_nexthop_local;
+	    nexthop = &info->attr->mp_nexthop_local;
 
 	  if (info->peer->nexthop.ifp)
 	    ifindex = info->peer->nexthop.ifp->ifindex;
@@ -791,18 +758,7 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp)
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       api.metric = info->attr->med;
 
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET6_ADDRSTRLEN];
-	  zlog_debug("Zebra send: IPv6 route add %s/%d nexthop %s metric %u",
-		     inet_ntop(AF_INET6, &p->u.prefix6, buf[0], sizeof(buf[0])),
-		     p->prefixlen,
-		     inet_ntop(AF_INET6, nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-
-      zapi_ipv6_route (ZEBRA_IPV6_ROUTE_ADD, zclient, 
-                       (struct prefix_ipv6 *) p, &api);
+      zapi_ipv6_add (zclient, (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
 }
@@ -829,7 +785,7 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info)
     }
 
   if ((peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
-      || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+      || CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP))
     SET_FLAG (flags, ZEBRA_FLAG_INTERNAL);
 
   if (p->family == AF_INET)
@@ -849,18 +805,7 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info)
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       api.metric = info->attr->med;
 
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET_ADDRSTRLEN];
-	  zlog_debug("Zebra send: IPv4 route delete %s/%d nexthop %s metric %u",
-		     inet_ntop(AF_INET, &p->u.prefix4, buf[0], sizeof(buf[0])),
-		     p->prefixlen,
-		     inet_ntop(AF_INET, nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_DELETE, zclient, 
-                       (struct prefix_ipv4 *) p, &api);
+      zapi_ipv4_delete (zclient, (struct prefix_ipv4 *) p, &api);
     }
 #ifdef HAVE_IPV6
   /* We have to think about a IPv6 link-local address curse. */
@@ -869,20 +814,18 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info)
       struct zapi_ipv6 api;
       unsigned int ifindex;
       struct in6_addr *nexthop;
-      
-      assert (info->attr->extra);
-      
+
       ifindex = 0;
       nexthop = NULL;
 
       /* Only global address nexthop exists. */
-      if (info->attr->extra->mp_nexthop_len == 16)
-	nexthop = &info->attr->extra->mp_nexthop_global;
+      if (info->attr->mp_nexthop_len == 16)
+	nexthop = &info->attr->mp_nexthop_global;
 
       /* If both global and link-local address present. */
-      if (info->attr->extra->mp_nexthop_len == 32)
+      if (info->attr->mp_nexthop_len == 32)
 	{
-	  nexthop = &info->attr->extra->mp_nexthop_local;
+	  nexthop = &info->attr->mp_nexthop_local;
 	  if (info->peer->nexthop.ifp)
 	    ifindex = info->peer->nexthop.ifp->ifindex;
 	}
@@ -906,18 +849,7 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info)
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       api.metric = info->attr->med;
 
-      if (BGP_DEBUG(zebra, ZEBRA))
-	{
-	  char buf[2][INET6_ADDRSTRLEN];
-	  zlog_debug("Zebra send: IPv6 route delete %s/%d nexthop %s metric %u",
-		     inet_ntop(AF_INET6, &p->u.prefix6, buf[0], sizeof(buf[0])),
-		     p->prefixlen,
-		     inet_ntop(AF_INET6, nexthop, buf[1], sizeof(buf[1])),
-		     api.metric);
-	}
-
-      zapi_ipv6_route (ZEBRA_IPV6_ROUTE_DELETE, zclient, 
-                       (struct prefix_ipv6 *) p, &api);
+      zapi_ipv6_delete (zclient, (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
 }
@@ -938,20 +870,16 @@ bgp_redistribute_set (struct bgp *bgp, afi_t afi, int type)
   /* Return if zebra connection is not established. */
   if (zclient->sock < 0)
     return CMD_WARNING;
-
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra send: redistribute add %s", zebra_route_string(type));
     
   /* Send distribute add message to zebra. */
-  zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient, type);
+  zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient->sock, type);
 
   return CMD_SUCCESS;
 }
 
 /* Redistribute with route-map specification.  */
 int
-bgp_redistribute_rmap_set (struct bgp *bgp, afi_t afi, int type, 
-                           const char *name)
+bgp_redistribute_rmap_set (struct bgp *bgp, afi_t afi, int type, char *name)
 {
   if (bgp->rmap[afi][type].name
       && (strcmp (bgp->rmap[afi][type].name, name) == 0))
@@ -1005,13 +933,8 @@ bgp_redistribute_unset (struct bgp *bgp, afi_t afi, int type)
   if (bgp->redist[AFI_IP][type] == 0 
       && bgp->redist[AFI_IP6][type] == 0 
       && zclient->sock >= 0)
-    {
-      /* Send distribute delete message to zebra. */
-      if (BGP_DEBUG(zebra, ZEBRA))
-	zlog_debug("Zebra send: redistribute delete %s",
-		   zebra_route_string(type));
-      zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient, type);
-    }
+    /* Send distribute delete message to zebra. */
+    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient->sock, type);
   
   /* Withdraw redistributed routes from current BGP's routing table. */
   bgp_redistribute_withdraw (bgp, afi, type);
@@ -1049,18 +972,17 @@ bgp_redistribute_metric_unset (struct bgp *bgp, afi_t afi, int type)
 }
 
 void
-bgp_zclient_reset (void)
+bgp_zclient_reset ()
 {
   zclient_reset (zclient);
 }
 
 void
-bgp_zebra_init (void)
+bgp_zebra_init (int enable)
 {
   /* Set default values. */
   zclient = zclient_new ();
   zclient_init (zclient, ZEBRA_ROUTE_BGP);
-  zclient->router_id_update = bgp_router_id_update;
   zclient->interface_add = bgp_interface_add;
   zclient->interface_delete = bgp_interface_delete;
   zclient->interface_address_add = bgp_interface_address_add;

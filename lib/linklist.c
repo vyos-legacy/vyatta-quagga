@@ -26,7 +26,7 @@
 
 /* Allocate new list. */
 struct list *
-list_new (void)
+list_new ()
 {
   struct list *new;
 
@@ -44,7 +44,7 @@ list_free (struct list *l)
 
 /* Allocate new listnode.  Internal use only. */
 static struct listnode *
-listnode_new (void)
+listnode_new ()
 {
   struct listnode *node;
 
@@ -80,12 +80,7 @@ listnode_add (struct list *list, void *val)
   list->count++;
 }
 
-/*
- * Add a node to the list.  If the list was sorted according to the
- * cmp function, insert a new node with the given val such that the
- * list remains sorted.  The new node is always inserted; there is no
- * notion of omitting duplicates.
- */
+/* Add new node with sort function. */
 void
 listnode_add_sort (struct list *list, void *val)
 {
@@ -167,7 +162,6 @@ listnode_delete (struct list *list, void *val)
 {
   struct listnode *node;
 
-  assert(list);
   for (node = list->head; node; node = node->next)
     {
       if (node->data == val)
@@ -195,7 +189,6 @@ listnode_head (struct list *list)
 {
   struct listnode *node;
 
-  assert(list);
   node = list->head;
 
   if (node)
@@ -210,7 +203,6 @@ list_delete_all_node (struct list *list)
   struct listnode *node;
   struct listnode *next;
 
-  assert(list);
   for (node = list->head; node; node = next)
     {
       next = node->next;
@@ -226,8 +218,16 @@ list_delete_all_node (struct list *list)
 void
 list_delete (struct list *list)
 {
-  assert(list);
-  list_delete_all_node (list);
+  struct listnode *node;
+  struct listnode *next;
+
+  for (node = list->head; node; node = next)
+    {
+      next = node->next;
+      if (list->del)
+	(*list->del) (node->data);
+      listnode_free (node);
+    }
   list_free (list);
 }
 
@@ -235,18 +235,17 @@ list_delete (struct list *list)
 struct listnode *
 listnode_lookup (struct list *list, void *data)
 {
-  struct listnode *node;
+  listnode node;
 
-  assert(list);
-  for (node = listhead(list); node; node = listnextnode (node))
-    if (data == listgetdata (node))
+  for (node = list->head; node; nextnode (node))
+    if (data == getdata (node))
       return node;
   return NULL;
 }
 
 /* Delete the node from list.  For ospfd and ospf6d. */
 void
-list_delete_node (struct list *list, struct listnode *node)
+list_delete_node (list list, listnode node)
 {
   if (node->prev)
     node->prev->next = node->next;
@@ -262,7 +261,7 @@ list_delete_node (struct list *list, struct listnode *node)
 
 /* ospf_spf.c */
 void
-list_add_node_prev (struct list *list, struct listnode *current, void *val)
+list_add_node_prev (list list, listnode current, void *val)
 {
   struct listnode *node;
 
@@ -283,7 +282,7 @@ list_add_node_prev (struct list *list, struct listnode *current, void *val)
 
 /* ospf_spf.c */
 void
-list_add_node_next (struct list *list, struct listnode *current, void *val)
+list_add_node_next (list list, listnode current, void *val)
 {
   struct listnode *node;
 
@@ -308,6 +307,6 @@ list_add_list (struct list *l, struct list *m)
 {
   struct listnode *n;
 
-  for (n = listhead (m); n; n = listnextnode (n))
+  for (n = listhead (m); n; nextnode (n))
     listnode_add (l, n->data);
 }

@@ -45,30 +45,41 @@ struct bgp_nexthop_cache *zlookup_query_ipv6 (struct in6_addr *);
 #endif /* HAVE_IPV6 */
 
 /* Only one BGP scan thread are activated at the same time. */
-static struct thread *bgp_scan_thread = NULL;
+struct thread *bgp_scan_thread = NULL;
 
 /* BGP import thread */
-static struct thread *bgp_import_thread = NULL;
+struct thread *bgp_import_thread = NULL;
 
 /* BGP scan interval. */
-static int bgp_scan_interval;
+int bgp_scan_interval;
 
 /* BGP import interval. */
-static int bgp_import_interval;
+int bgp_import_interval;
 
 /* Route table for next-hop lookup cache. */
-static struct bgp_table *bgp_nexthop_cache_table[AFI_MAX];
-static struct bgp_table *cache1_table[AFI_MAX];
-static struct bgp_table *cache2_table[AFI_MAX];
+struct bgp_table *bgp_nexthop_cache_ipv4;
+struct bgp_table *cache1;
+struct bgp_table *cache2;
+
+/* Route table for next-hop lookup cache. */
+struct bgp_table *bgp_nexthop_cache_ipv6;
+struct bgp_table *cache6_1;
+struct bgp_table *cache6_2;
 
 /* Route table for connected route. */
-static struct bgp_table *bgp_connected_table[AFI_MAX];
+struct bgp_table *bgp_connected_ipv4;
+
+/* Route table for connected route. */
+struct bgp_table *bgp_connected_ipv6;
 
 /* BGP nexthop lookup query client. */
 static struct zclient *zlookup = NULL;
+
+/* BGP process function. */
+int bgp_process (struct bgp *, struct bgp_node *, afi_t, safi_t);
 
 /* Add nexthop to the end of the list.  */
-static void
+void
 bnc_nexthop_add (struct bgp_nexthop_cache *bnc, struct nexthop *nexthop)
 {
   struct nexthop *last;
@@ -82,7 +93,7 @@ bnc_nexthop_add (struct bgp_nexthop_cache *bnc, struct nexthop *nexthop)
   nexthop->prev = last;
 }
 
-static void
+void
 bnc_nexthop_free (struct bgp_nexthop_cache *bnc)
 {
   struct nexthop *nexthop;
@@ -95,7 +106,7 @@ bnc_nexthop_free (struct bgp_nexthop_cache *bnc)
     }
 }
 
-static struct bgp_nexthop_cache *
+struct bgp_nexthop_cache *
 bnc_new ()
 {
   struct bgp_nexthop_cache *new;
@@ -105,14 +116,14 @@ bnc_new ()
   return new;
 }
 
-static void
+void
 bnc_free (struct bgp_nexthop_cache *bnc)
 {
   bnc_nexthop_free (bnc);
   XFREE (MTYPE_BGP_NEXTHOP_CACHE, bnc);
 }
 
-static int
+int
 bgp_nexthop_same (struct nexthop *next1, struct nexthop *next2)
 {
   if (next1->type != next2->type)
@@ -142,14 +153,11 @@ bgp_nexthop_same (struct nexthop *next1, struct nexthop *next2)
 	return 0;
       break;
 #endif /* HAVE_IPV6 */
-    default:
-      /* do nothing */
-      break;
     }
   return 1;
 }
 
-static int
+int
 bgp_nexthop_cache_changed (struct bgp_nexthop_cache *bnc1,
 			   struct bgp_nexthop_cache *bnc2)
 {
@@ -186,7 +194,7 @@ bgp_nexthop_check_ebgp (afi_t afi, struct attr *attr)
   /* Lookup the address is onlink or not. */
   if (afi == AFI_IP)
     {
-      rn = bgp_node_match_ipv4 (bgp_connected_table[AFI_IP], &attr->nexthop);
+      rn = bgp_node_match_ipv4 (bgp_connected_ipv4, &attr->nexthop);
       if (rn)
 	{
 	  bgp_unlock_node (rn);
@@ -196,15 +204,15 @@ bgp_nexthop_check_ebgp (afi_t afi, struct attr *attr)
 #ifdef HAVE_IPV6
   else if (afi == AFI_IP6)
     {
-      if (attr->extra->mp_nexthop_len == 32)
+      if (attr->mp_nexthop_len == 32)
 	return 1;
-      else if (attr->extra->mp_nexthop_len == 16)
+      else if (attr->mp_nexthop_len == 16)
 	{
-	  if (IN6_IS_ADDR_LINKLOCAL (&attr->extra->mp_nexthop_global))
+	  if (IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_global))
 	    return 1;
 
-	  rn = bgp_node_match_ipv6 (bgp_connected_table[AFI_IP6],
-				      &attr->extra->mp_nexthop_global);
+	  rn = bgp_node_match_ipv6 (bgp_connected_ipv6,
+				      &attr->mp_nexthop_global);
 	  if (rn)
 	    {
 	      bgp_unlock_node (rn);
@@ -218,7 +226,7 @@ bgp_nexthop_check_ebgp (afi_t afi, struct attr *attr)
 
 #ifdef HAVE_IPV6
 /* Check specified next-hop is reachable or not. */
-static int
+int
 bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
 			 int *metricchanged)
 {
@@ -230,25 +238,24 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
   /* If lookup is not enabled, return valid. */
   if (zlookup->sock < 0)
     {
-      if (ri->extra)
-        ri->extra->igpmetric = 0;
+      ri->igpmetric = 0;
       return 1;
     }
 
   /* Only check IPv6 global address only nexthop. */
   attr = ri->attr;
 
-  if (attr->extra->mp_nexthop_len != 16 
-      || IN6_IS_ADDR_LINKLOCAL (&attr->extra->mp_nexthop_global))
+  if (attr->mp_nexthop_len != 16 
+      || IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_global))
     return 1;
 
   memset (&p, 0, sizeof (struct prefix));
   p.family = AF_INET6;
   p.prefixlen = IPV6_MAX_BITLEN;
-  p.u.prefix6 = attr->extra->mp_nexthop_global;
+  p.u.prefix6 = attr->mp_nexthop_global;
 
   /* IBGP or ebgp-multihop */
-  rn = bgp_node_get (bgp_nexthop_cache_table[AFI_IP6], &p);
+  rn = bgp_node_get (bgp_nexthop_cache_ipv6, &p);
 
   if (rn->info)
     {
@@ -257,7 +264,7 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
     }
   else
     {
-      bnc = zlookup_query_ipv6 (&attr->extra->mp_nexthop_global);
+      bnc = zlookup_query_ipv6 (&attr->mp_nexthop_global);
       if (bnc)
 	{
 	  struct bgp_table *old;
@@ -266,10 +273,10 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
 
 	  if (changed)
 	    {
-	      if (bgp_nexthop_cache_table[AFI_IP6] == cache1_table[AFI_IP6])
-		old = cache2_table[AFI_IP6];
+	      if (bgp_nexthop_cache_ipv6 == cache6_1)
+		old = cache6_2;
 	      else
-		old = cache1_table[AFI_IP6];
+		old = cache6_1;
 
 	      oldrn = bgp_node_lookup (old, &p);
 	      if (oldrn)
@@ -297,10 +304,10 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
   if (metricchanged)
     *metricchanged = bnc->metricchanged;
 
-  if (bnc->valid && bnc->metric)
-    (bgp_info_extra_get (ri))->igpmetric = bnc->metric;
-  else if (ri->extra)
-    ri->extra->igpmetric = 0;
+  if (bnc->valid)
+    ri->igpmetric = bnc->metric;
+  else
+    ri->igpmetric = 0;
 
   return bnc->valid;
 }
@@ -319,8 +326,7 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
   /* If lookup is not enabled, return valid. */
   if (zlookup->sock < 0)
     {
-      if (ri->extra)
-        ri->extra->igpmetric = 0;
+      ri->igpmetric = 0;
       return 1;
     }
 
@@ -337,7 +343,7 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
   p.u.prefix4 = addr;
 
   /* IBGP or ebgp-multihop */
-  rn = bgp_node_get (bgp_nexthop_cache_table[AFI_IP], &p);
+  rn = bgp_node_get (bgp_nexthop_cache_ipv4, &p);
 
   if (rn->info)
     {
@@ -355,10 +361,10 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
 
 	  if (changed)
 	    {
-	      if (bgp_nexthop_cache_table[AFI_IP] == cache1_table[AFI_IP])
-		old = cache2_table[AFI_IP];
+	      if (bgp_nexthop_cache_ipv4 == cache1)
+		old = cache2;
 	      else
-		old = cache1_table[AFI_IP];
+		old = cache1;
 
 	      oldrn = bgp_node_lookup (old, &p);
 	      if (oldrn)
@@ -386,16 +392,16 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
   if (metricchanged)
     *metricchanged = bnc->metricchanged;
 
-  if (bnc->valid && bnc->metric)
-    (bgp_info_extra_get(ri))->igpmetric = bnc->metric;
-  else if (ri->extra)
-    ri->extra->igpmetric = 0;
+  if (bnc->valid)
+    ri->igpmetric = bnc->metric;
+  else
+    ri->igpmetric = 0;
 
   return bnc->valid;
 }
 
 /* Reset and free all BGP nexthop cache. */
-static void
+void
 bgp_nexthop_cache_reset (struct bgp_table *table)
 {
   struct bgp_node *rn;
@@ -410,25 +416,25 @@ bgp_nexthop_cache_reset (struct bgp_table *table)
       }
 }
 
-static void
-bgp_scan (afi_t afi, safi_t safi)
+void
+bgp_scan_ipv4 ()
 {
   struct bgp_node *rn;
   struct bgp *bgp;
   struct bgp_info *bi;
   struct bgp_info *next;
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   int valid;
   int current;
   int changed;
   int metricchanged;
 
   /* Change cache. */
-  if (bgp_nexthop_cache_table[afi] == cache1_table[afi])
-    bgp_nexthop_cache_table[afi] = cache2_table[afi];
+  if (bgp_nexthop_cache_ipv4 == cache1)
+    bgp_nexthop_cache_ipv4 = cache2;
   else
-    bgp_nexthop_cache_table[afi] = cache1_table[afi];
+    bgp_nexthop_cache_ipv4 = cache1;
 
   /* Get default bgp. */
   bgp = bgp_get_default ();
@@ -436,20 +442,20 @@ bgp_scan (afi_t afi, safi_t safi)
     return;
 
   /* Maximum prefix check */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (peer->status != Established)
 	continue;
 
-      if (peer->afc[afi][SAFI_UNICAST])
-	bgp_maximum_prefix_overflow (peer, afi, SAFI_UNICAST, 1);
-      if (peer->afc[afi][SAFI_MULTICAST])
-	bgp_maximum_prefix_overflow (peer, afi, SAFI_MULTICAST, 1);
-      if (peer->afc[afi][SAFI_MPLS_VPN])
-	bgp_maximum_prefix_overflow (peer, afi, SAFI_MPLS_VPN, 1);
+      if (peer->afc[AFI_IP][SAFI_UNICAST])
+	bgp_maximum_prefix_overflow (peer, AFI_IP, SAFI_UNICAST);
+      if (peer->afc[AFI_IP][SAFI_MULTICAST])
+	bgp_maximum_prefix_overflow (peer, AFI_IP, SAFI_MULTICAST);
+      if (peer->afc[AFI_IP][SAFI_MPLS_VPN])
+	bgp_maximum_prefix_overflow (peer, AFI_IP, SAFI_MPLS_VPN);
     }
 
-  for (rn = bgp_table_top (bgp->rib[afi][SAFI_UNICAST]); rn;
+  for (rn = bgp_table_top (bgp->rib[AFI_IP][SAFI_UNICAST]); rn;
        rn = bgp_route_next (rn))
     {
       for (bi = rn->info; bi; bi = next)
@@ -462,9 +468,9 @@ bgp_scan (afi_t afi, safi_t safi)
 	      metricchanged = 0;
 
 	      if (peer_sort (bi->peer) == BGP_PEER_EBGP && bi->peer->ttl == 1)
-		valid = bgp_nexthop_check_ebgp (afi, bi->attr);
+		valid = bgp_nexthop_check_ebgp (AFI_IP, bi->attr);
 	      else
-		valid = bgp_nexthop_lookup (afi, bi->peer, bi,
+		valid = bgp_nexthop_lookup (AFI_IP, bi->peer, bi,
 					    &changed, &metricchanged);
 
 	      current = CHECK_FLAG (bi->flags, BGP_INFO_VALID) ? 1 : 0;
@@ -479,63 +485,153 @@ bgp_scan (afi_t afi, safi_t safi)
 		  if (CHECK_FLAG (bi->flags, BGP_INFO_VALID))
 		    {
 		      bgp_aggregate_decrement (bgp, &rn->p, bi,
-					       afi, SAFI_UNICAST);
-		      bgp_info_unset_flag (rn, bi, BGP_INFO_VALID);
+					       AFI_IP, SAFI_UNICAST);
+		      UNSET_FLAG (bi->flags, BGP_INFO_VALID);
 		    }
 		  else
 		    {
-		      bgp_info_set_flag (rn, bi, BGP_INFO_VALID);
+		      SET_FLAG (bi->flags, BGP_INFO_VALID);
 		      bgp_aggregate_increment (bgp, &rn->p, bi,
-					       afi, SAFI_UNICAST);
+					       AFI_IP, SAFI_UNICAST);
 		    }
 		}
 
-              if (CHECK_FLAG (bgp->af_flags[afi][SAFI_UNICAST],
+              if (CHECK_FLAG (bgp->af_flags[AFI_IP][SAFI_UNICAST],
 		  BGP_CONFIG_DAMPENING)
-                  &&  bi->extra && bi->extra->damp_info )
-                if (bgp_damp_scan (bi, afi, SAFI_UNICAST))
+                  &&  bi->damp_info )
+                if (bgp_damp_scan (bi, AFI_IP, SAFI_UNICAST))
 		  bgp_aggregate_increment (bgp, &rn->p, bi,
-					   afi, SAFI_UNICAST);
+					   AFI_IP, SAFI_UNICAST);
 	    }
 	}
-      bgp_process (bgp, rn, afi, SAFI_UNICAST);
+      bgp_process (bgp, rn, AFI_IP, SAFI_UNICAST);
     }
 
   /* Flash old cache. */
-  if (bgp_nexthop_cache_table[afi] == cache1_table[afi])
-    bgp_nexthop_cache_reset (cache2_table[afi]);
+  if (bgp_nexthop_cache_ipv4 == cache1)
+    bgp_nexthop_cache_reset (cache2);
   else
-    bgp_nexthop_cache_reset (cache1_table[afi]);
-
-  if (BGP_DEBUG (events, EVENTS))
-    {
-      if (afi == AFI_IP)
-	zlog_debug ("scanning IPv4 Unicast routing tables");
-      else if (afi == AFI_IP6)
-	zlog_debug ("scanning IPv6 Unicast routing tables");
-    }
+    bgp_nexthop_cache_reset (cache1);
 }
 
+#ifdef HAVE_IPV6
+void
+bgp_scan_ipv6 ()
+{
+  struct bgp_node *rn;
+  struct bgp *bgp;
+  struct bgp_info *bi;
+  struct bgp_info *next;
+  struct peer *peer;
+  struct listnode *nn;
+  int valid;
+  int current;
+  int changed;
+  int metricchanged;
+
+  /* Change cache. */
+  if (bgp_nexthop_cache_ipv6 == cache6_1)
+    bgp_nexthop_cache_ipv6 = cache6_2;
+  else
+    bgp_nexthop_cache_ipv6 = cache6_1;
+
+  /* Get default bgp. */
+  bgp = bgp_get_default ();
+  if (bgp == NULL)
+    return;
+
+  /* Maximum prefix check */
+  LIST_LOOP (bgp->peer, peer, nn)
+    {
+      if (peer->status != Established)
+	continue;
+
+      if (peer->afc[AFI_IP6][SAFI_UNICAST])
+	bgp_maximum_prefix_overflow (peer, AFI_IP6, SAFI_UNICAST);
+      if (peer->afc[AFI_IP6][SAFI_MULTICAST])
+	bgp_maximum_prefix_overflow (peer, AFI_IP6, SAFI_MULTICAST);
+    }
+
+  for (rn = bgp_table_top (bgp->rib[AFI_IP6][SAFI_UNICAST]); rn;
+       rn = bgp_route_next (rn))
+    {
+      for (bi = rn->info; bi; bi = next)
+	{
+	  next = bi->next;
+
+	  if (bi->type == ZEBRA_ROUTE_BGP && bi->sub_type == BGP_ROUTE_NORMAL)
+	    {
+	      changed = 0;
+	      metricchanged = 0;
+
+	      if (peer_sort (bi->peer) == BGP_PEER_EBGP && bi->peer->ttl == 1)
+		valid = 1;
+	      else
+		valid = bgp_nexthop_lookup_ipv6 (bi->peer, bi,
+						 &changed, &metricchanged);
+
+	      current = CHECK_FLAG (bi->flags, BGP_INFO_VALID) ? 1 : 0;
+
+	      if (changed)
+		SET_FLAG (bi->flags, BGP_INFO_IGP_CHANGED);
+	      else
+		UNSET_FLAG (bi->flags, BGP_INFO_IGP_CHANGED);
+
+	      if (valid != current)
+		{
+		  if (CHECK_FLAG (bi->flags, BGP_INFO_VALID))
+		    {
+		      bgp_aggregate_decrement (bgp, &rn->p, bi,
+					       AFI_IP6, SAFI_UNICAST);
+		      UNSET_FLAG (bi->flags, BGP_INFO_VALID);
+		    }
+		  else
+		    {
+		      SET_FLAG (bi->flags, BGP_INFO_VALID);
+		      bgp_aggregate_increment (bgp, &rn->p, bi,
+					       AFI_IP6, SAFI_UNICAST);
+		    }
+		}
+
+              if (CHECK_FLAG (bgp->af_flags[AFI_IP6][SAFI_UNICAST],
+		  BGP_CONFIG_DAMPENING)
+                  &&  bi->damp_info )
+                if (bgp_damp_scan (bi, AFI_IP6, SAFI_UNICAST))
+		  bgp_aggregate_increment (bgp, &rn->p, bi,
+					   AFI_IP6, SAFI_UNICAST);
+	    }
+	}
+      bgp_process (bgp, rn, AFI_IP6, SAFI_UNICAST);
+    }
+
+  /* Flash old cache. */
+  if (bgp_nexthop_cache_ipv6 == cache6_1)
+    bgp_nexthop_cache_reset (cache6_2);
+  else
+    bgp_nexthop_cache_reset (cache6_1);
+}
+#endif /* HAVE_IPV6 */
+
 /* BGP scan thread.  This thread check nexthop reachability. */
-static int
-bgp_scan_timer (struct thread *t)
+int
+bgp_scan (struct thread *t)
 {
   bgp_scan_thread =
-    thread_add_timer (master, bgp_scan_timer, NULL, bgp_scan_interval);
+    thread_add_timer (master, bgp_scan, NULL, bgp_scan_interval);
 
-  if (BGP_DEBUG (events, EVENTS))
-    zlog_debug ("Performing BGP general scanning");
+  if (BGP_DEBUG (normal, NORMAL))
+    zlog_info ("Performing BGP general scanning");
 
-  bgp_scan (AFI_IP, SAFI_UNICAST);
+  bgp_scan_ipv4 ();
 
 #ifdef HAVE_IPV6
-  bgp_scan (AFI_IP6, SAFI_UNICAST);
+  bgp_scan_ipv6 ();
 #endif /* HAVE_IPV6 */
 
   return 0;
 }
 
-struct bgp_connected_ref
+struct bgp_connected
 {
   unsigned int refcnt;
 };
@@ -545,9 +641,10 @@ bgp_connected_add (struct connected *ifc)
 {
   struct prefix p;
   struct prefix *addr;
+  struct prefix *dest;
   struct interface *ifp;
   struct bgp_node *rn;
-  struct bgp_connected_ref *bc;
+  struct bgp_connected *bc;
 
   ifp = ifc->ifp;
 
@@ -558,16 +655,25 @@ bgp_connected_add (struct connected *ifc)
     return;
 
   addr = ifc->address;
+  dest = ifc->destination;
 
   if (addr->family == AF_INET)
     {
-      PREFIX_COPY_IPV4(&p, CONNECTED_PREFIX(ifc));
+      memset (&p, 0, sizeof (struct prefix));
+      p.family = AF_INET;
+      p.prefixlen = addr->prefixlen;
+
+      if (if_is_pointopoint (ifp))
+	p.u.prefix4 = dest->u.prefix4;
+      else
+	p.u.prefix4 = addr->u.prefix4;
+
       apply_mask_ipv4 ((struct prefix_ipv4 *) &p);
 
       if (prefix_ipv4_any ((struct prefix_ipv4 *) &p))
 	return;
 
-      rn = bgp_node_get (bgp_connected_table[AFI_IP], (struct prefix *) &p);
+      rn = bgp_node_get (bgp_connected_ipv4, (struct prefix *) &p);
       if (rn->info)
 	{
 	  bc = rn->info;
@@ -575,16 +681,24 @@ bgp_connected_add (struct connected *ifc)
 	}
       else
 	{
-	  bc = XMALLOC (0, sizeof (struct bgp_connected_ref));
-	  memset (bc, 0, sizeof (struct bgp_connected_ref));
+	  bc = XMALLOC (0, sizeof (struct bgp_connected));
+	  memset (bc, 0, sizeof (struct bgp_connected));
 	  bc->refcnt = 1;
 	  rn->info = bc;
 	}
     }
 #ifdef HAVE_IPV6
-  else if (addr->family == AF_INET6)
+  if (addr->family == AF_INET6)
     {
-      PREFIX_COPY_IPV6(&p, CONNECTED_PREFIX(ifc));
+      memset (&p, 0, sizeof (struct prefix));
+      p.family = AF_INET6;
+      p.prefixlen = addr->prefixlen;
+
+      if (if_is_pointopoint (ifp))
+	p.u.prefix6 = dest->u.prefix6;
+      else
+	p.u.prefix6 = addr->u.prefix6;
+
       apply_mask_ipv6 ((struct prefix_ipv6 *) &p);
 
       if (IN6_IS_ADDR_UNSPECIFIED (&p.u.prefix6))
@@ -593,7 +707,7 @@ bgp_connected_add (struct connected *ifc)
       if (IN6_IS_ADDR_LINKLOCAL (&p.u.prefix6))
 	return;
 
-      rn = bgp_node_get (bgp_connected_table[AFI_IP6], (struct prefix *) &p);
+      rn = bgp_node_get (bgp_connected_ipv6, (struct prefix *) &p);
       if (rn->info)
 	{
 	  bc = rn->info;
@@ -601,8 +715,8 @@ bgp_connected_add (struct connected *ifc)
 	}
       else
 	{
-	  bc = XMALLOC (0, sizeof (struct bgp_connected_ref));
-	  memset (bc, 0, sizeof (struct bgp_connected_ref));
+	  bc = XMALLOC (0, sizeof (struct bgp_connected));
+	  memset (bc, 0, sizeof (struct bgp_connected));
 	  bc->refcnt = 1;
 	  rn->info = bc;
 	}
@@ -615,9 +729,10 @@ bgp_connected_delete (struct connected *ifc)
 {
   struct prefix p;
   struct prefix *addr;
+  struct prefix *dest;
   struct interface *ifp;
   struct bgp_node *rn;
-  struct bgp_connected_ref *bc;
+  struct bgp_connected *bc;
 
   ifp = ifc->ifp;
 
@@ -625,16 +740,25 @@ bgp_connected_delete (struct connected *ifc)
     return;
 
   addr = ifc->address;
+  dest = ifc->destination;
 
   if (addr->family == AF_INET)
     {
-      PREFIX_COPY_IPV4(&p, CONNECTED_PREFIX(ifc));
+      memset (&p, 0, sizeof (struct prefix));
+      p.family = AF_INET;
+      p.prefixlen = addr->prefixlen;
+
+      if (if_is_pointopoint (ifp))
+	p.u.prefix4 = dest->u.prefix4;
+      else
+	p.u.prefix4 = addr->u.prefix4;
+
       apply_mask_ipv4 ((struct prefix_ipv4 *) &p);
 
       if (prefix_ipv4_any ((struct prefix_ipv4 *) &p))
 	return;
 
-      rn = bgp_node_lookup (bgp_connected_table[AFI_IP], &p);
+      rn = bgp_node_lookup (bgp_connected_ipv4, &p);
       if (! rn)
 	return;
 
@@ -651,7 +775,15 @@ bgp_connected_delete (struct connected *ifc)
 #ifdef HAVE_IPV6
   else if (addr->family == AF_INET6)
     {
-      PREFIX_COPY_IPV6(&p, CONNECTED_PREFIX(ifc));
+      memset (&p, 0, sizeof (struct prefix));
+      p.family = AF_INET6;
+      p.prefixlen = addr->prefixlen;
+
+      if (if_is_pointopoint (ifp))
+	p.u.prefix6 = dest->u.prefix6;
+      else
+	p.u.prefix6 = addr->u.prefix6;
+
       apply_mask_ipv6 ((struct prefix_ipv6 *) &p);
 
       if (IN6_IS_ADDR_UNSPECIFIED (&p.u.prefix6))
@@ -660,7 +792,7 @@ bgp_connected_delete (struct connected *ifc)
       if (IN6_IS_ADDR_LINKLOCAL (&p.u.prefix6))
 	return;
 
-      rn = bgp_node_lookup (bgp_connected_table[AFI_IP6], (struct prefix *) &p);
+      rn = bgp_node_lookup (bgp_connected_ipv6, (struct prefix *) &p);
       if (! rn)
 	return;
 
@@ -680,16 +812,19 @@ bgp_connected_delete (struct connected *ifc)
 int
 bgp_nexthop_self (afi_t afi, struct attr *attr)
 {
-  struct listnode *node;
-  struct listnode *node2;
+  listnode node;
+  listnode node2;
   struct interface *ifp;
   struct connected *ifc;
   struct prefix *p;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+  for (node = listhead (iflist); node; nextnode (node))
     {
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, node2, ifc))
+      ifp = getdata (node);
+
+      for (node2 = listhead (ifp->connected); node2; nextnode (node2))
 	{
+	  ifc = getdata (node2);
 	  p = ifc->address;
 
 	  if (p && p->family == AF_INET 
@@ -700,17 +835,15 @@ bgp_nexthop_self (afi_t afi, struct attr *attr)
   return 0;
 }
 
-static struct bgp_nexthop_cache *
+struct bgp_nexthop_cache *
 zlookup_read ()
 {
   struct stream *s;
-  uint16_t length;
-  u_char marker;
-  u_char version;
-  uint16_t command;
+  u_int16_t length;
+  u_char command;
   int nbytes;
   struct in_addr raddr;
-  uint32_t metric;
+  u_int32_t metric;
   int i;
   u_char nexthop_num;
   struct nexthop *nexthop;
@@ -723,18 +856,7 @@ zlookup_read ()
   length = stream_getw (s);
 
   nbytes = stream_read (s, zlookup->sock, length - 2);
-  marker = stream_getc (s);
-  version = stream_getc (s);
-  
-  if (version != ZSERV_VERSION || marker != ZEBRA_HEADER_MARKER)
-    {
-      zlog_err("%s: socket %d version mismatch, marker %d, version %d",
-               __func__, zlookup->sock, marker, version);
-      return NULL;
-    }
-    
-  command = stream_getw (s);
-  
+  command = stream_getc (s);
   raddr.s_addr = stream_get_ipv4 (s);
   metric = stream_getl (s);
   nexthop_num = stream_getc (s);
@@ -760,9 +882,6 @@ zlookup_read ()
 	    case ZEBRA_NEXTHOP_IFNAME:
 	      nexthop->ifindex = stream_getl (s);
 	      break;
-            default:
-              /* do nothing */
-              break;
 	    }
 	  bnc_nexthop_add (bnc, nexthop);
 	}
@@ -785,12 +904,11 @@ zlookup_query (struct in_addr addr)
 
   s = zlookup->obuf;
   stream_reset (s);
-  zclient_create_header (s, ZEBRA_IPV4_NEXTHOP_LOOKUP);
+  stream_putw (s, 7);
+  stream_putc (s, ZEBRA_IPV4_NEXTHOP_LOOKUP);
   stream_put_in_addr (s, &addr);
-  
-  stream_putw_at (s, 0, stream_get_endp (s));
-  
-  ret = writen (zlookup->sock, s->data, stream_get_endp (s));
+
+  ret = writen (zlookup->sock, s->data, 7);
   if (ret < 0)
     {
       zlog_err ("can't write to zlookup->sock");
@@ -810,16 +928,15 @@ zlookup_query (struct in_addr addr)
 }
 
 #ifdef HAVE_IPV6
-static struct bgp_nexthop_cache *
+struct bgp_nexthop_cache *
 zlookup_read_ipv6 ()
 {
   struct stream *s;
-  uint16_t length;
-  u_char version, marker;
-  uint16_t  command;
+  u_int16_t length;
+  u_char command;
   int nbytes;
   struct in6_addr raddr;
-  uint32_t metric;
+  u_int32_t metric;
   int i;
   u_char nexthop_num;
   struct nexthop *nexthop;
@@ -832,18 +949,8 @@ zlookup_read_ipv6 ()
   length = stream_getw (s);
 
   nbytes = stream_read (s, zlookup->sock, length - 2);
-  marker = stream_getc (s);
-  version = stream_getc (s);
-  
-  if (version != ZSERV_VERSION || marker != ZEBRA_HEADER_MARKER)
-    {
-      zlog_err("%s: socket %d version mismatch, marker %d, version %d",
-               __func__, zlookup->sock, marker, version);
-      return NULL;
-    }
-    
-  command = stream_getw (s);
-  
+  command = stream_getc (s);
+
   stream_get (&raddr, s, 16);
 
   metric = stream_getl (s);
@@ -875,9 +982,6 @@ zlookup_read_ipv6 ()
 	    case ZEBRA_NEXTHOP_IFNAME:
 	      nexthop->ifindex = stream_getl (s);
 	      break;
-	    default:
-	      /* do nothing */
-	      break;
 	    }
 	  bnc_nexthop_add (bnc, nexthop);
 	}
@@ -900,11 +1004,11 @@ zlookup_query_ipv6 (struct in6_addr *addr)
 
   s = zlookup->obuf;
   stream_reset (s);
-  zclient_create_header (s, ZEBRA_IPV6_NEXTHOP_LOOKUP);
+  stream_putw (s, 19);
+  stream_putc (s, ZEBRA_IPV6_NEXTHOP_LOOKUP);
   stream_put (s, addr, 16);
-  stream_putw_at (s, 0, stream_get_endp (s));
-  
-  ret = writen (zlookup->sock, s->data, stream_get_endp (s));
+
+  ret = writen (zlookup->sock, s->data, 19);
   if (ret < 0)
     {
       zlog_err ("can't write to zlookup->sock");
@@ -924,14 +1028,13 @@ zlookup_query_ipv6 (struct in6_addr *addr)
 }
 #endif /* HAVE_IPV6 */
 
-static int
-bgp_import_check (struct prefix *p, u_int32_t *igpmetric,
-                  struct in_addr *igpnexthop)
+int
+bgp_import_check (struct prefix *p, u_int32_t *igpmetric, struct in_addr *igpnexthop)
 {
   struct stream *s;
   int ret;
-  u_int16_t length, command;
-  u_char version, marker;
+  u_int16_t length;
+  u_char command;
   int nbytes;
   struct in_addr addr;
   struct in_addr nexthop;
@@ -950,15 +1053,13 @@ bgp_import_check (struct prefix *p, u_int32_t *igpmetric,
   /* Send query to the lookup connection */
   s = zlookup->obuf;
   stream_reset (s);
-  zclient_create_header (s, ZEBRA_IPV4_IMPORT_LOOKUP);
-  
+  stream_putw (s, 8);
+  stream_putc (s, ZEBRA_IPV4_IMPORT_LOOKUP);
   stream_putc (s, p->prefixlen);
   stream_put_in_addr (s, &p->u.prefix4);
-  
-  stream_putw_at (s, 0, stream_get_endp (s));
-  
+
   /* Write the packet. */
-  ret = writen (zlookup->sock, s->data, stream_get_endp (s));
+  ret = writen (zlookup->sock, s->data, 8);
 
   if (ret < 0)
     {
@@ -984,18 +1085,7 @@ bgp_import_check (struct prefix *p, u_int32_t *igpmetric,
 
   /* Fetch whole data. */
   nbytes = stream_read (s, zlookup->sock, length - 2);
-  marker = stream_getc (s);
-  version = stream_getc (s);
-
-  if (version != ZSERV_VERSION || marker != ZEBRA_HEADER_MARKER)
-    {
-      zlog_err("%s: socket %d version mismatch, marker %d, version %d",
-               __func__, zlookup->sock, marker, version);
-      return 0;
-    }
-    
-  command = stream_getw (s);
-  
+  command = stream_getc (s);
   addr.s_addr = stream_get_ipv4 (s);
   metric = stream_getl (s);
   nexthop_num = stream_getc (s);
@@ -1026,13 +1116,12 @@ bgp_import_check (struct prefix *p, u_int32_t *igpmetric,
 
 /* Scan all configured BGP route then check the route exists in IGP or
    not. */
-static int
+int
 bgp_import (struct thread *t)
 {
   struct bgp *bgp;
   struct bgp_node *rn;
   struct bgp_static *bgp_static;
-  struct listnode *node, *nnode;
   int valid;
   u_int32_t metric;
   struct in_addr nexthop;
@@ -1042,56 +1131,54 @@ bgp_import (struct thread *t)
   bgp_import_thread = 
     thread_add_timer (master, bgp_import, NULL, bgp_import_interval);
 
-  if (BGP_DEBUG (events, EVENTS))
-    zlog_debug ("Import timer expired.");
+  bgp = bgp_get_default ();
+  if (! bgp)
+    return 0;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
-    {
-      for (afi = AFI_IP; afi < AFI_MAX; afi++)
-	for (safi = SAFI_UNICAST; safi < SAFI_MPLS_VPN; safi++)
-	  for (rn = bgp_table_top (bgp->route[afi][safi]); rn;
-	       rn = bgp_route_next (rn))
-	    if ((bgp_static = rn->info) != NULL)
+  for (afi = AFI_IP; afi < AFI_MAX; afi++)
+    for (safi = SAFI_UNICAST; safi < SAFI_MPLS_VPN; safi++)
+      for (rn = bgp_table_top (bgp->route[afi][safi]); rn;
+	   rn = bgp_route_next (rn))
+	if ((bgp_static = rn->info) != NULL)
+	  {
+	    if (bgp_static->backdoor)
+	      continue;
+
+	    valid = bgp_static->valid;
+	    metric = bgp_static->igpmetric;
+	    nexthop = bgp_static->igpnexthop;
+
+	    if (bgp_flag_check (bgp, BGP_FLAG_IMPORT_CHECK)
+		&& afi == AFI_IP && safi == SAFI_UNICAST)
+	      bgp_static->valid = bgp_import_check (&rn->p, &bgp_static->igpmetric,
+						    &bgp_static->igpnexthop);
+	    else
 	      {
-		if (bgp_static->backdoor)
-		  continue;
-
-		valid = bgp_static->valid;
-		metric = bgp_static->igpmetric;
-		nexthop = bgp_static->igpnexthop;
-
-		if (bgp_flag_check (bgp, BGP_FLAG_IMPORT_CHECK)
-		    && afi == AFI_IP && safi == SAFI_UNICAST)
-		  bgp_static->valid = bgp_import_check (&rn->p, &bgp_static->igpmetric,
-						        &bgp_static->igpnexthop);
-		else
-		  {
-		    bgp_static->valid = 1;
-		    bgp_static->igpmetric = 0;
-		    bgp_static->igpnexthop.s_addr = 0;
-		  }
-
-		if (bgp_static->valid != valid)
-		  {
-		    if (bgp_static->valid)
-		      bgp_static_update (bgp, &rn->p, bgp_static, afi, safi);
-		    else
-		      bgp_static_withdraw (bgp, &rn->p, afi, safi);
-		  }
-		else if (bgp_static->valid)
-		  {
-		    if (bgp_static->igpmetric != metric
-			|| bgp_static->igpnexthop.s_addr != nexthop.s_addr
-			|| bgp_static->rmap.name)
-		      bgp_static_update (bgp, &rn->p, bgp_static, afi, safi);
-		  }
+		bgp_static->valid = 1;
+		bgp_static->igpmetric = 0;
+		bgp_static->igpnexthop.s_addr = 0;
 	      }
-    }
+
+	    if (bgp_static->valid != valid)
+	      {
+		if (bgp_static->valid)
+		  bgp_static_update (bgp, &rn->p, bgp_static, afi, safi);
+		else
+		  bgp_static_withdraw (bgp, &rn->p, afi, safi);
+	      }
+	    else if (bgp_static->valid)
+	      {
+		if (bgp_static->igpmetric != metric
+		    || bgp_static->igpnexthop.s_addr != nexthop.s_addr
+		    || bgp_static->rmap.name)
+		  bgp_static_update (bgp, &rn->p, bgp_static, afi, safi);
+	      }
+	  }
   return 0;
 }
 
 /* Connect to zebra for nexthop lookup. */
-static int
+int
 zlookup_connect (struct thread *t)
 {
   struct zclient *zlookup;
@@ -1109,6 +1196,10 @@ zlookup_connect (struct thread *t)
 #endif /* HAVE_TCP_ZEBRA */
   if (zlookup->sock < 0)
     return -1;
+
+  /* Make BGP import there. */
+  bgp_import_thread = 
+    thread_add_timer (master, bgp_import, NULL, 0);
 
   return 0;
 }
@@ -1141,11 +1232,11 @@ bgp_multiaccess_check_v4 (struct in_addr nexthop, char *peer)
   if (zlookup->sock < 0)
     return 0;
 
-  rn1 = bgp_node_match (bgp_connected_table[AFI_IP], &p1);
+  rn1 = bgp_node_match (bgp_connected_ipv4, &p1);
   if (! rn1)
     return 0;
   
-  rn2 = bgp_node_match (bgp_connected_table[AFI_IP], &p2);
+  rn2 = bgp_node_match (bgp_connected_ipv4, &p2);
   if (! rn2)
     return 0;
 
@@ -1168,7 +1259,7 @@ DEFUN (bgp_scan_time,
     {
       thread_cancel (bgp_scan_thread);
       bgp_scan_thread = 
-	thread_add_timer (master, bgp_scan_timer, NULL, bgp_scan_interval);
+	thread_add_timer (master, bgp_scan, NULL, bgp_scan_interval);
     }
 
   return CMD_SUCCESS;
@@ -1187,7 +1278,7 @@ DEFUN (no_bgp_scan_time,
     {
       thread_cancel (bgp_scan_thread);
       bgp_scan_thread = 
-	thread_add_timer (master, bgp_scan_timer, NULL, bgp_scan_interval);
+	thread_add_timer (master, bgp_scan, NULL, bgp_scan_interval);
     }
 
   return CMD_SUCCESS;
@@ -1219,7 +1310,7 @@ DEFUN (show_ip_bgp_scan,
   vty_out (vty, "BGP scan interval is %d%s", bgp_scan_interval, VTY_NEWLINE);
 
   vty_out (vty, "Current BGP nexthop cache:%s", VTY_NEWLINE);
-  for (rn = bgp_table_top (bgp_nexthop_cache_table[AFI_IP]); rn; rn = bgp_route_next (rn))
+  for (rn = bgp_table_top (bgp_nexthop_cache_ipv4); rn; rn = bgp_route_next (rn))
     if ((bnc = rn->info) != NULL)
       {
 	if (bnc->valid)
@@ -1233,9 +1324,7 @@ DEFUN (show_ip_bgp_scan,
 #ifdef HAVE_IPV6
   {
     char buf[BUFSIZ];
-    for (rn = bgp_table_top (bgp_nexthop_cache_table[AFI_IP6]); 
-         rn; 
-         rn = bgp_route_next (rn))
+    for (rn = bgp_table_top (bgp_nexthop_cache_ipv6); rn; rn = bgp_route_next (rn))
       if ((bnc = rn->info) != NULL)
 	{
 	  if (bnc->valid)
@@ -1251,9 +1340,7 @@ DEFUN (show_ip_bgp_scan,
 #endif /* HAVE_IPV6 */
 
   vty_out (vty, "BGP connected route:%s", VTY_NEWLINE);
-  for (rn = bgp_table_top (bgp_connected_table[AFI_IP]); 
-       rn; 
-       rn = bgp_route_next (rn))
+  for (rn = bgp_table_top (bgp_connected_ipv4); rn; rn = bgp_route_next (rn))
     if (rn->info != NULL)
       vty_out (vty, " %s/%d%s", inet_ntoa (rn->p.u.prefix4), rn->p.prefixlen,
 	       VTY_NEWLINE);
@@ -1262,9 +1349,7 @@ DEFUN (show_ip_bgp_scan,
   {
     char buf[BUFSIZ];
 
-    for (rn = bgp_table_top (bgp_connected_table[AFI_IP6]); 
-         rn; 
-         rn = bgp_route_next (rn))
+    for (rn = bgp_table_top (bgp_connected_ipv6); rn; rn = bgp_route_next (rn))
       if (rn->info != NULL)
 	vty_out (vty, " %s/%d%s",
 		 inet_ntop (AF_INET6, &rn->p.u.prefix6, buf, BUFSIZ),
@@ -1296,24 +1381,21 @@ bgp_scan_init ()
   bgp_scan_interval = BGP_SCAN_INTERVAL_DEFAULT;
   bgp_import_interval = BGP_IMPORT_INTERVAL_DEFAULT;
 
-  cache1_table[AFI_IP] = bgp_table_init (AFI_IP, SAFI_UNICAST);
-  cache2_table[AFI_IP] = bgp_table_init (AFI_IP, SAFI_UNICAST);
-  bgp_nexthop_cache_table[AFI_IP] = cache1_table[AFI_IP];
+  cache1 = bgp_table_init ();
+  cache2 = bgp_table_init ();
+  bgp_nexthop_cache_ipv4 = cache1;
 
-  bgp_connected_table[AFI_IP] = bgp_table_init (AFI_IP, SAFI_UNICAST);
+  bgp_connected_ipv4 = bgp_table_init ();
 
 #ifdef HAVE_IPV6
-  cache1_table[AFI_IP6] = bgp_table_init (AFI_IP6, SAFI_UNICAST);
-  cache2_table[AFI_IP6] = bgp_table_init (AFI_IP6, SAFI_UNICAST);
-  bgp_nexthop_cache_table[AFI_IP6] = cache1_table[AFI_IP6];
-  bgp_connected_table[AFI_IP6] = bgp_table_init (AFI_IP6, SAFI_UNICAST);
+  cache6_1 = bgp_table_init ();
+  cache6_2 = bgp_table_init ();
+  bgp_nexthop_cache_ipv6 = cache6_1;
+  bgp_connected_ipv6 = bgp_table_init ();
 #endif /* HAVE_IPV6 */
 
   /* Make BGP scan thread. */
-  bgp_scan_thread = thread_add_timer (master, bgp_scan_timer, 
-                                      NULL, bgp_scan_interval);
-  /* Make BGP import there. */
-  bgp_import_thread = thread_add_timer (master, bgp_import, NULL, 0);
+  bgp_scan_thread = thread_add_timer (master, bgp_scan, NULL, bgp_scan_interval);
 
   install_element (BGP_NODE, &bgp_scan_time_cmd);
   install_element (BGP_NODE, &no_bgp_scan_time_cmd);

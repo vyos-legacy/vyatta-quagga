@@ -34,8 +34,6 @@
 # include <config.h>
 #endif
 
-#include <zebra.h>
-
 #if !defined __STDC__ || !__STDC__
 /* This is a separate conditional since some stdc systems
    reject `defined (const)'.  */
@@ -969,8 +967,6 @@ _getopt_internal (argc, argv, optstring, longopts, longind, long_only)
   }
 }
 
-#ifdef REALLY_NEED_PLAIN_GETOPT
-
 int
 getopt (argc, argv, optstring)
      int argc;
@@ -982,8 +978,6 @@ getopt (argc, argv, optstring)
 			   (int *) 0,
 			   0);
 }
-
-#endif /* REALLY_NEED_PLAIN_GETOPT */
 
 #endif	/* Not ELIDE_CODE.  */
 

@@ -18,28 +18,22 @@ along with GNU Zebra; see the file COPYING.  If not, write to the
 Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 Boston, MA 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_ZEBRA_H
-#define _QUAGGA_BGP_ZEBRA_H
-
-extern void bgp_zebra_init (void);
-extern int bgp_if_update_all (void);
-extern int bgp_config_write_redistribute (struct vty *, struct bgp *, afi_t, safi_t,
+int bgp_if_update_all ();
+int bgp_config_write_redistribute (struct vty *, struct bgp *, afi_t, safi_t,
 				   int *);
-extern void bgp_zebra_announce (struct prefix *, struct bgp_info *, struct bgp *);
-extern void bgp_zebra_withdraw (struct prefix *, struct bgp_info *);
+void bgp_zebra_announce (struct prefix *, struct bgp_info *, struct bgp *);
+void bgp_zebra_withdraw (struct prefix *, struct bgp_info *);
 
-extern int bgp_redistribute_set (struct bgp *, afi_t, int);
-extern int bgp_redistribute_rmap_set (struct bgp *, afi_t, int, const char *);
-extern int bgp_redistribute_metric_set (struct bgp *, afi_t, int, u_int32_t);
-extern int bgp_redistribute_unset (struct bgp *, afi_t, int);
-extern int bgp_redistribute_routemap_unset (struct bgp *, afi_t, int);
-extern int bgp_redistribute_metric_unset (struct bgp *, afi_t, int);
+int bgp_redistribute_set (struct bgp *, afi_t, int);
+int bgp_redistribute_rmap_set (struct bgp *, afi_t, int, char *);
+int bgp_redistribute_metric_set (struct bgp *, afi_t, int, u_int32_t);
+int bgp_redistribute_unset (struct bgp *, afi_t, int);
+int bgp_redistribute_routemap_unset (struct bgp *, afi_t, int);
+int bgp_redistribute_metric_unset (struct bgp *, afi_t, int);
 
-extern struct interface *if_lookup_by_ipv4 (struct in_addr *);
-extern struct interface *if_lookup_by_ipv4_exact (struct in_addr *);
+struct interface *if_lookup_by_ipv4 (struct in_addr *);
+struct interface *if_lookup_by_ipv4_exact (struct in_addr *);
 #ifdef HAVE_IPV6
-extern struct interface *if_lookup_by_ipv6 (struct in6_addr *);
-extern struct interface *if_lookup_by_ipv6_exact (struct in6_addr *);
+struct interface *if_lookup_by_ipv6 (struct in6_addr *);
+struct interface *if_lookup_by_ipv6_exact (struct in6_addr *);
 #endif /* HAVE_IPV6 */
-
-#endif /* _QUAGGA_BGP_ZEBRA_H */

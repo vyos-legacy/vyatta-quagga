@@ -25,12 +25,10 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "command.h"
 #include "getopt.h"
 #include "thread.h"
-#include <lib/version.h>
+#include "version.h"
 #include "memory.h"
 #include "prefix.h"
 #include "log.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_attr.h"
@@ -47,40 +45,13 @@ struct option longopts[] =
   { "vty_port",    required_argument, NULL, 'P'},
   { "retain",      no_argument,       NULL, 'r'},
   { "no_kernel",   no_argument,       NULL, 'n'},
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
-  { "dryrun",      no_argument,       NULL, 'C'},
   { "help",        no_argument,       NULL, 'h'},
   { 0 }
 };
 
-/* signal definitions */
-void sighup (void);
-void sigint (void);
-void sigusr1 (void);
-
-struct quagga_signal_t bgp_signals[] = 
-{
-  { 
-    .signal = SIGHUP, 
-    .handler = &sighup,
-  },
-  {
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigint,
-  },
-};
-
 /* Configuration file and directory. */
+char config_current[] = BGP_DEFAULT_CONFIG;
 char config_default[] = SYSCONFDIR BGP_DEFAULT_CONFIG;
 
 /* Route retain mode flag. */
@@ -93,32 +64,11 @@ struct thread_master *master;
 char *config_file = NULL;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_BGPD_PID;
+char *pid_file = PATH_BGPD_PID;
 
 /* VTY port number and address.  */
 int vty_port = BGP_VTY_PORT;
 char *vty_addr = NULL;
-
-/* privileges */
-zebra_capabilities_t _caps_p [] =  
-{
-    ZCAP_BIND, 
-    ZCAP_NET_RAW,
-};
-
-struct zebra_privs_t bgpd_privs =
-{
-#if defined(QUAGGA_USER) && defined(QUAGGA_GROUP)
-  .user = QUAGGA_USER,
-  .group = QUAGGA_GROUP,
-#endif
-#ifdef VTY_GROUP
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = sizeof(_caps_p)/sizeof(_caps_p[0]),
-  .cap_num_i = 0,
-};
 
 /* Help information display. */
 static void
@@ -139,10 +89,7 @@ redistribution between different routing protocols.\n\n\
 -P, --vty_port     Set vty's port number\n\
 -r, --retain       When program terminates, retain added route by bgpd.\n\
 -n, --no_kernel    Do not install route to kernel.\n\
--u, --user         User to run as\n\
--g, --group        Group to run as\n\
 -v, --version      Print program version\n\
--C, --dryrun       Check configuration for validity and exit\n\
 -h, --help         Display this help and exit\n\
 \n\
 Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
@@ -153,7 +100,7 @@ Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
 
 /* SIGHUP handler. */
 void 
-sighup (void)
+sighup (int sig)
 {
   zlog (NULL, LOG_INFO, "SIGHUP received");
 
@@ -163,19 +110,19 @@ sighup (void)
   zlog_info ("bgpd restarting!");
 
   /* Reload config file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
   /* Create VTY's socket */
-  vty_serv_sock (vty_addr, vty_port, BGP_VTYSH_PATH);
+  vty_serv_sock (vty_addr, vty_port ? vty_port : BGP_VTY_PORT, BGP_VTYSH_PATH);
 
   /* Try to return to normal operation. */
 }
 
 /* SIGINT handler. */
 void
-sigint (void)
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal");
+  zlog (NULL, LOG_INFO, "Terminating on signal");
 
   if (! retain_mode)
     bgp_terminate ();
@@ -185,9 +132,43 @@ sigint (void)
 
 /* SIGUSR1 handler. */
 void
-sigusr1 (void)
+sigusr1 (int sig)
 {
   zlog_rotate (NULL);
+}
+
+/* Signale wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
+{
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
+
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
+/* Initialization of signal handles. */
+void
+signal_init ()
+{
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigint);
+  signal_set (SIGPIPE, SIG_IGN);
+  signal_set (SIGUSR1, sigusr1);
 }
 
 /* Main routine of bgpd. Treatment of argument and start bgp finite
@@ -198,7 +179,6 @@ main (int argc, char **argv)
   char *p;
   int opt;
   int daemon_mode = 0;
-  int dryrun = 0;
   char *progname;
   struct thread thread;
 
@@ -208,7 +188,7 @@ main (int argc, char **argv)
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  zlog_default = openzlog (progname, ZLOG_BGP,
+  zlog_default = openzlog (progname, ZLOG_NOLOG, ZLOG_BGP,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
   /* BGP master init. */
@@ -217,7 +197,7 @@ main (int argc, char **argv)
   /* Command line argument treatment. */
   while (1) 
     {
-      opt = getopt_long (argc, argv, "df:i:hp:A:P:rnu:g:vC", longopts, 0);
+      opt = getopt_long (argc, argv, "df:hp:A:P:rnv", longopts, 0);
     
       if (opt == EOF)
 	break;
@@ -242,15 +222,7 @@ main (int argc, char **argv)
 	  vty_addr = optarg;
 	  break;
 	case 'P':
-          /* Deal with atoi() returning 0 on failure, and bgpd not
-             listening on bgp port... */
-          if (strcmp(optarg, "0") == 0) 
-            {
-              vty_port = 0;
-              break;
-            } 
-          vty_port = atoi (optarg);
-          vty_port = (vty_port ? vty_port : BGP_VTY_PORT);
+	  vty_port = atoi (optarg);
 	  break;
 	case 'r':
 	  retain_mode = 1;
@@ -258,18 +230,9 @@ main (int argc, char **argv)
 	case 'n':
 	  bgp_option_set (BGP_OPT_NO_FIB);
 	  break;
-	case 'u':
-	  bgpd_privs.user = optarg;
-	  break;
-	case 'g':
-	  bgpd_privs.group = optarg;
-	  break;
 	case 'v':
 	  print_version (progname);
 	  exit (0);
-	  break;
-	case 'C':
-	  dryrun = 1;
 	  break;
 	case 'h':
 	  usage (progname, 0);
@@ -285,10 +248,9 @@ main (int argc, char **argv)
 
   /* Initializations. */
   srand (time (NULL));
-  signal_init (master, Q_SIGC(bgp_signals), bgp_signals);
-  zprivs_init (&bgpd_privs);
+  signal_init ();
   cmd_init (1);
-  vty_init (master);
+  vty_init ();
   memory_init ();
 
   /* BGP related initialization.  */
@@ -298,12 +260,8 @@ main (int argc, char **argv)
   sort_node ();
 
   /* Parse config file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Start execution only if not in dry-run mode */
-  if(dryrun)
-    return(0);
-  
   /* Turn into daemon if daemon_mode is set. */
   if (daemon_mode)
     daemon (0, 0);
@@ -315,13 +273,13 @@ main (int argc, char **argv)
   vty_serv_sock (vty_addr, vty_port, BGP_VTYSH_PATH);
 
   /* Print banner. */
-  zlog_notice ("BGPd %s starting: vty@%d, bgp@%d", QUAGGA_VERSION,
-	       vty_port, bm->port);
+  zlog_info ("BGPd %s starting: vty@%d, bgp@%d", ZEBRA_VERSION,
+	     vty_port, bm->port);
 
   /* Start finite state machine, here we go! */
   while (thread_fetch (master, &thread))
     thread_call (&thread);
 
   /* Not reached. */
-  return (0);
+  exit (0);
 }

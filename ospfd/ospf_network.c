@@ -29,9 +29,6 @@
 #include "sockunion.h"
 #include "log.h"
 #include "sockopt.h"
-#include "privs.h"
-
-extern struct zebra_privs_t ospfd_privs;
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_network.h"
@@ -41,8 +38,6 @@ extern struct zebra_privs_t ospfd_privs;
 #include "ospfd/ospf_lsdb.h"
 #include "ospfd/ospf_neighbor.h"
 #include "ospfd/ospf_packet.h"
-
-
 
 /* Join to the OSPF ALL SPF ROUTERS multicast group. */
 int
@@ -55,13 +50,11 @@ ospf_if_add_allspfrouters (struct ospf *top, struct prefix *p,
                                    p->u.prefix4, htonl (OSPF_ALLSPFROUTERS),
                                    ifindex);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_ADD_MEMBERSHIP (fd %d, addr %s, "
-	       "ifindex %u, AllSPFRouters): %s; perhaps a kernel limit "
-	       "on # of multicast group memberships has been exceeded?",
-               top->fd, inet_ntoa(p->u.prefix4), ifindex, safe_strerror(errno));
+    zlog_warn ("can't setsockopt IP_ADD_MEMBERSHIP (AllSPFRouters): %s",
+               strerror (errno));
   else
-    zlog_info ("interface %s [%u] join AllSPFRouters Multicast group.",
-	       inet_ntoa (p->u.prefix4), ifindex);
+    zlog_info ("interface %s join AllSPFRouters Multicast group.",
+	       inet_ntoa (p->u.prefix4));
 
   return ret;
 }
@@ -76,12 +69,11 @@ ospf_if_drop_allspfrouters (struct ospf *top, struct prefix *p,
                                    p->u.prefix4, htonl (OSPF_ALLSPFROUTERS),
                                    ifindex);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_DROP_MEMBERSHIP (fd %d, addr %s, "
-	       "ifindex %u, AllSPFRouters): %s",
-               top->fd, inet_ntoa(p->u.prefix4), ifindex, safe_strerror(errno));
+    zlog_warn("can't setsockopt IP_DROP_MEMBERSHIP (AllSPFRouters): %s",
+	      strerror (errno));
   else
-    zlog_info ("interface %s [%u] leave AllSPFRouters Multicast group.",
-	       inet_ntoa (p->u.prefix4), ifindex);
+    zlog_info ("interface %s leave AllSPFRouters Multicast group.",
+	       inet_ntoa (p->u.prefix4));
 
   return ret;
 }
@@ -97,13 +89,11 @@ ospf_if_add_alldrouters (struct ospf *top, struct prefix *p, unsigned int
                                    p->u.prefix4, htonl (OSPF_ALLDROUTERS),
                                    ifindex);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_ADD_MEMBERSHIP (fd %d, addr %s, "
-	       "ifindex %u, AllDRouters): %s; perhaps a kernel limit "
-	       "on # of multicast group memberships has been exceeded?",
-               top->fd, inet_ntoa(p->u.prefix4), ifindex, safe_strerror(errno));
+    zlog_warn ("can't setsockopt IP_ADD_MEMBERSHIP (AllDRouters): %s",
+               strerror (errno));
   else
-    zlog_info ("interface %s [%u] join AllDRouters Multicast group.",
-	       inet_ntoa (p->u.prefix4), ifindex);
+    zlog_info ("interface %s join AllDRouters Multicast group.",
+	       inet_ntoa (p->u.prefix4));
 
   return ret;
 }
@@ -118,12 +108,11 @@ ospf_if_drop_alldrouters (struct ospf *top, struct prefix *p, unsigned int
                                    p->u.prefix4, htonl (OSPF_ALLDROUTERS),
                                    ifindex);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_DROP_MEMBERSHIP (fd %d, addr %s, "
-	       "ifindex %u, AllDRouters): %s",
-               top->fd, inet_ntoa(p->u.prefix4), ifindex, safe_strerror(errno));
+    zlog_warn ("can't setsockopt IP_DROP_MEMBERSHIP (AllDRouters): %s",
+	       strerror (errno));
   else
-    zlog_info ("interface %s [%u] leave AllDRouters Multicast group.",
-	       inet_ntoa (p->u.prefix4), ifindex);
+    zlog_info ("interface %s leave AllDRouters Multicast group.",
+	       inet_ntoa (p->u.prefix4));
 
   return ret;
 }
@@ -140,22 +129,18 @@ ospf_if_ipmulticast (struct ospf *top, struct prefix *p, unsigned int ifindex)
   /* Prevent receiving self-origined multicast packets. */
   ret = setsockopt (top->fd, IPPROTO_IP, IP_MULTICAST_LOOP, (void *)&val, len);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_MULTICAST_LOOP(0) for fd %d: %s",
-	       top->fd, safe_strerror(errno));
+    zlog_warn ("can't setsockopt IP_MULTICAST_LOOP(0): %s", strerror (errno));
   
   /* Explicitly set multicast ttl to 1 -- endo. */
   val = 1;
   ret = setsockopt (top->fd, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&val, len);
   if (ret < 0)
-    zlog_warn ("can't setsockopt IP_MULTICAST_TTL(1) for fd %d: %s",
-	       top->fd, safe_strerror (errno));
+    zlog_warn ("can't setsockopt IP_MULTICAST_TTL(1): %s", strerror (errno));
 
   ret = setsockopt_multicast_ipv4 (top->fd, IP_MULTICAST_IF,
                                    p->u.prefix4, 0, ifindex);
   if (ret < 0)
-    zlog_warn("can't setsockopt IP_MULTICAST_IF(fd %d, addr %s, "
-	      "ifindex %u): %s",
-	      top->fd, inet_ntoa(p->u.prefix4), ifindex, safe_strerror(errno));
+    zlog_warn ("can't setsockopt IP_MULTICAST_IF: %s", strerror (errno));
 
   return ret;
 }
@@ -164,72 +149,44 @@ int
 ospf_sock_init (void)
 {
   int ospf_sock;
-  /*
-   * XXX warning: unused variable `tos'
-   * tos should be ifdefed similarly to usage
-   */
   int ret, tos, hincl = 1;
 
-  if ( ospfd_privs.change (ZPRIVS_RAISE) )
-    zlog_err ("ospf_sock_init: could not raise privs, %s",
-               safe_strerror (errno) );
-    
   ospf_sock = socket (AF_INET, SOCK_RAW, IPPROTO_OSPFIGP);
   if (ospf_sock < 0)
     {
-      int save_errno = errno;
-      if ( ospfd_privs.change (ZPRIVS_LOWER) )
-        zlog_err ("ospf_sock_init: could not lower privs, %s",
-                   safe_strerror (errno) );
-      zlog_err ("ospf_read_sock_init: socket: %s", safe_strerror (save_errno));
-      exit(1);
+      zlog_warn ("ospf_read_sock_init: socket: %s", strerror (errno));
+      return -1;
     }
-    
-#ifdef IP_HDRINCL
-  /* we will include IP header with packet */
-  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_HDRINCL, &hincl, sizeof (hincl));
-  if (ret < 0)
-    {
-      int save_errno = errno;
-      if ( ospfd_privs.change (ZPRIVS_LOWER) )
-        zlog_err ("ospf_sock_init: could not lower privs, %s",
-                   safe_strerror (errno) );
-      zlog_warn ("Can't set IP_HDRINCL option for fd %d: %s",
-      		 ospf_sock, safe_strerror(save_errno));
-    }
-#elif defined (IPTOS_PREC_INTERNETCONTROL)
-#warning "IP_HDRINCL not available on this system"
-#warning "using IPTOS_PREC_INTERNETCONTROL"
+
   /* Set precedence field. */
+#ifdef IPTOS_PREC_INTERNETCONTROL
   tos = IPTOS_PREC_INTERNETCONTROL;
   ret = setsockopt (ospf_sock, IPPROTO_IP, IP_TOS,
 		    (char *) &tos, sizeof (int));
   if (ret < 0)
     {
-      int save_errno = errno;
-      if ( ospfd_privs.change (ZPRIVS_LOWER) )
-        zlog_err ("ospf_sock_init: could not lower privs, %s",
-                   safe_strerror (errno) );
-      zlog_warn ("can't set sockopt IP_TOS %d to socket %d: %s",
-      		 tos, ospf_sock, safe_strerror(save_errno));
+      zlog_warn ("can't set sockopt IP_TOS %d to socket %d", tos, ospf_sock);
       close (ospf_sock);	/* Prevent sd leak. */
       return ret;
     }
-#else /* !IPTOS_PREC_INTERNETCONTROL */
-#warning "IP_HDRINCL not available, nor is IPTOS_PREC_INTERNETCONTROL"
-  zlog_warn ("IP_HDRINCL option not available");
-#endif /* IP_HDRINCL */
+#endif /* IPTOS_PREC_INTERNETCONTROL */
 
-  ret = setsockopt_ifindex (AF_INET, ospf_sock, 1);
-
+  /* we will include IP header with packet */
+  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_HDRINCL, &hincl, sizeof (hincl));
   if (ret < 0)
-     zlog_warn ("Can't set pktinfo option for fd %d", ospf_sock);
+    zlog_warn ("Can't set IP_HDRINCL option");
 
-  if (ospfd_privs.change (ZPRIVS_LOWER))
-    {
-      zlog_err ("ospf_sock_init: could not lower privs, %s",
-               safe_strerror (errno) );
-    }
+#if defined (IP_PKTINFO)
+  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_PKTINFO, &hincl, sizeof (hincl));
+   if (ret < 0)
+    zlog_warn ("Can't set IP_PKTINFO option");
+#elif defined (IP_RECVIF)
+  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_RECVIF, &hincl, sizeof (hincl));
+   if (ret < 0)
+    zlog_warn ("Can't set IP_RECVIF option");
+#else
+#warning "cannot be able to receive link information on this OS"
+#endif
  
   return ospf_sock;
 }

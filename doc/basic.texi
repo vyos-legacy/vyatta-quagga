@@ -1,4 +1,5 @@
 @node Basic commands
+@comment  node-name,  next,  previous,  up
 @chapter Basic commands
 
 There are five routing daemons in use, and there is one manager daemon.
@@ -15,15 +16,15 @@ The following sections discuss commands common to all the routing
 daemons.
 
 @menu
-* Terminal Mode Commands::      Common commands used in a VTY
 * Config Commands::             Commands used in config files
 * Common Invocation Options::   Starting the daemons
-* Virtual Terminal Interfaces:: Interacting with the daemons
+* Virtual Terminal Interfaces::  Interacting with the daemons
 @end menu
 
 
 
-@node Config Commands
+@node Config Commands, Common Invocation Options, Basic commands, Basic commands
+@comment  node-name,  next,  previous,  up
 @section Config Commands
 
 @cindex Configuration files for running the software
@@ -63,7 +64,8 @@ options when starting the daemon.
 
 
 
-@node Basic Config Commands
+@node Basic Config Commands, Sample Config File, Config Commands, Config Commands
+@comment  node-name,  next,  previous,  up
 @subsection Basic Config Commands
 
 @deffn Command {hostname @var{hostname}} {}
@@ -79,110 +81,47 @@ accept connections.
 Set enable password.
 @end deffn
 
-@deffn Command {log trap @var{level}} {}
-@deffnx Command {no log trap} {}
-These commands are deprecated and are present only for historical compatibility.
-The log trap command sets the current logging level for all enabled
-logging destinations, and it sets the default for all future logging commands
-that do not specify a level.  The normal default
-logging level is debugging.  The @code{no} form of the command resets
-the default level for future logging commands to debugging, but it does
-not change the logging level of existing logging destinations.
-@end deffn
-
-
 @deffn Command {log stdout} {}
-@deffnx Command {log stdout @var{level}} {}
 @deffnx Command {no log stdout} {}
-Enable logging output to stdout. 
-If the optional second argument specifying the
-logging level is not present, the default logging level (typically debugging,
-but can be changed using the deprecated @code{log trap} command) will be used.
-The @code{no} form of the command disables logging to stdout.
-The @code{level} argument must have one of these values: 
-emergencies, alerts, critical, errors, warnings, notifications, informational, or debugging.  Note that the existing code logs its most important messages
-with severity @code{errors}.
+Set logging output to stdout.
 @end deffn
 
 @deffn Command {log file @var{filename}} {}
-@deffnx Command {log file @var{filename} @var{level}} {}
-@deffnx Command {no log file} {}
-If you want to log into a file, please specify @code{filename} as
-in this example:
+If you want to log into a file please specify @code{filename} as
+follows.
 @example
-log file /var/log/quagga/bgpd.log informational
+log file /usr/local/etc/bgpd.log
 @end example
-If the optional second argument specifying the
-logging level is not present, the default logging level (typically debugging,
-but can be changed using the deprecated @code{log trap} command) will be used.
-The @code{no} form of the command disables logging to a file.
-
-Note: if you do not configure any file logging, and a daemon crashes due
-to a signal or an assertion failure, it will attempt to save the crash
-information in a file named /var/tmp/quagga.<daemon name>.crashlog.
-For security reasons, this will not happen if the file exists already, so
-it is important to delete the file after reporting the crash information.
 @end deffn
 
 @deffn Command {log syslog} {}
-@deffnx Command {log syslog @var{level}} {}
 @deffnx Command {no log syslog} {}
-Enable logging output to syslog.
-If the optional second argument specifying the
-logging level is not present, the default logging level (typically debugging,
-but can be changed using the deprecated @code{log trap} command) will be used.
-The @code{no} form of the command disables logging to syslog.
+Set logging output to syslog.
 @end deffn
 
-@deffn Command {log monitor} {}
-@deffnx Command {log monitor @var{level}} {}
-@deffnx Command {no log monitor} {}
-Enable logging output to vty terminals that have enabled logging
-using the @code{terminal monitor} command.
-By default, monitor logging is enabled at the debugging level, but this
-command (or the deprecated @code{log trap} command) can be used to change 
-the monitor logging level.
-If the optional second argument specifying the
-logging level is not present, the default logging level (typically debugging,
-but can be changed using the deprecated @code{log trap} command) will be used.
-The @code{no} form of the command disables logging to terminal monitors.
+@deffn Command {write terminal} {}
+Displays the current configuration to the vty interface.
 @end deffn
 
-@deffn Command {log facility @var{facility}} {}
-@deffnx Command {no log facility} {}
-This command changes the facility used in syslog messages.  The default
-facility is @code{daemon}.  The @code{no} form of the command resets
-the facility to the default @code{daemon} facility.
+@deffn Command {write file} {}
+Write current configuration to configuration file.
 @end deffn
 
-@deffn Command {log record-priority} {}
-@deffnx Command {no log record-priority} {}
-To include the severity in all messages logged to a file, to stdout, or to
-a terminal monitor (i.e. anything except syslog),
-use the @code{log record-priority} global configuration command.
-To disable this option, use the @code{no} form of the command.  By default,
-the severity level is not included in logged messages.  Note: some
-versions of syslogd (including Solaris) can be configured to include
-the facility and level in the messages emitted.
+@deffn Command {configure terminal} {}
+Change to configuration mode.  This command is the first step to
+configuration.
 @end deffn
 
-@deffn Command {log timestamp precision @var{<0-6>}} {}
-@deffnx Command {no log timestamp precision} {}
-This command sets the precision of log message timestamps to the
-given number of digits after the decimal point.  Currently,
-the value must be in the range 0 to 6 (i.e. the maximum precision
-is microseconds).
-To restore the default behavior (1-second accuracy), use the
-@code{no} form of the command, or set the precision explicitly to 0.
+@deffn Command {terminal length @var{<0-512>}} {}
+Set terminal display length to @var{<0-512>}.  If length is 0, no
+display control is performed.
+@end deffn
 
-@example
-@group
-log timestamp precision 3
-@end group
-@end example
+@deffn Command {who} {}
+@end deffn
 
-In this example, the precision is set to provide timestamps with
-millisecond accuracy.
+@deffn Command {list} {}
+List commands.
 @end deffn
 
 @deffn Command {service password-encryption} {}
@@ -196,6 +135,10 @@ Enable advanced mode VTY.
 @deffn Command {service terminal-length @var{<0-512>}} {}
 Set system wide line configuration.  This configuration command applies
 to all VTY interfaces.
+@end deffn
+
+@deffn Command {show version} {}
+Show the current version of the Zebra and its build host information.
 @end deffn
 
 @deffn Command {line vty} {}
@@ -227,7 +170,10 @@ Do not perform timeout at all.  This command is as same as
 Restrict vty connections with an access list.
 @end deffn
 
-@node Sample Config File
+
+
+@node   Sample Config File,  , Basic Config Commands, Config Commands
+@comment  node-name,  next,  previous,  up
 @subsection Sample Config File
 
 
@@ -262,58 +208,13 @@ comment and the password is set to 'zebra!password'.
 
 
 
-@node Terminal Mode Commands
-@section Terminal Mode Commands
-
-@deffn Command {write terminal} {}
-Displays the current configuration to the vty interface.
-@end deffn
-
-@deffn Command {write file} {}
-Write current configuration to configuration file.
-@end deffn
-
-@deffn Command {configure terminal} {}
-Change to configuration mode.  This command is the first step to
-configuration.
-@end deffn
-
-@deffn Command {terminal length @var{<0-512>}} {}
-Set terminal display length to @var{<0-512>}.  If length is 0, no
-display control is performed.
-@end deffn
-
-@deffn Command {who} {}
-Show a list of currently connected vty sessions.
-@end deffn
-
-@deffn Command {list} {}
-List all available commands.
-@end deffn
-
-@deffn Command {show version} {}
-Show the current version of @value{PACKAGE_NAME} and its build host information.
-@end deffn
-
-@deffn Command {show logging} {}
-Shows the current configuration of the logging system.  This includes
-the status of all logging destinations.
-@end deffn
-
-@deffn Command {logmsg @var{level} @var{message}} {}
-Send a message to all logging destinations that are enabled for messages
-of the given severity.
-@end deffn
-
-
-
-
-@node Common Invocation Options
+@node Common Invocation Options, Virtual Terminal Interfaces, Config Commands, Basic commands
+@comment  node-name,  next,  previous,  up
 @section Common Invocation Options
 @c COMMON_OPTIONS
 @c OPTIONS section of the man page
 
-These options apply to all @value{PACKAGE_NAME} daemons.
+These options apply to all Zebra daemons.
 
 @table @samp
 
@@ -340,23 +241,13 @@ stop}.
 
 The file name is an run-time option rather than a configure-time option
 so that multiple routing daemons can be run simultaneously.  This is
-useful when using @value{PACKAGE_NAME} to implement a routing looking glass.  One
+useful when using Zebra to implement a routing looking glass.  One
 machine can be used to collect differing routing views from differing
 points in the network.
 
-@item -A @var{address}
-@itemx --vty_addr=@var{address}
-Set the VTY local address to bind to. If set, the VTY socket will only
-be bound to this address. 
-
 @item -P @var{port}
 @itemx --vty_port=@var{port}
-Set the VTY TCP port number. If set to 0 then the TCP VTY sockets will not
-be opened.
-
-@item -u @var{user}
-@itemx --vty_addr=@var{user}
-Set the user and group to run as.
+Set the VTY port number.
 
 @item -v
 @itemx --version
@@ -366,7 +257,8 @@ Print program version.
 
 
 
-@node Virtual Terminal Interfaces
+@node  Virtual Terminal Interfaces,  , Common Invocation Options, Basic commands
+@comment  node-name,  next,  previous,  up
 @section Virtual Terminal Interfaces
 
 VTY -- Virtual Terminal [aka TeletYpe] Interface is a command line
@@ -380,7 +272,8 @@ interface (CLI) for user interaction with the routing daemon.
 
 
 
-@node VTY Overview
+@node  VTY Overview, VTY Modes, Virtual Terminal Interfaces, Virtual Terminal Interfaces
+@comment  node-name,  next,  previous,  up
 @subsection VTY Overview
 
 
@@ -397,8 +290,9 @@ Trying 127.0.0.1...
 Connected to localhost.
 Escape character is '^]'.
 
-Hello, this is @value{PACKAGE_NAME} (version @value{VERSION})
-@value{COPYRIGHT_STR}
+Hello, this is zebra (version @value{VERSION})
+Copyright 1997-2000 Kunihiro Ishiguro
+
 
 User Access Verification
 
@@ -422,8 +316,12 @@ Router#
 
 '?' is very useful for looking up commands.
 
-@node VTY Modes
+
+
+@node  VTY Modes, VTY CLI Commands, VTY Overview, Virtual Terminal Interfaces
+@comment  node-name,  next,  previous,  up
 @subsection VTY Modes
+
 
 There are three basic VTY modes:
 
@@ -435,7 +333,10 @@ There are three basic VTY modes:
 
 There are commands that may be restricted to specific VTY modes. 
 
-@node VTY View Mode
+
+
+@node VTY View Mode, VTY Enable Mode, VTY Modes, VTY Modes
+@comment  node-name,  next,  previous,  up
 @subsubsection VTY View Mode
 @c to be written (gpoul)
 
@@ -443,25 +344,33 @@ There are commands that may be restricted to specific VTY modes.
 This mode is for read-only access to the CLI. One may exit the mode by
 leaving the system, or by entering @code{enable} mode.
 
-@node VTY Enable Mode
+
+
+@node VTY Enable Mode, VTY Other Modes, VTY View Mode, VTY Modes
+@comment  node-name,  next,  previous,  up
 @subsubsection VTY Enable Mode
+
 
 @c to be written (gpoul)
 This mode is for read-write access to the CLI. One may exit the mode by
 leaving the system, or by escaping to view mode.
 
-@node VTY Other Modes
+
+
+@node VTY Other Modes,  , VTY Enable Mode, VTY Modes
+@comment  node-name,  next,  previous,  up
 @subsubsection VTY Other Modes
 
 
 @c to be written (gpoul)
 This page is for describing other modes.
 
-@node VTY CLI Commands
+@node VTY CLI Commands,  , VTY Modes, Virtual Terminal Interfaces
+@comment  node-name,  next,  previous,  up
 @subsection VTY CLI Commands
 
-Commands that you may use at the command-line are described in the following
-three subsubsections.
+
+Commands that you may use at the command-line are described in the following three subsubsections.
 
 @menu
 * CLI Movement Commands::       Commands for moving the cursor about
@@ -469,8 +378,12 @@ three subsubsections.
 * CLI Advanced Commands::       Other commands, session management and so on
 @end menu
 
-@node CLI Movement Commands
+
+
+@node CLI Movement Commands, CLI Editing Commands, VTY CLI Commands, VTY CLI Commands
+@comment  node-name,  next,  previous,  up
 @subsubsection CLI Movement Commands
+
 
 These commands are used for moving the CLI cursor. The @key{C} character
 means press the Control Key.
@@ -507,8 +420,12 @@ Move to the end of the line.
 
 @end table
 
-@node CLI Editing Commands
+
+
+@node CLI Editing Commands, CLI Advanced Commands, CLI Movement Commands, VTY CLI Commands
+@comment  node-name,  next,  previous,  up
 @subsubsection CLI Editing Commands
+
 
 These commands are used for editing text on a line. The @key{C}
 character means press the Control Key.
@@ -547,8 +464,12 @@ Transpose character.
 
 @end table
 
-@node CLI Advanced Commands
+
+
+@node CLI Advanced Commands,  , CLI Editing Commands, VTY CLI Commands
+@comment  node-name,  next,  previous,  up
 @subsubsection CLI Advanced Commands
+
 
 There are several additional CLI commands for command line completions,
 insta-help, and VTY session management.

@@ -29,10 +29,17 @@
 #include "log.h"
 #include "ripd/ripd.h"
 #include "ripd/rip_debug.h"
-#include "ripd/rip_interface.h"
 
 /* All information about zebra. */
 struct zclient *zclient = NULL;
+
+/* Callback prototypes for zebra client service. */
+int rip_interface_add (int, struct zclient *, zebra_size_t);
+int rip_interface_delete (int, struct zclient *, zebra_size_t);
+int rip_interface_address_add (int, struct zclient *, zebra_size_t);
+int rip_interface_address_delete (int, struct zclient *, zebra_size_t);
+int rip_interface_up (int, struct zclient *, zebra_size_t);
+int rip_interface_down (int, struct zclient *, zebra_size_t);
 
 /* RIPd to zebra command interface. */
 void
@@ -59,7 +66,7 @@ rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop,
 	  api.distance = distance;
 	}
 
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_ADD, zclient, p, &api);
+      zapi_ipv4_add (zclient, p, &api);
 
       rip_global_route_changes++;
     }
@@ -83,14 +90,14 @@ rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop,
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       api.metric = metric;
 
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_DELETE, zclient, p, &api);
+      zapi_ipv4_delete (zclient, p, &api);
 
       rip_global_route_changes++;
     }
 }
 
 /* Zebra route add and delete treatment. */
-static int
+int
 rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 {
   struct stream *s;
@@ -127,17 +134,12 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
     }
   if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
     api.distance = stream_getc (s);
-  else
-    api.distance = 255;
   if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
     api.metric = stream_getl (s);
-  else
-    api.metric = 0;
 
   /* Then fetch IPv4 prefixes. */
   if (command == ZEBRA_IPV4_ROUTE_ADD)
-    rip_redistribute_add (api.type, RIP_ROUTE_REDISTRIBUTE, &p, ifindex, 
-                          &nexthop, api.metric, api.distance);
+    rip_redistribute_add (api.type, RIP_ROUTE_REDISTRIBUTE, &p, ifindex, &nexthop);
   else 
     rip_redistribute_delete (api.type, RIP_ROUTE_REDISTRIBUTE, &p, ifindex);
 
@@ -145,14 +147,14 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 }
 
 void
-rip_zclient_reset (void)
+rip_zclient_reset ()
 {
   zclient_reset (zclient);
 }
 
 /* RIP route-map set for redistribution */
-static void
-rip_routemap_set (int type, const char *name)
+void
+rip_routemap_set (int type, char *name)
 {
   if (rip->route_map[type].name)
     free(rip->route_map[type].name);
@@ -161,15 +163,15 @@ rip_routemap_set (int type, const char *name)
   rip->route_map[type].map = route_map_lookup_by_name (name);
 }
 
-static void
-rip_redistribute_metric_set (int type, unsigned int metric)
+void
+rip_redistribute_metric_set (int type, int metric)
 {
   rip->route_map[type].metric_config = 1;
   rip->route_map[type].metric = metric;
 }
 
-static int
-rip_metric_unset (int type, unsigned int metric)
+int
+rip_metric_unset (int type,int metric)
 {
 #define DONT_CARE_METRIC_RIP 17  
   if (metric != DONT_CARE_METRIC_RIP &&
@@ -181,8 +183,8 @@ rip_metric_unset (int type, unsigned int metric)
 }
 
 /* RIP route-map unset for redistribution */
-static int
-rip_routemap_unset (int type, const char *name)
+int
+rip_routemap_unset (int type,char *name)
 {
   if (! rip->route_map[type].name ||
       (name != NULL && strcmp(rip->route_map[type].name,name)))
@@ -199,7 +201,7 @@ rip_routemap_unset (int type, const char *name)
 static struct {
   int type;
   int str_min_len;
-  const char *str;
+  char *str;
 } redist_type[] = {
   {ZEBRA_ROUTE_KERNEL,  1, "kernel"},
   {ZEBRA_ROUTE_CONNECT, 1, "connected"},
@@ -233,7 +235,7 @@ DEFUN (no_router_zebra,
   return CMD_SUCCESS;
 }
 
-static int
+int
 rip_redistribute_set (int type)
 {
   if (zclient->redist[type])
@@ -242,12 +244,12 @@ rip_redistribute_set (int type)
   zclient->redist[type] = 1;
 
   if (zclient->sock > 0)
-    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient, type);
+    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_ADD, zclient->sock, type);
 
   return CMD_SUCCESS;
 }
 
-static int
+int
 rip_redistribute_unset (int type)
 {
   if (! zclient->redist[type])
@@ -256,7 +258,7 @@ rip_redistribute_unset (int type)
   zclient->redist[type] = 0;
 
   if (zclient->sock > 0)
-    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient, type);
+    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient->sock, type);
 
   /* Remove the routes from RIP table. */
   rip_redistribute_withdraw (type);
@@ -271,7 +273,7 @@ rip_redistribute_check (int type)
 }
 
 void
-rip_redistribute_clean (void)
+rip_redistribute_clean ()
 {
   int i;
 
@@ -281,7 +283,7 @@ rip_redistribute_clean (void)
 	{
 	  if (zclient->sock > 0)
 	    zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE,
-				     zclient, redist_type[i].type);
+				     zclient->sock, redist_type[i].type);
 
 	  zclient->redist[redist_type[i].type] = 0;
 
@@ -314,9 +316,13 @@ DEFUN (no_rip_redistribute_rip,
 
 DEFUN (rip_redistribute_type,
        rip_redistribute_type_cmd,
-       "redistribute " QUAGGA_REDIST_STR_RIPD,
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD)
+       "redistribute (kernel|connected|static|ospf|bgp)",
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n")
 {
   int i;
 
@@ -325,8 +331,7 @@ DEFUN (rip_redistribute_type,
       if (strncmp (redist_type[i].str, argv[0], 
 		   redist_type[i].str_min_len) == 0) 
 	{
-	  zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, 
-	                        redist_type[i].type);
+	  zclient_redistribute_set (zclient, redist_type[i].type);
 	  return CMD_SUCCESS;
 	}
     }
@@ -339,10 +344,14 @@ DEFUN (rip_redistribute_type,
 
 DEFUN (no_rip_redistribute_type,
        no_rip_redistribute_type_cmd,
-       "no redistribute " QUAGGA_REDIST_STR_RIPD,
+       "no redistribute (kernel|connected|static|ospf|bgp)",
        NO_STR
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD)
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n")
 {
   int i;
 
@@ -366,9 +375,13 @@ DEFUN (no_rip_redistribute_type,
 
 DEFUN (rip_redistribute_type_routemap,
        rip_redistribute_type_routemap_cmd,
-       "redistribute " QUAGGA_REDIST_STR_RIPD " route-map WORD",
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
+       "redistribute (kernel|connected|static|ospf|bgp) route-map WORD",
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n"
        "Route map reference\n"
        "Pointer to route-map entries\n")
 {
@@ -379,7 +392,7 @@ DEFUN (rip_redistribute_type_routemap,
 		redist_type[i].str_min_len) == 0) 
       {
 	rip_routemap_set (redist_type[i].type, argv[1]);
-	zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, redist_type[i].type);
+	zclient_redistribute_set (zclient, redist_type[i].type);
 	return CMD_SUCCESS;
       }
   }
@@ -392,10 +405,14 @@ DEFUN (rip_redistribute_type_routemap,
 
 DEFUN (no_rip_redistribute_type_routemap,
        no_rip_redistribute_type_routemap_cmd,
-       "no redistribute " QUAGGA_REDIST_STR_RIPD " route-map WORD",
+       "no redistribute (kernel|connected|static|ospf|bgp) route-map WORD",
        NO_STR
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n"
        "Route map reference\n"
        "Pointer to route-map entries\n")
 {
@@ -421,9 +438,13 @@ DEFUN (no_rip_redistribute_type_routemap,
 
 DEFUN (rip_redistribute_type_metric,
        rip_redistribute_type_metric_cmd,
-       "redistribute " QUAGGA_REDIST_STR_RIPD " metric <0-16>",
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
+       "redistribute (kernel|connected|static|ospf|bgp) metric <0-16>",
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n"
        "Metric\n"
        "Metric value\n")
 {
@@ -437,7 +458,7 @@ DEFUN (rip_redistribute_type_metric,
 		redist_type[i].str_min_len) == 0) 
       {
 	rip_redistribute_metric_set (redist_type[i].type, metric);
-	zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, redist_type[i].type);
+	zclient_redistribute_set (zclient, redist_type[i].type);
 	return CMD_SUCCESS;
       }
   }
@@ -450,10 +471,14 @@ DEFUN (rip_redistribute_type_metric,
 
 DEFUN (no_rip_redistribute_type_metric,
        no_rip_redistribute_type_metric_cmd,
-       "no redistribute " QUAGGA_REDIST_STR_RIPD " metric <0-16>",
+       "no redistribute (kernel|connected|static|ospf|bgp) metric <0-16>",
        NO_STR
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n"
        "Metric\n"
        "Metric value\n")
 {
@@ -477,46 +502,16 @@ DEFUN (no_rip_redistribute_type_metric,
   return CMD_WARNING;
 }
 
-DEFUN (rip_redistribute_type_metric_routemap,
-       rip_redistribute_type_metric_routemap_cmd,
-       "redistribute " QUAGGA_REDIST_STR_RIPD " metric <0-16> route-map WORD",
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
-       "Metric\n"
-       "Metric value\n"
-       "Route map reference\n"
-       "Pointer to route-map entries\n")
-{
-  int i;
-  int metric;
-
-  metric = atoi (argv[1]);
-
-  for (i = 0; redist_type[i].str; i++) {
-    if (strncmp(redist_type[i].str, argv[0],
-		redist_type[i].str_min_len) == 0) 
-      {
-	rip_redistribute_metric_set (redist_type[i].type, metric);
-	rip_routemap_set (redist_type[i].type, argv[2]);
-	zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, redist_type[i].type);
-	return CMD_SUCCESS;
-      }
-  }
-
-  vty_out(vty, "Invalid type %s%s", argv[0],
-	  VTY_NEWLINE);
-
-  return CMD_WARNING;
-}
-
-
 DEFUN (no_rip_redistribute_type_metric_routemap,
        no_rip_redistribute_type_metric_routemap_cmd,
-       "no redistribute " QUAGGA_REDIST_STR_RIPD
-       " metric <0-16> route-map WORD",
+       "no redistribute (kernel|connected|static|ospf|bgp) metric <0-16> route-map WORD",
        NO_STR
-       REDIST_STR
-       QUAGGA_REDIST_HELP_STR_RIPD
+       "Redistribute information from another routing protocol\n"
+       "Kernel routes\n"
+       "Connected\n"
+       "Static routes\n"
+       "Open Shortest Path First (OSPF)\n"
+       "Border Gateway Protocol (BGP)\n"
        "Metric\n"
        "Metric value\n"
        "Route map reference\n"
@@ -564,8 +559,7 @@ DEFUN (rip_default_information_originate,
 
       rip->default_information = 1;
   
-      rip_redistribute_add (ZEBRA_ROUTE_RIP, RIP_ROUTE_DEFAULT, &p, 0, 
-                            NULL, 0, 0);
+      rip_redistribute_add (ZEBRA_ROUTE_RIP, RIP_ROUTE_STATIC, &p, 0, NULL);
     }
 
   return CMD_SUCCESS;
@@ -587,14 +581,14 @@ DEFUN (no_rip_default_information_originate,
 
       rip->default_information = 0;
   
-      rip_redistribute_delete (ZEBRA_ROUTE_RIP, RIP_ROUTE_DEFAULT, &p, 0);
+      rip_redistribute_delete (ZEBRA_ROUTE_RIP, RIP_ROUTE_STATIC, &p, 0);
     }
 
   return CMD_SUCCESS;
 }
 
 /* RIP configuration write function. */
-static int
+int
 config_write_zebra (struct vty *vty)
 {
   if (! zclient->enable)
@@ -615,6 +609,8 @@ int
 config_write_rip_redistribute (struct vty *vty, int config_mode)
 {
   int i;
+  char *str[] = { "system", "kernel", "connected", "static", "rip",
+		  "ripng", "ospf", "ospf6", "bgp"};
 
   for (i = 0; i < ZEBRA_ROUTE_MAX; i++)
     if (i != zclient->redist_default && zclient->redist[i])
@@ -625,27 +621,27 @@ config_write_rip_redistribute (struct vty *vty, int config_mode)
 	      {
 		if (rip->route_map[i].name)
 		  vty_out (vty, " redistribute %s metric %d route-map %s%s",
-			   zebra_route_string(i), rip->route_map[i].metric,
+			   str[i], rip->route_map[i].metric,
 			   rip->route_map[i].name,
 			   VTY_NEWLINE);
 		else
 		  vty_out (vty, " redistribute %s metric %d%s",
-			   zebra_route_string(i), rip->route_map[i].metric,
+			   str[i], rip->route_map[i].metric,
 			   VTY_NEWLINE);
 	      }
 	    else
 	      {
 		if (rip->route_map[i].name)
 		  vty_out (vty, " redistribute %s route-map %s%s",
-			   zebra_route_string(i), rip->route_map[i].name,
+			   str[i], rip->route_map[i].name,
 			   VTY_NEWLINE);
 		else
-		  vty_out (vty, " redistribute %s%s", zebra_route_string(i),
+		  vty_out (vty, " redistribute %s%s", str[i],
 			   VTY_NEWLINE);
 	      }
 	  }
 	else
-	  vty_out (vty, " %s", zebra_route_string(i));
+	  vty_out (vty, " %s", str[i]);
       }
   return 0;
 }
@@ -686,7 +682,6 @@ rip_zclient_init ()
   install_element (RIP_NODE, &rip_redistribute_type_cmd);
   install_element (RIP_NODE, &rip_redistribute_type_routemap_cmd);
   install_element (RIP_NODE, &rip_redistribute_type_metric_cmd);
-  install_element (RIP_NODE, &rip_redistribute_type_metric_routemap_cmd);
   install_element (RIP_NODE, &no_rip_redistribute_type_cmd);
   install_element (RIP_NODE, &no_rip_redistribute_type_routemap_cmd);
   install_element (RIP_NODE, &no_rip_redistribute_type_metric_cmd);

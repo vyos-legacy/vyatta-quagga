@@ -96,7 +96,7 @@ static struct as_list_master as_list_master =
 };
 
 /* Allocate new AS filter. */
-static struct as_filter *
+struct as_filter *
 as_filter_new ()
 {
   struct as_filter *new;
@@ -107,7 +107,7 @@ as_filter_new ()
 }
 
 /* Free allocated AS filter. */
-static void
+void
 as_filter_free (struct as_filter *asfilter)
 {
   if (asfilter->reg)
@@ -118,8 +118,8 @@ as_filter_free (struct as_filter *asfilter)
 }
 
 /* Make new AS filter. */
-static struct as_filter *
-as_filter_make (regex_t *reg, const char *reg_str, enum as_filter_type type)
+struct as_filter *
+as_filter_make (regex_t *reg, char *reg_str, enum as_filter_type type)
 {
   struct as_filter *asfilter;
 
@@ -131,8 +131,8 @@ as_filter_make (regex_t *reg, const char *reg_str, enum as_filter_type type)
   return asfilter;
 }
 
-static struct as_filter *
-as_filter_lookup (struct as_list *aslist, const char *reg_str,
+struct as_filter *
+as_filter_lookup (struct as_list *aslist, char *reg_str,
 		  enum as_filter_type type)
 {
   struct as_filter *asfilter;
@@ -143,7 +143,7 @@ as_filter_lookup (struct as_list *aslist, const char *reg_str,
   return NULL;
 }
 
-static void
+void
 as_list_filter_add (struct as_list *aslist, struct as_filter *asfilter)
 {
   asfilter->next = NULL;
@@ -158,7 +158,7 @@ as_list_filter_add (struct as_list *aslist, struct as_filter *asfilter)
 
 /* Lookup as_list from list of as_list by name. */
 struct as_list *
-as_list_lookup (const char *name)
+as_list_lookup (char *name)
 {
   struct as_list *aslist;
 
@@ -176,7 +176,7 @@ as_list_lookup (const char *name)
   return NULL;
 }
 
-static struct as_list *
+struct as_list *
 as_list_new ()
 {
   struct as_list *new;
@@ -186,7 +186,7 @@ as_list_new ()
   return new;
 }
 
-static void
+void
 as_list_free (struct as_list *aslist)
 {
   XFREE (MTYPE_AS_LIST, aslist);
@@ -194,10 +194,10 @@ as_list_free (struct as_list *aslist)
 
 /* Insert new AS list to list of as_list.  Each as_list is sorted by
    the name. */
-static struct as_list *
-as_list_insert (const char *name)
+struct as_list *
+as_list_insert (char *name)
 {
-  size_t i;
+  int i;
   long number;
   struct as_list *aslist;
   struct as_list *point;
@@ -278,8 +278,8 @@ as_list_insert (const char *name)
   return aslist;
 }
 
-static struct as_list *
-as_list_get (const char *name)
+struct as_list *
+as_list_get (char *name)
 {
   struct as_list *aslist;
 
@@ -296,21 +296,24 @@ as_list_get (const char *name)
   return aslist;
 }
 
-static const char *
+static char *
 filter_type_str (enum as_filter_type type)
 {
   switch (type)
     {
     case AS_FILTER_PERMIT:
       return "permit";
+      break;
     case AS_FILTER_DENY:
       return "deny";
+      break;
     default:
       return "";
+      break;
     }
 }
 
-static void
+void
 as_list_delete (struct as_list *aslist)
 {
   struct as_list_list *list;
@@ -349,7 +352,7 @@ as_list_empty (struct as_list *aslist)
     return 0;
 }
 
-static void
+void
 as_list_filter_delete (struct as_list *aslist, struct as_filter *asfilter)
 {
   if (asfilter->next)
@@ -415,7 +418,7 @@ as_list_delete_hook (void (*func) ())
   as_list_master.delete_hook = func;
 }
 
-static int
+int
 as_list_dup_check (struct as_list *aslist, struct as_filter *new)
 {
   struct as_filter *asfilter;
@@ -443,7 +446,10 @@ DEFUN (ip_as_path, ip_as_path_cmd,
   struct as_filter *asfilter;
   struct as_list *aslist;
   regex_t *regex;
+  struct buffer *b;
+  int i;
   char *regstr;
+  int first = 0;
 
   /* Check the filter type. */
   if (strncmp (argv[1], "p", 1) == 0)
@@ -457,12 +463,25 @@ DEFUN (ip_as_path, ip_as_path_cmd,
     }
 
   /* Check AS path regex. */
-  regstr = argv_concat(argv, argc, 2);
+  b = buffer_new (1024);
+  for (i = 2; i < argc; i++)
+    {
+      if (first)
+	buffer_putc (b, ' ');
+      else
+	first = 1;
+
+      buffer_putstr (b, argv[i]);
+    }
+  buffer_putc (b, '\0');
+
+  regstr = buffer_getstr (b);
+  buffer_free (b);
 
   regex = bgp_regcomp (regstr);
   if (!regex)
     {
-      XFREE (MTYPE_TMP, regstr);
+      free (regstr);
       vty_out (vty, "can't compile regexp %s%s", argv[0],
 	       VTY_NEWLINE);
       return CMD_WARNING;
@@ -470,7 +489,7 @@ DEFUN (ip_as_path, ip_as_path_cmd,
 
   asfilter = as_filter_make (regex, regstr, type);
   
-  XFREE (MTYPE_TMP, regstr);
+  free (regstr);
 
   /* Install new filter to the access_list. */
   aslist = as_list_get (argv[0]);
@@ -499,6 +518,9 @@ DEFUN (no_ip_as_path,
   enum as_filter_type type;
   struct as_filter *asfilter;
   struct as_list *aslist;
+  struct buffer *b;
+  int i;
+  int first = 0;
   char *regstr;
   regex_t *regex;
 
@@ -523,12 +545,25 @@ DEFUN (no_ip_as_path,
     }
   
   /* Compile AS path. */
-  regstr = argv_concat(argv, argc, 2);
+  b = buffer_new (1024);
+  for (i = 2; i < argc; i++)
+    {
+      if (first)
+	buffer_putc (b, ' ');
+      else
+	first = 1;
+
+      buffer_putstr (b, argv[i]);
+    }
+  buffer_putc (b, '\0');
+
+  regstr = buffer_getstr (b);
+  buffer_free (b);
 
   regex = bgp_regcomp (regstr);
   if (!regex)
     {
-      XFREE (MTYPE_TMP, regstr);
+      free (regstr);
       vty_out (vty, "can't compile regexp %s%s", argv[0],
 	       VTY_NEWLINE);
       return CMD_WARNING;
@@ -537,7 +572,7 @@ DEFUN (no_ip_as_path,
   /* Lookup asfilter. */
   asfilter = as_filter_lookup (aslist, regstr, type);
 
-  XFREE (MTYPE_TMP, regstr);
+  free (regstr);
   bgp_regex_free (regex);
 
   if (asfilter == NULL)
@@ -572,85 +607,10 @@ DEFUN (no_ip_as_path_all,
 
   as_list_delete (aslist);
 
-  /* Run hook function. */
-  if (as_list_master.delete_hook)
-    (*as_list_master.delete_hook) ();
-
   return CMD_SUCCESS;
 }
 
-static void
-as_list_show (struct vty *vty, struct as_list *aslist)
-{
-  struct as_filter *asfilter;
-
-  vty_out (vty, "AS path access list %s%s", aslist->name, VTY_NEWLINE);
-
-  for (asfilter = aslist->head; asfilter; asfilter = asfilter->next)
-    {
-      vty_out (vty, "    %s %s%s", filter_type_str (asfilter->type),
-	       asfilter->reg_str, VTY_NEWLINE);
-    }
-}
-
-static void
-as_list_show_all (struct vty *vty)
-{
-  struct as_list *aslist;
-  struct as_filter *asfilter;
-
-  for (aslist = as_list_master.num.head; aslist; aslist = aslist->next)
-    {
-      vty_out (vty, "AS path access list %s%s", aslist->name, VTY_NEWLINE);
-
-      for (asfilter = aslist->head; asfilter; asfilter = asfilter->next)
-	{
-	  vty_out (vty, "    %s %s%s", filter_type_str (asfilter->type),
-		   asfilter->reg_str, VTY_NEWLINE);
-	}
-    }
-
-  for (aslist = as_list_master.str.head; aslist; aslist = aslist->next)
-    {
-      vty_out (vty, "AS path access list %s%s", aslist->name, VTY_NEWLINE);
-
-      for (asfilter = aslist->head; asfilter; asfilter = asfilter->next)
-	{
-	  vty_out (vty, "    %s %s%s", filter_type_str (asfilter->type),
-		   asfilter->reg_str, VTY_NEWLINE);
-	}
-    }
-}
-
-DEFUN (show_ip_as_path_access_list,
-       show_ip_as_path_access_list_cmd,
-       "show ip as-path-access-list WORD",
-       SHOW_STR
-       IP_STR
-       "List AS path access lists\n"
-       "AS path access list name\n")
-{
-  struct as_list *aslist;
-
-  aslist = as_list_lookup (argv[0]);
-  if (aslist)
-    as_list_show (vty, aslist);
-
-  return CMD_SUCCESS;
-}
-
-DEFUN (show_ip_as_path_access_list_all,
-       show_ip_as_path_access_list_all_cmd,
-       "show ip as-path-access-list",
-       SHOW_STR
-       IP_STR
-       "List AS path access lists\n")
-{
-  as_list_show_all (vty);
-  return CMD_SUCCESS;
-}
-
-static int
+int
 config_write_as_list (struct vty *vty)
 {
   struct as_list *aslist;
@@ -688,16 +648,11 @@ struct cmd_node as_list_node =
 
 /* Register functions. */
 void
-bgp_filter_init (void)
+bgp_filter_init ()
 {
   install_node (&as_list_node, config_write_as_list);
 
   install_element (CONFIG_NODE, &ip_as_path_cmd);
   install_element (CONFIG_NODE, &no_ip_as_path_cmd);
   install_element (CONFIG_NODE, &no_ip_as_path_all_cmd);
-
-  install_element (VIEW_NODE, &show_ip_as_path_access_list_cmd);
-  install_element (VIEW_NODE, &show_ip_as_path_access_list_all_cmd);
-  install_element (ENABLE_NODE, &show_ip_as_path_access_list_cmd);
-  install_element (ENABLE_NODE, &show_ip_as_path_access_list_all_cmd);
 }

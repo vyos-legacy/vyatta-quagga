@@ -28,8 +28,6 @@
 #include "linklist.h"
 #include "memory.h"
 
-#include "ripd/ripd.h"
-
 #define RIP_OFFSET_LIST_IN  0
 #define RIP_OFFSET_LIST_OUT 1
 #define RIP_OFFSET_LIST_MAX 2
@@ -48,8 +46,8 @@ struct rip_offset_list
 
 static struct list *rip_offset_list_master;
 
-static int
-strcmp_safe (const char *s1, const char *s2)
+int
+strcmp_safe (char *s1, char *s2)
 {
   if (s1 == NULL && s2 == NULL)
     return 0;
@@ -60,8 +58,8 @@ strcmp_safe (const char *s1, const char *s2)
   return strcmp (s1, s2);
 }
 
-static struct rip_offset_list *
-rip_offset_list_new (void)
+struct rip_offset_list *
+rip_offset_list_new ()
 {
   struct rip_offset_list *new;
 
@@ -70,19 +68,19 @@ rip_offset_list_new (void)
   return new;
 }
 
-static void
+void
 rip_offset_list_free (struct rip_offset_list *offset)
 {
   XFREE (MTYPE_RIP_OFFSET_LIST, offset);
 }
 
-static struct rip_offset_list *
-rip_offset_list_lookup (const char *ifname)
+struct rip_offset_list *
+rip_offset_list_lookup (char *ifname)
 {
   struct rip_offset_list *offset;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (rip_offset_list_master, node, nnode, offset))
+  LIST_LOOP (rip_offset_list_master, offset, nn)
     {
       if (strcmp_safe (offset->ifname, ifname) == 0)
 	return offset;
@@ -90,8 +88,8 @@ rip_offset_list_lookup (const char *ifname)
   return NULL;
 }
 
-static struct rip_offset_list *
-rip_offset_list_get (const char *ifname)
+struct rip_offset_list *
+rip_offset_list_get (char *ifname)
 {
   struct rip_offset_list *offset;
   
@@ -107,9 +105,9 @@ rip_offset_list_get (const char *ifname)
   return offset;
 }
 
-static int
-rip_offset_list_set (struct vty *vty, const char *alist, const char *direct_str,
-		     const char *metric_str, const char *ifname)
+int
+rip_offset_list_set (struct vty *vty, char *alist, char *direct_str,
+		     char *metric_str, char *ifname)
 {
   int direct;
   int metric;
@@ -145,10 +143,9 @@ rip_offset_list_set (struct vty *vty, const char *alist, const char *direct_str,
   return CMD_SUCCESS;
 }
 
-static int
-rip_offset_list_unset (struct vty *vty, const char *alist,
-		       const char *direct_str, const char *metric_str,
-		       const char *ifname)
+int
+rip_offset_list_unset (struct vty *vty, char *alist, char *direct_str,
+		       char *metric_str, char *ifname)
 {
   int direct;
   int metric;
@@ -336,13 +333,13 @@ DEFUN (no_rip_offset_list_ifname,
   return rip_offset_list_unset (vty, argv[0], argv[1], argv[2], argv[3]);
 }
 
-static int
+int
 offset_list_cmp (struct rip_offset_list *o1, struct rip_offset_list *o2)
 {
   return strcmp_safe (o1->ifname, o2->ifname);
 }
 
-static void
+void
 offset_list_del (struct rip_offset_list *offset)
 {
   if (OFFSET_LIST_IN_NAME (offset))
@@ -380,10 +377,10 @@ rip_offset_clean ()
 int
 config_write_rip_offset_list (struct vty *vty)
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct rip_offset_list *offset;
 
-  for (ALL_LIST_ELEMENTS (rip_offset_list_master, node, nnode, offset))
+  LIST_LOOP (rip_offset_list_master, offset, nn)
     {
       if (! offset->ifname)
 	{

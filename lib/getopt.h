@@ -22,18 +22,6 @@
 #ifndef _GETOPT_H
 #define _GETOPT_H 1
 
-/*
- * The operating system may or may not provide getopt_long(), and if
- * so it may or may not be a version we are willing to use.  Our
- * strategy is to declare getopt here, and then provide code unless
- * the supplied version is adequate.  The difficult case is when a
- * declaration for getopt is provided, as our declaration must match.
- *
- * XXX Arguably this version should be named differently, and the
- * local names defined to refer to the system version when we choose
- * to use the system version.
- */
-
 #ifdef	__cplusplus
 extern "C" {
 #endif
@@ -111,23 +99,14 @@ struct option
 #define optional_argument	2
 
 #if defined (__STDC__) && __STDC__
-
-#if REALLY_NEED_PLAIN_GETOPT
-
-/*
- * getopt is defined in POSIX.2.  Assume that if the system defines
- * getopt that it complies with POSIX.2.  If not, an autoconf test
- * should be written to define NONPOSIX_GETOPT_DEFINITION.
- */
-#ifndef NONPOSIX_GETOPT_DEFINITION
+#ifdef __GNU_LIBRARY__
+/* Many other libraries have conflicting prototypes for getopt, with
+   differences in the consts, in stdlib.h.  To avoid compilation
+   errors, only prototype getopt for the GNU C library.  */
 extern int getopt (int argc, char *const *argv, const char *shortopts);
-#else /* NONPOSIX_GETOPT_DEFINITION */
-extern int getopt (void);
-#endif /* NONPOSIX_GETOPT_DEFINITION */
-
-#endif
-
-
+#else /* not __GNU_LIBRARY__ */
+extern int getopt ();
+#endif /* __GNU_LIBRARY__ */
 extern int getopt_long (int argc, char *const *argv, const char *shortopts,
 		        const struct option *longopts, int *longind);
 extern int getopt_long_only (int argc, char *const *argv,
@@ -140,16 +119,11 @@ extern int _getopt_internal (int argc, char *const *argv,
 		             const struct option *longopts, int *longind,
 			     int long_only);
 #else /* not __STDC__ */
-
-#ifdef REALLY_NEED_PLAIN_GETOPT
 extern int getopt ();
-#endif /* REALLY_NEED_PLAIN_GETOPT */
-
 extern int getopt_long ();
 extern int getopt_long_only ();
 
 extern int _getopt_internal ();
-
 #endif /* __STDC__ */
 
 #ifdef	__cplusplus

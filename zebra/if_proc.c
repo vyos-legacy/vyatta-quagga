@@ -123,8 +123,8 @@ ifstat_dev_fields (int version, char *buf, struct interface *ifp)
 }
 
 /* Update interface's statistics. */
-void
-ifstat_update_proc (void)
+int
+ifstat_update_proc ()
 {
   FILE *fp;
   char buf[PROCBUFSIZ];
@@ -138,8 +138,8 @@ ifstat_update_proc (void)
   if (fp == NULL)
     {
       zlog_warn ("Can't open proc file %s: %s",
-		 _PATH_PROC_NET_DEV, safe_strerror (errno));
-      return;
+		 _PATH_PROC_NET_DEV, strerror (errno));
+      return -1;
     }
 
   /* Drop header lines. */
@@ -161,8 +161,8 @@ ifstat_update_proc (void)
       ifp = if_get_by_name (name);
       ifstat_dev_fields (version, stat, ifp);
     }
-  fclose(fp);
-  return;
+
+  return 0;
 }
 
 /* Interface structure allocation by proc filesystem. */
@@ -179,7 +179,7 @@ interface_list_proc ()
   if (fp == NULL)
     {
       zlog_warn ("Can't open proc file %s: %s",
-		 _PATH_PROC_NET_DEV, safe_strerror (errno));
+		 _PATH_PROC_NET_DEV, strerror (errno));
       return -1;
     }
 
@@ -195,7 +195,6 @@ interface_list_proc ()
       ifp = if_get_by_name (name);
       if_add_update (ifp);
     }
-  fclose(fp);
   return 0;
 }
 
@@ -212,7 +211,7 @@ ifaddr_proc_ipv6 ()
   char buf[PROCBUFSIZ];
   int n;
   char addr[33];
-  char ifname[21];
+  char ifname[20];
   int ifindex, plen, scope, status;
   struct interface *ifp;
   struct prefix_ipv6 p;
@@ -222,7 +221,7 @@ ifaddr_proc_ipv6 ()
   if (fp == NULL)
     {
       zlog_warn ("Can't open proc file %s: %s",
-		 _PATH_PROC_NET_IF_INET6, safe_strerror (errno));
+		 _PATH_PROC_NET_IF_INET6, strerror (errno));
       return -1;
     }
   
@@ -240,9 +239,8 @@ ifaddr_proc_ipv6 ()
       str2in6_addr (addr, &p.prefix);
       p.prefixlen = plen;
 
-      connected_add_ipv6 (ifp, 0, &p.prefix, p.prefixlen, NULL, ifname);
+      connected_add_ipv6 (ifp, &p.prefix, p.prefixlen, NULL);
     }
-  fclose (fp);
   return 0;
 }
 #endif /* HAVE_IPV6 && HAVE_PROC_NET_IF_INET6 */

@@ -22,13 +22,6 @@
 
 #include <zebra.h>
 
-#include "log.h"
-#include "privs.h"
-
-#include "zebra/ipforward.h"
-
-extern struct zebra_privs_t zserv_privs;
-
 char proc_net_snmp[] = "/proc/net/snmp";
 
 static void
@@ -41,7 +34,7 @@ dropline (FILE *fp)
 }
 
 int
-ipforward (void)
+ipforward ()
 {
   FILE *fp;
   int ipforwarding = 0;
@@ -62,8 +55,6 @@ ipforward (void)
   pnt = fgets (buf, 6, fp);
   sscanf (buf, "Ip: %d", &ipforwarding);
 
-  fclose(fp);
-  
   if (ipforwarding == 1)
     return 1;
 
@@ -74,53 +65,35 @@ ipforward (void)
 char proc_ipv4_forwarding[] = "/proc/sys/net/ipv4/ip_forward";
 
 int
-ipforward_on (void)
+ipforward_on ()
 {
   FILE *fp;
-  
-  if ( zserv_privs.change(ZPRIVS_RAISE) )
-  	zlog_err ("Can't raise privileges, %s", safe_strerror (errno) );
 
   fp = fopen (proc_ipv4_forwarding, "w");
-
-  if (fp == NULL) {
-    if ( zserv_privs.change(ZPRIVS_LOWER) )
-      zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
+  
+  if (fp == NULL)
     return -1;
-  }
 
   fprintf (fp, "1\n");
 
   fclose (fp);
 
-  if ( zserv_privs.change(ZPRIVS_LOWER) )
-    zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
-
   return ipforward ();
 }
 
 int
-ipforward_off (void)
+ipforward_off ()
 {
   FILE *fp;
 
-  if ( zserv_privs.change(ZPRIVS_RAISE) )
-  	zlog_err ("Can't raise privileges, %s", safe_strerror (errno));
-
   fp = fopen (proc_ipv4_forwarding, "w");
-
-  if (fp == NULL) {
-    if ( zserv_privs.change(ZPRIVS_LOWER) )
-      zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
+  
+  if (fp == NULL)
     return -1;
-  }
 
   fprintf (fp, "0\n");
 
   fclose (fp);
-
-  if ( zserv_privs.change(ZPRIVS_LOWER) )
-    zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
 
   return ipforward ();
 }
@@ -129,7 +102,7 @@ ipforward_off (void)
 char proc_ipv6_forwarding[] = "/proc/sys/net/ipv6/conf/all/forwarding";
 
 int
-ipforward_ipv6 (void)
+ipforward_ipv6 ()
 {
   FILE *fp;
   char buf[5];
@@ -143,58 +116,39 @@ ipforward_ipv6 (void)
   fgets (buf, 2, fp);
   sscanf (buf, "%d", &ipforwarding);
 
-  fclose (fp);
   return ipforwarding;
 }
 
 int
-ipforward_ipv6_on (void)
+ipforward_ipv6_on ()
 {
   FILE *fp;
 
-  if ( zserv_privs.change(ZPRIVS_RAISE) )
-  	zlog_err ("Can't raise privileges, %s", safe_strerror (errno));
-
   fp = fopen (proc_ipv6_forwarding, "w");
-
-  if (fp == NULL) {
-    if ( zserv_privs.change(ZPRIVS_LOWER) )
-      zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
+  
+  if (fp == NULL)
     return -1;
-  }
 
   fprintf (fp, "1\n");
 
   fclose (fp);
 
-  if ( zserv_privs.change(ZPRIVS_LOWER) )
-    zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
-
   return ipforward_ipv6 ();
 }
 
 int
-ipforward_ipv6_off (void)
+ipforward_ipv6_off ()
 {
   FILE *fp;
 
-  if ( zserv_privs.change(ZPRIVS_RAISE) )
-  	zlog_err ("Can't raise privileges, %s", safe_strerror (errno));
-
   fp = fopen (proc_ipv6_forwarding, "w");
-
-  if (fp == NULL) {
-    if ( zserv_privs.change(ZPRIVS_LOWER) )
-      zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
+  
+  if (fp == NULL)
     return -1;
-  }
 
   fprintf (fp, "0\n");
 
   fclose (fp);
-
-  if ( zserv_privs.change(ZPRIVS_LOWER) )
-    zlog_err ("Can't lower privileges, %s", safe_strerror (errno));
 
   return ipforward_ipv6 ();
 }

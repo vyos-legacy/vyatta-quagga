@@ -33,8 +33,8 @@
 /* Linked list of RIP peer. */
 struct list *peer_list;
 
-static struct rip_peer *
-rip_peer_new (void)
+struct rip_peer *
+rip_peer_new ()
 {
   struct rip_peer *new;
 
@@ -43,7 +43,7 @@ rip_peer_new (void)
   return new;
 }
 
-static void
+void
 rip_peer_free (struct rip_peer *peer)
 {
   XFREE (MTYPE_RIP_PEER, peer);
@@ -53,9 +53,9 @@ struct rip_peer *
 rip_peer_lookup (struct in_addr *addr)
 {
   struct rip_peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (peer_list, node, nnode, peer))
+  LIST_LOOP (peer_list, peer, nn)
     {
       if (IPV4_ADDR_SAME (&peer->addr, addr))
 	return peer;
@@ -67,9 +67,9 @@ struct rip_peer *
 rip_peer_lookup_next (struct in_addr *addr)
 {
   struct rip_peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (peer_list, node, nnode, peer))
+  LIST_LOOP (peer_list, peer, nn)
     {
       if (htonl (peer->addr.s_addr) > htonl (addr->s_addr))
 	return peer;
@@ -78,7 +78,7 @@ rip_peer_lookup_next (struct in_addr *addr)
 }
 
 /* RIP peer is timeout. */
-static int
+int
 rip_peer_timeout (struct thread *t)
 {
   struct rip_peer *peer;
@@ -91,7 +91,7 @@ rip_peer_timeout (struct thread *t)
 }
 
 /* Get RIP peer.  At the same time update timeout thread. */
-static struct rip_peer *
+struct rip_peer *
 rip_peer_get (struct in_addr *addr)
 {
   struct rip_peer *peer;
@@ -145,7 +145,7 @@ rip_peer_bad_packet (struct sockaddr_in *from)
 }
 
 /* Display peer uptime. */
-static char *
+char *
 rip_peer_uptime (struct rip_peer *peer, char *buf, size_t len)
 {
   time_t uptime;
@@ -183,11 +183,11 @@ void
 rip_peer_display (struct vty *vty)
 {
   struct rip_peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 #define RIP_UPTIME_LEN 25
   char timebuf[RIP_UPTIME_LEN];
 
-  for (ALL_LIST_ELEMENTS (peer_list, node, nnode, peer))
+  LIST_LOOP (peer_list, peer, nn)
     {
       vty_out (vty, "    %-16s %9d %9d %9d   %s%s", inet_ntoa (peer->addr),
 	       peer->recv_badpackets, peer->recv_badroutes,
@@ -197,14 +197,14 @@ rip_peer_display (struct vty *vty)
     }
 }
 
-static int
+int
 rip_peer_list_cmp (struct rip_peer *p1, struct rip_peer *p2)
 {
   return htonl (p1->addr.s_addr) > htonl (p2->addr.s_addr);
 }
 
 void
-rip_peer_init (void)
+rip_peer_init ()
 {
   peer_list = list_new ();
   peer_list->cmp = (int (*)(void *, void *)) rip_peer_list_cmp;

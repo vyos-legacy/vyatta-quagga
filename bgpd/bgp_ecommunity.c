@@ -58,7 +58,7 @@ ecommunity_free (struct ecommunity *ecom)
 static int
 ecommunity_add_val (struct ecommunity *ecom, struct ecommunity_val *eval)
 {
-  u_int8_t *p;
+  u_char *p;
   int ret;
   int c;
 
@@ -97,7 +97,7 @@ ecommunity_add_val (struct ecommunity *ecom, struct ecommunity_val *eval)
 /* This function takes pointer to Extended Communites strucutre then
    create a new Extended Communities structure by uniq and sort each
    Exteneded Communities value.  */
-static struct ecommunity *
+struct ecommunity *
 ecommunity_uniq_sort (struct ecommunity *ecom)
 {
   int i;
@@ -119,7 +119,7 @@ ecommunity_uniq_sort (struct ecommunity *ecom)
 
 /* Parse Extended Communites Attribute in BGP packet.  */
 struct ecommunity *
-ecommunity_parse (u_int8_t *pnt, u_short length)
+ecommunity_parse (char *pnt, u_short length)
 {
   struct ecommunity tmp;
   struct ecommunity *new;
@@ -156,15 +156,6 @@ ecommunity_dup (struct ecommunity *ecom)
   else
     new->val = NULL;
   return new;
-}
-
-/* Retrun string representation of communities attribute. */
-char *
-ecommunity_str (struct ecommunity *ecom)
-{
-  if (! ecom->str)
-    ecom->str = ecommunity_ecom2str (ecom, ECOMMUNITY_FORMAT_DISPLAY);
-  return ecom->str;
 }
 
 /* Merge two Extended Communities Attribute structure.  */
@@ -232,7 +223,7 @@ ecommunity_hash_make (struct ecommunity *ecom)
 {
   int c;
   unsigned int key;
-  u_int8_t *pnt;
+  unsigned char *pnt;
 
   key = 0;
   pnt = ecom->val;
@@ -245,8 +236,7 @@ ecommunity_hash_make (struct ecommunity *ecom)
 
 /* Compare two Extended Communities Attribute structure.  */
 int
-ecommunity_cmp (const struct ecommunity *ecom1, 
-                const struct ecommunity *ecom2)
+ecommunity_cmp (struct ecommunity *ecom1, struct ecommunity *ecom2)
 {
   if (ecom1->size == ecom2->size
       && memcmp (ecom1->val, ecom2->val, ecom1->size * ECOMMUNITY_SIZE) == 0)
@@ -271,8 +261,8 @@ enum ecommunity_token
 };
 
 /* Get next Extended Communities token from the string. */
-static const char *
-ecommunity_gettoken (const char *str, struct ecommunity_val *eval,
+char *
+ecommunity_gettoken (char *str, struct ecommunity_val *eval,
 		     enum ecommunity_token *token)
 {
   int ret;
@@ -281,7 +271,7 @@ ecommunity_gettoken (const char *str, struct ecommunity_val *eval,
   int separator = 0;
   u_int32_t val_low = 0;
   u_int32_t val_high = 0;
-  const char *p = str;
+  char *p = str;
   struct in_addr ip;
   char ipstr[INET_ADDRSTRLEN + 1];
 
@@ -449,7 +439,7 @@ ecommunity_gettoken (const char *str, struct ecommunity_val *eval,
                                     keyword_include = 1
 */
 struct ecommunity *
-ecommunity_str2com (const char *str, int type, int keyword_included)
+ecommunity_str2com (char *str, int type, int keyword_included)
 {
   struct ecommunity *ecom = NULL;
   enum ecommunity_token token;
@@ -500,6 +490,7 @@ ecommunity_str2com (const char *str, int type, int keyword_included)
 	  if (ecom)
 	    ecommunity_free (ecom);
 	  return NULL;
+	  break;
 	}
     }
   return ecom;
@@ -530,14 +521,14 @@ char *
 ecommunity_ecom2str (struct ecommunity *ecom, int format)
 {
   int i;
-  u_int8_t *pnt;
+  u_char *pnt;
   int encode = 0;
   int type = 0;
 #define ECOMMUNITY_STR_DEFAULT_LEN  26
   int str_size;
   int str_pnt;
-  char *str_buf;
-  const char *prefix;
+  u_char *str_buf;
+  char *prefix;
   int len = 0;
   int first = 1;
 
@@ -568,30 +559,24 @@ ecommunity_ecom2str (struct ecommunity *ecom, int format)
 
   for (i = 0; i < ecom->size; i++)
     {
-      /* Space between each value.  */
-      if (! first)
-	str_buf[str_pnt++] = ' ';
-
       pnt = ecom->val + (i * 8);
 
       /* High-order octet of type. */
       encode = *pnt++;
       if (encode != ECOMMUNITY_ENCODE_AS && encode != ECOMMUNITY_ENCODE_IP)
 	{
-	  len = sprintf (str_buf + str_pnt, "?");
-	  str_pnt += len;
-	  first = 0;
-	  continue;
+	  if (str_buf)
+	    XFREE (MTYPE_ECOMMUNITY_STR, str_buf);
+	  return "Unknown";
 	}
       
       /* Low-order octet of type. */
       type = *pnt++;
       if (type !=  ECOMMUNITY_ROUTE_TARGET && type != ECOMMUNITY_SITE_ORIGIN)
 	{
-	  len = sprintf (str_buf + str_pnt, "?");
-	  str_pnt += len;
-	  first = 0;
-	  continue;
+	  if (str_buf)
+	    XFREE (MTYPE_ECOMMUNITY_STR, str_buf);
+	  return "Unknown";
 	}
 
       switch (format)
@@ -606,7 +591,9 @@ ecommunity_ecom2str (struct ecommunity *ecom, int format)
 	  prefix = "";
 	  break;
 	default:
-	  prefix = "";
+	  if (str_buf)
+	    XFREE (MTYPE_ECOMMUNITY_STR, str_buf);
+	  return "Unknown";
 	  break;
 	}
 
@@ -616,6 +603,10 @@ ecommunity_ecom2str (struct ecommunity *ecom, int format)
 	  str_size *= 2;
 	  str_buf = XREALLOC (MTYPE_ECOMMUNITY_STR, str_buf, str_size);
 	}
+
+      /* Space between each value.  */
+      if (! first)
+	str_buf[str_pnt++] = ' ';
 
       /* Put string into buffer.  */
       if (encode == ECOMMUNITY_ENCODE_AS)
@@ -648,34 +639,3 @@ ecommunity_ecom2str (struct ecommunity *ecom, int format)
     }
   return str_buf;
 }
-
-int
-ecommunity_match (const struct ecommunity *ecom1, 
-                  const struct ecommunity *ecom2)
-{
-  int i = 0;
-  int j = 0;
-
-  if (ecom1 == NULL && ecom2 == NULL)
-    return 1;
-
-  if (ecom1 == NULL || ecom2 == NULL)
-    return 0;
-
-  if (ecom1->size < ecom2->size)
-    return 0;
-
-  /* Every community on com2 needs to be on com1 for this to match */
-  while (i < ecom1->size && j < ecom2->size)
-    {
-      if (memcmp (ecom1->val + i, ecom2->val + j, ECOMMUNITY_SIZE) == 0)
-        j++;
-      i++;
-    }
-
-  if (j == ecom2->size)
-    return 1;
-  else
-    return 0;
-}
-

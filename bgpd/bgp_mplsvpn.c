@@ -32,7 +32,11 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_attr.h"
 #include "bgpd/bgp_mplsvpn.h"
 
-static u_int16_t
+int route_vty_out (struct vty *, struct prefix *, struct bgp_info *, int, safi_t);
+int route_vty_out_tag (struct vty *, struct prefix *, struct bgp_info *, int, safi_t);
+void route_vty_out_tmp (struct vty *, struct prefix *, struct attr *, safi_t);
+
+u_int16_t
 decode_rd_type (u_char *pnt)
 {
   u_int16_t v;
@@ -53,7 +57,7 @@ decode_label (u_char *pnt)
   return l;
 }
 
-static void
+void
 decode_rd_as (u_char *pnt, struct rd_as *rd_as)
 {
   rd_as->as = (u_int16_t) *pnt++ << 8;
@@ -65,7 +69,7 @@ decode_rd_as (u_char *pnt, struct rd_as *rd_as)
   rd_as->val |= (u_int32_t) *pnt;
 }
 
-static void
+void
 decode_rd_ip (u_char *pnt, struct rd_ip *rd_ip)
 {
   memcpy (&rd_ip->ip, pnt, 4);
@@ -75,6 +79,11 @@ decode_rd_ip (u_char *pnt, struct rd_ip *rd_ip)
   rd_ip->val |= (u_int16_t) *pnt;
 }
 
+int bgp_update (struct peer *, struct prefix *, struct attr *, 
+		afi_t, safi_t, int, int, struct prefix_rd *, u_char *);
+
+int bgp_withdraw (struct peer *, struct prefix *, struct attr *, 
+		  int, int, int, int, struct prefix_rd *, u_char *);
 int
 bgp_nlri_parse_vpnv4 (struct peer *peer, struct attr *attr, 
 		      struct bgp_nlri *packet)
@@ -157,7 +166,7 @@ bgp_nlri_parse_vpnv4 (struct peer *peer, struct attr *attr,
 
       if (attr)
 	bgp_update (peer, &p, attr, AFI_IP, SAFI_MPLS_VPN,
-		    ZEBRA_ROUTE_BGP, BGP_ROUTE_NORMAL, &prd, tagpnt, 0);
+		    ZEBRA_ROUTE_BGP, BGP_ROUTE_NORMAL, &prd, tagpnt);
       else
 	bgp_withdraw (peer, &p, attr, AFI_IP, SAFI_MPLS_VPN,
 		      ZEBRA_ROUTE_BGP, BGP_ROUTE_NORMAL, &prd, tagpnt);
@@ -171,13 +180,13 @@ bgp_nlri_parse_vpnv4 (struct peer *peer, struct attr *attr,
 }
 
 int
-str2prefix_rd (const char *str, struct prefix_rd *prd)
+str2prefix_rd (u_char *str, struct prefix_rd *prd)
 {
   int ret;
-  char *p;
-  char *p2;
+  u_char *p;
+  u_char *p2;
   struct stream *s;
-  char *half;
+  u_char *half;
   struct in_addr addr;
 
   s = stream_new (8);
@@ -227,22 +236,15 @@ str2prefix_rd (const char *str, struct prefix_rd *prd)
 }
 
 int
-str2tag (const char *str, u_char *tag)
+str2tag (u_char *str, u_char *tag)
 {
-  unsigned long l;
-  char *endptr;
-  u_int32_t t;
+  u_int32_t l;
 
-  l = strtoul (str, &endptr, 10);
-  
-  if (*endptr == '\0' || l == ULONG_MAX || l > UINT32_MAX)
-    return 0;
+  l = atol (str);
 
-  t = (u_int32_t) l;
-  
-  tag[0] = (u_char)(t >> 12);
-  tag[1] = (u_char)(t >> 4);
-  tag[2] = (u_char)(t << 4);
+  tag[0] = (u_char)(l >> 12);
+  tag[1] = (u_char)(l >> 4);
+  tag[2] = (u_char)(l << 4);
 
   return 1;
 }
@@ -307,7 +309,7 @@ DEFUN (no_vpnv4_network,
   return bgp_static_unset_vpnv4 (vty, argv[0], argv[1], argv[2]);
 }
 
-static int
+int
 show_adj_route_vpn (struct vty *vty, struct peer *peer, struct prefix_rd *prd)
 {
   struct bgp *bgp;
@@ -401,7 +403,7 @@ enum bgp_show_type
   bgp_show_type_community_list_exact
 };
 
-static int
+int
 bgp_show_mpls_vpn (struct vty *vty, struct prefix_rd *prd, enum bgp_show_type type,
 		   void *output_arg, int tags)
 {
@@ -713,7 +715,7 @@ DEFUN (show_ip_bgp_vpnv4_rd_neighbor_advertised_routes,
 }
 
 void
-bgp_mplsvpn_init (void)
+bgp_mplsvpn_init ()
 {
   install_element (BGP_VPNV4_NODE, &vpnv4_network_cmd);
   install_element (BGP_VPNV4_NODE, &no_vpnv4_network_cmd);

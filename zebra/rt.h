@@ -23,21 +23,17 @@
 #ifndef _ZEBRA_RT_H
 #define _ZEBRA_RT_H
 
-#include "prefix.h"
-#include "if.h"
-#include "zebra/rib.h"
-
-extern int kernel_add_ipv4 (struct prefix *, struct rib *);
-extern int kernel_delete_ipv4 (struct prefix *, struct rib *);
-extern int kernel_add_route (struct prefix_ipv4 *, struct in_addr *, int, int);
-extern int kernel_address_add_ipv4 (struct interface *, struct connected *);
-extern int kernel_address_delete_ipv4 (struct interface *, struct connected *);
+int kernel_add_ipv4 (struct prefix *, struct rib *);
+int kernel_delete_ipv4 (struct prefix *, struct rib *);
+int kernel_add_route (struct prefix_ipv4 *, struct in_addr *, int, int);
+int kernel_address_add_ipv4 (struct interface *, struct connected *);
+int kernel_address_delete_ipv4 (struct interface *, struct connected *);
 
 #ifdef HAVE_IPV6
-extern int kernel_add_ipv6 (struct prefix *, struct rib *);
-extern int kernel_delete_ipv6 (struct prefix *, struct rib *);
-extern int kernel_delete_ipv6_old (struct prefix_ipv6 *dest, struct in6_addr *gate,
-			    	  unsigned int index, int flags, int table);
+int kernel_add_ipv6 (struct prefix *, struct rib *);
+int kernel_delete_ipv6 (struct prefix *, struct rib *);
+int kernel_delete_ipv6_old (struct prefix_ipv6 *dest, struct in6_addr *gate,
+			    unsigned int index, int flags, int table);
 
 #endif /* HAVE_IPV6 */
 

@@ -30,7 +30,6 @@ struct ospf_lsdb
   {
     unsigned long count;
     unsigned long count_self;
-    unsigned int checksum;
     struct route_table *db;
   } type[OSPF_MAX_LSA];
   unsigned long total;
@@ -43,9 +42,8 @@ struct ospf_lsdb
 };
 
 /* Macros. */
-#define LSDB_LOOP(T,N,L)                                                      \
-  if ((T) != NULL)                                                            \
-  for ((N) = route_top ((T)); ((N)); ((N)) = route_next ((N)))                \
+#define LSDB_LOOP(T,N,L) \
+  for ((N) = route_top ((T)); ((N)); ((N)) = route_next ((N))) \
     if (((L) = (N)->info))
 
 #define ROUTER_LSDB(A)       ((A)->lsdb->type[OSPF_ROUTER_LSA].db)
@@ -62,25 +60,24 @@ struct ospf_lsdb
 #define AS_LSDB(O,T)         ((O)->lsdb->type[(T)].db)
 
 /* OSPF LSDB related functions. */
-extern struct ospf_lsdb *ospf_lsdb_new (void);
-extern void ospf_lsdb_init (struct ospf_lsdb *);
-extern void ospf_lsdb_free (struct ospf_lsdb *);
-extern void ospf_lsdb_cleanup (struct ospf_lsdb *);
-extern void ospf_lsdb_add (struct ospf_lsdb *, struct ospf_lsa *);
-extern void ospf_lsdb_delete (struct ospf_lsdb *, struct ospf_lsa *);
-extern void ospf_lsdb_delete_all (struct ospf_lsdb *);
-/* Set all stats to -1 (LSA_SPF_NOT_EXPLORED). */
-extern void ospf_lsdb_clean_stat (struct ospf_lsdb *lsdb);
-extern struct ospf_lsa *ospf_lsdb_lookup (struct ospf_lsdb *, struct ospf_lsa *);
-extern struct ospf_lsa *ospf_lsdb_lookup_by_id (struct ospf_lsdb *, u_char,
+struct ospf_lsdb *ospf_lsdb_new ();
+void ospf_lsdb_init (struct ospf_lsdb *);
+void ospf_lsdb_free (struct ospf_lsdb *);
+void ospf_lsdb_cleanup (struct ospf_lsdb *);
+void ospf_lsdb_add (struct ospf_lsdb *, struct ospf_lsa *);
+void ospf_lsdb_delete (struct ospf_lsdb *, struct ospf_lsa *);
+void ospf_lsdb_delete_all (struct ospf_lsdb *);
+struct ospf_lsa *ospf_lsdb_lookup (struct ospf_lsdb *, struct ospf_lsa *);
+struct ospf_lsa *ospf_lsdb_lookup_by_id (struct ospf_lsdb *, u_char,
 					struct in_addr, struct in_addr);
-extern struct ospf_lsa *ospf_lsdb_lookup_by_id_next (struct ospf_lsdb *, u_char,
+struct ospf_lsa *ospf_lsdb_lookup_by_id_next (struct ospf_lsdb *, u_char,
 					     struct in_addr, struct in_addr,
 					     int);
-extern unsigned long ospf_lsdb_count_all (struct ospf_lsdb *);
-extern unsigned long ospf_lsdb_count (struct ospf_lsdb *, int);
-extern unsigned long ospf_lsdb_count_self (struct ospf_lsdb *, int);
-extern unsigned int ospf_lsdb_checksum (struct ospf_lsdb *, int);
-extern unsigned long ospf_lsdb_isempty (struct ospf_lsdb *);
+unsigned long ospf_lsdb_count_all (struct ospf_lsdb *);
+unsigned long ospf_lsdb_count (struct ospf_lsdb *, int);
+unsigned long ospf_lsdb_count_self (struct ospf_lsdb *, int);
+unsigned long ospf_lsdb_isempty (struct ospf_lsdb *);
+struct ospf_lsa *foreach_lsa (struct route_table *, void *, int,
+	              int (*callback) (struct ospf_lsa *, void *, int));
 
 #endif /* _ZEBRA_OSPF_LSDB_H */

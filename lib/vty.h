@@ -21,9 +21,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #ifndef _ZEBRA_VTY_H
 #define _ZEBRA_VTY_H
 
-#include "thread.h"
-#include "log.h"
-
 #define VTY_BUFSIZ 512
 #define VTY_MAXHIST 20
 
@@ -41,6 +38,9 @@ struct vty
 
   /* What address is this vty comming from. */
   char *address;
+
+  /* Privilege level of this vty. */
+  int privilege;
 
   /* Failure count */
   int fail;
@@ -80,30 +80,27 @@ struct vty
   unsigned char escape;
 
   /* Current vty status. */
-  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE} status;
+  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE,
+        VTY_START, VTY_CONTINUE} status;
 
-  /* IAC handling: was the last character received the
-     IAC (interpret-as-command) escape character (and therefore the next
-     character will be the command code)?  Refer to Telnet RFC 854. */
+  /* IAC handling */
   unsigned char iac;
 
-  /* IAC SB (option subnegotiation) handling */
+  /* IAC SB handling */
   unsigned char iac_sb_in_progress;
-  /* At the moment, we care only about the NAWS (window size) negotiation,
-     and that requires just a 5-character buffer (RFC 1073):
-       <NAWS char> <16-bit width> <16-bit height> */
-#define TELNET_NAWS_SB_LEN 5
-  unsigned char sb_buf[TELNET_NAWS_SB_LEN];
-  /* How many subnegotiation characters have we received?  We just drop
-     those that do not fit in the buffer. */
-  size_t sb_len;
+  struct buffer *sb_buffer;
 
   /* Window width/height. */
   int width;
   int height;
 
+  int scroll_one;
+
   /* Configure lines. */
   int lines;
+
+  /* Current executing function pointer. */
+  int (*func) (struct vty *, void *arg);
 
   /* Terminal monitor. */
   int monitor;
@@ -118,10 +115,21 @@ struct vty
   /* Timeout seconds and thread. */
   unsigned long v_timeout;
   struct thread *t_timeout;
+
+  /* Thread output function. */
+  struct thread *t_output;
+
+  /* Output data pointer. */
+  int (*output_func) (struct vty *, int);
+  void (*output_clean) (struct vty *);
+  void *output_rn;
+  unsigned long output_count;
+  int output_type;
+  void *output_arg;
 };
 
 /* Integrated configuration file. */
-#define INTEGRATE_DEFAULT_CONFIG "Quagga.conf"
+#define INTEGRATE_DEFAULT_CONFIG "Zebra.conf"
 
 /* Small macro to determine newline is newline only or linefeed needed. */
 #define VTY_NEWLINE  ((vty->type == VTY_TERM) ? "\r\n" : "\n")
@@ -148,79 +156,50 @@ struct vty
 #define PRINTF_ATTRIBUTE(a,b)
 #endif /* __GNUC__ */
 
-/* Utility macros to convert VTY argument to unsigned long or integer. */
-#define VTY_GET_LONG(NAME,V,STR) \
-do { \
-  char *endptr = NULL; \
-  (V) = strtoul ((STR), &endptr, 10); \
-  if (*endptr != '\0' || (V) == ULONG_MAX) \
-    { \
+/* Utility macro to convert VTY argument to unsigned integer.  */
+#define VTY_GET_INTEGER(NAME,V,STR)                              \
+{                                                                \
+  char *endptr = NULL;                                           \
+  (V) = strtoul ((STR), &endptr, 10);                            \
+  if ((V) == ULONG_MAX || *endptr != '\0')                       \
+    {                                                            \
       vty_out (vty, "%% Invalid %s value%s", NAME, VTY_NEWLINE); \
-      return CMD_WARNING; \
-    } \
-} while (0)
+      return CMD_WARNING;                                        \
+    }                                                            \
+}
 
-#define VTY_GET_INTEGER_RANGE(NAME,V,STR,MIN,MAX) \
-do { \
-  unsigned long tmpl; \
-  VTY_GET_LONG(NAME, tmpl, STR); \
-  if ( (tmpl < (MIN)) || (tmpl > (MAX))) \
-    { \
+#define VTY_GET_INTEGER_RANGE(NAME,V,STR,MIN,MAX)                \
+{                                                                \
+  char *endptr = NULL;                                           \
+  (V) = strtoul ((STR), &endptr, 10);                            \
+  if ((V) == ULONG_MAX || *endptr != '\0'                        \
+      || (V) < (MIN) || (V) > (MAX))                             \
+    {                                                            \
       vty_out (vty, "%% Invalid %s value%s", NAME, VTY_NEWLINE); \
-      return CMD_WARNING; \
-    } \
-  (V) = tmpl; \
-} while (0)
-
-#define VTY_GET_INTEGER(NAME,V,STR) \
-  VTY_GET_INTEGER_RANGE(NAME,V,STR,0U,UINT32_MAX)
-
-#define VTY_GET_IPV4_ADDRESS(NAME,V,STR)                                      \
-do {                                                                             \
-  int retv;                                                                   \
-  retv = inet_aton ((STR), &(V));                                             \
-  if (!retv)                                                                  \
-    {                                                                         \
-      vty_out (vty, "%% Invalid %s value%s", NAME, VTY_NEWLINE);              \
-      return CMD_WARNING;                                                     \
-    }                                                                         \
-} while (0)
-
-#define VTY_GET_IPV4_PREFIX(NAME,V,STR)                                       \
-do {                                                                             \
-  int retv;                                                                   \
-  retv = str2prefix_ipv4 ((STR), &(V));                                       \
-  if (retv <= 0)                                                              \
-    {                                                                         \
-      vty_out (vty, "%% Invalid %s value%s", NAME, VTY_NEWLINE);              \
-      return CMD_WARNING;                                                     \
-    }                                                                         \
-} while (0)
+      return CMD_WARNING;                                        \
+    }                                                            \
+}
 
 /* Exported variables */
 extern char integrate_default[];
 
 /* Prototypes. */
-extern void vty_init (struct thread_master *);
-extern void vty_init_vtysh (void);
-extern void vty_reset (void);
-extern struct vty *vty_new (void);
-extern int vty_out (struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
-extern void vty_read_config (char *, char *);
-extern void vty_time_print (struct vty *, int);
-extern void vty_serv_sock (const char *, unsigned short, const char *);
-extern void vty_close (struct vty *);
-extern char *vty_get_cwd (void);
-extern void vty_log (const char *level, const char *proto, 
-                     const char *fmt, struct timestamp_control *, va_list);
-extern int vty_config_lock (struct vty *);
-extern int vty_config_unlock (struct vty *);
-extern int vty_shell (struct vty *);
-extern int vty_shell_serv (struct vty *);
-extern void vty_hello (struct vty *);
-
-/* Send a fixed-size message to all vty terminal monitors; this should be
-   an async-signal-safe function. */
-extern void vty_log_fixed (const char *buf, size_t len);
+void vty_init (void);
+void vty_init_vtysh (void);
+void vty_reset (void);
+void vty_finish (void);
+struct vty *vty_new (void);
+int vty_out (struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
+void vty_read_config (char *, char *, char *);
+void vty_time_print (struct vty *, int);
+void vty_serv_sock (const char *, unsigned short, char *);
+void vty_close (struct vty *);
+char *vty_get_cwd (void);
+void vty_log (const char *, const char *, va_list);
+int vty_config_lock (struct vty *);
+int vty_config_unlock (struct vty *);
+int vty_shell (struct vty *);
+int vty_shell_serv (struct vty *);
+void vty_hello (struct vty *);
 
 #endif /* _ZEBRA_VTY_H */

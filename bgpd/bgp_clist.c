@@ -34,21 +34,26 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 /* Lookup master structure for community-list or
    extcommunity-list.  */
 struct community_list_master *
-community_list_master_lookup (struct community_list_handler *ch, int master)
+community_list_master_lookup (struct community_list_handler *ch, int style)
 {
   if (ch)
-    switch (master)
+    switch (style)
       {
-      case COMMUNITY_LIST_MASTER:
+      case COMMUNITY_LIST_STANDARD:
+      case COMMUNITY_LIST_EXPANDED:
+      case COMMUNITY_LIST_AUTO:
 	return &ch->community_list;
-      case EXTCOMMUNITY_LIST_MASTER:
+	break;
+      case EXTCOMMUNITY_LIST_STANDARD:
+      case EXTCOMMUNITY_LIST_EXPANDED:
+      case EXTCOMMUNITY_LIST_AUTO:
 	return &ch->extcommunity_list;
       }
   return NULL;
 }
 
 /* Allocate a new community list entry.  */
-static struct community_entry *
+struct community_entry *
 community_entry_new ()
 {
   struct community_entry *new;
@@ -59,29 +64,29 @@ community_entry_new ()
 }
 
 /* Free community list entry.  */
-static void
+void
 community_entry_free (struct community_entry *entry)
 {
   switch (entry->style)
     {
     case COMMUNITY_LIST_STANDARD:
       if (entry->u.com)
-        community_free (entry->u.com);
+	community_free (entry->u.com);
       break;
     case EXTCOMMUNITY_LIST_STANDARD:
       /* In case of standard extcommunity-list, configuration string
-         is made by ecommunity_ecom2str().  */
+	 is made by ecommunity_ecom2str().  */
       if (entry->config)
-        XFREE (MTYPE_ECOMMUNITY_STR, entry->config);
+	XFREE (MTYPE_ECOMMUNITY_STR, entry->config);
       if (entry->u.ecom)
-        ecommunity_free (entry->u.ecom);
+	ecommunity_free (entry->u.ecom);
       break;
     case COMMUNITY_LIST_EXPANDED:
     case EXTCOMMUNITY_LIST_EXPANDED:
       if (entry->config)
-        XFREE (MTYPE_COMMUNITY_LIST_CONFIG, entry->config);
+	XFREE (MTYPE_COMMUNITY_LIST_CONFIG, entry->config);
       if (entry->reg)
-        bgp_regex_free (entry->reg);
+	bgp_regex_free (entry->reg);
     default:
       break;
     }
@@ -89,7 +94,7 @@ community_entry_free (struct community_entry *entry)
 }
 
 /* Allocate a new community-list.  */
-static struct community_list *
+struct community_list *
 community_list_new ()
 {
   struct community_list *new;
@@ -100,7 +105,7 @@ community_list_new ()
 }
 
 /* Free community-list.  */
-static void
+void
 community_list_free (struct community_list *list)
 {
   if (list->name)
@@ -108,11 +113,11 @@ community_list_free (struct community_list *list)
   XFREE (MTYPE_COMMUNITY_LIST, list);
 }
 
-static struct community_list *
+struct community_list *
 community_list_insert (struct community_list_handler *ch,
-		       const char *name, int master)
+		       char *name, int style)
 {
-  size_t i;
+  int i;
   long number;
   struct community_list *new;
   struct community_list *point;
@@ -120,8 +125,8 @@ community_list_insert (struct community_list_handler *ch,
   struct community_list_master *cm;
 
   /* Lookup community-list master.  */
-  cm = community_list_master_lookup (ch, master);
-  if (!cm)
+  cm = community_list_master_lookup (ch, style);
+  if (! cm)
     return NULL;
 
   /* Allocate new community_list and copy given name. */
@@ -133,9 +138,9 @@ community_list_insert (struct community_list_handler *ch,
   for (number = 0, i = 0; i < strlen (name); i++)
     {
       if (isdigit ((int) name[i]))
-        number = (number * 10) + (name[i] - '0');
+	number = (number * 10) + (name[i] - '0');
       else
-        break;
+	break;
     }
 
   /* In case of name is all digit character */
@@ -147,8 +152,8 @@ community_list_insert (struct community_list_handler *ch,
       list = &cm->num;
 
       for (point = list->head; point; point = point->next)
-        if (atol (point->name) >= number)
-          break;
+	if (atol (point->name) >= number)
+	  break;
     }
   else
     {
@@ -156,11 +161,11 @@ community_list_insert (struct community_list_handler *ch,
 
       /* Set access_list to string list. */
       list = &cm->str;
-
+  
       /* Set point to insertion point. */
       for (point = list->head; point; point = point->next)
-        if (strcmp (point->name, name) >= 0)
-          break;
+	if (strcmp (point->name, name) >= 0)
+	  break;
     }
 
   /* Link to upper list.  */
@@ -204,16 +209,16 @@ community_list_insert (struct community_list_handler *ch,
 
 struct community_list *
 community_list_lookup (struct community_list_handler *ch,
-		       const char *name, int master)
+		       char *name, int style)
 {
   struct community_list *list;
   struct community_list_master *cm;
 
-  if (!name)
+  if (! name)
     return NULL;
 
-  cm = community_list_master_lookup (ch, master);
-  if (!cm)
+  cm = community_list_master_lookup (ch, style);
+  if (! cm)
     return NULL;
 
   for (list = cm->num.head; list; list = list->next)
@@ -226,19 +231,18 @@ community_list_lookup (struct community_list_handler *ch,
   return NULL;
 }
 
-static struct community_list *
-community_list_get (struct community_list_handler *ch,
-		    const char *name, int master)
+struct community_list *
+community_list_get (struct community_list_handler *ch, char *name, int style)
 {
   struct community_list *list;
 
-  list = community_list_lookup (ch, name, master);
-  if (!list)
-    list = community_list_insert (ch, name, master);
+  list = community_list_lookup (ch, name, style);
+  if (! list)
+    list = community_list_insert (ch, name, style);
   return list;
 }
 
-static void
+void
 community_list_delete (struct community_list *list)
 {
   struct community_list_list *clist;
@@ -265,7 +269,7 @@ community_list_delete (struct community_list *list)
   community_list_free (list);
 }
 
-static int
+int 
 community_list_empty_p (struct community_list *list)
 {
   return (list->head == NULL && list->tail == NULL) ? 1 : 0;
@@ -273,8 +277,8 @@ community_list_empty_p (struct community_list *list)
 
 /* Add community-list entry to the list.  */
 static void
-community_list_entry_add (struct community_list *list,
-                          struct community_entry *entry)
+community_list_entry_add (struct community_list *list, 
+			  struct community_entry *entry)
 {
   entry->next = NULL;
   entry->prev = list->tail;
@@ -289,7 +293,7 @@ community_list_entry_add (struct community_list *list,
 /* Delete community-list entry from the list.  */
 static void
 community_list_entry_delete (struct community_list *list,
-                             struct community_entry *entry, int style)
+			     struct community_entry *entry, int style)
 {
   if (entry->next)
     entry->next->prev = entry->prev;
@@ -309,31 +313,31 @@ community_list_entry_delete (struct community_list *list,
 
 /* Lookup community-list entry from the list.  */
 static struct community_entry *
-community_list_entry_lookup (struct community_list *list, const void *arg,
-                             int direct)
+community_list_entry_lookup (struct community_list *list, void *arg,
+			     int direct)
 {
   struct community_entry *entry;
 
   for (entry = list->head; entry; entry = entry->next)
     {
       switch (entry->style)
-        {
-        case COMMUNITY_LIST_STANDARD:
-          if (community_cmp (entry->u.com, arg))
-            return entry;
-          break;
-        case EXTCOMMUNITY_LIST_STANDARD:
-          if (ecommunity_cmp (entry->u.ecom, arg))
-            return entry;
-          break;
-        case COMMUNITY_LIST_EXPANDED:
-        case EXTCOMMUNITY_LIST_EXPANDED:
-          if (strcmp (entry->config, arg) == 0)
-            return entry;
-          break;
-        default:
-          break;
-        }
+	{
+	case COMMUNITY_LIST_STANDARD:
+	  if (community_cmp (entry->u.com, arg))
+	    return entry;
+	  break;
+	case EXTCOMMUNITY_LIST_STANDARD:
+	  if (ecommunity_cmp (entry->u.ecom, arg))
+	    return entry;
+	  break;
+	case COMMUNITY_LIST_EXPANDED:
+	case EXTCOMMUNITY_LIST_EXPANDED:
+	  if (strcmp (entry->config, arg) == 0)
+	    return entry;
+	  break;
+	default:
+	  break;
+	}
     }
   return NULL;
 }
@@ -341,9 +345,9 @@ community_list_entry_lookup (struct community_list *list, const void *arg,
 /* Internal function to perform regular expression match for community
    attribute.  */
 static int
-community_regexp_match (struct community *com, regex_t * reg)
+community_regexp_match (struct community *com, regex_t *reg)
 {
-  const char *str;
+  char *str;
 
   /* When there is no communities attribute it is treated as empty
      string.  */
@@ -360,38 +364,18 @@ community_regexp_match (struct community *com, regex_t * reg)
   return 0;
 }
 
-static int
-ecommunity_regexp_match (struct ecommunity *ecom, regex_t * reg)
-{
-  const char *str;
-
-  /* When there is no communities attribute it is treated as empty
-     string.  */
-  if (ecom == NULL || ecom->size == 0)
-    str = "";
-  else
-    str = ecommunity_str (ecom);
-
-  /* Regular expression match.  */
-  if (regexec (reg, str, 0, NULL, 0) == 0)
-    return 1;
-
-  /* No match.  */
-  return 0;
-}
-
 /* Delete community attribute using regular expression match.  Return
    modified communites attribute.  */
 static struct community *
-community_regexp_delete (struct community *com, regex_t * reg)
+community_regexp_delete (struct community *com, regex_t *reg)
 {
   int i;
   u_int32_t comval;
   /* Maximum is "65535:65535" + '\0'. */
   char c[12];
-  const char *str;
+  char *str;
 
-  if (!com)
+  if (! com)
     return NULL;
 
   i = 0;
@@ -401,29 +385,29 @@ community_regexp_delete (struct community *com, regex_t * reg)
       comval = ntohl (comval);
 
       switch (comval)
-        {
-        case COMMUNITY_INTERNET:
-          str = "internet";
-          break;
-        case COMMUNITY_NO_EXPORT:
-          str = "no-export";
-          break;
-        case COMMUNITY_NO_ADVERTISE:
-          str = "no-advertise";
-          break;
-        case COMMUNITY_LOCAL_AS:
-          str = "local-AS";
-          break;
-        default:
-          sprintf (c, "%d:%d", (comval >> 16) & 0xFFFF, comval & 0xFFFF);
-          str = c;
-          break;
-        }
+	{
+	case COMMUNITY_INTERNET:
+	  str = "internet";
+	  break;
+	case COMMUNITY_NO_EXPORT:
+	  str = "no-export";
+	  break;
+	case COMMUNITY_NO_ADVERTISE:
+	  str = "no-advertise";
+	  break;
+	case COMMUNITY_LOCAL_AS:
+	  str = "local-AS";
+	  break;
+	default:
+	  sprintf (c, "%d:%d", (comval >> 16) & 0xFFFF, comval & 0xFFFF);
+	  str = c;
+	  break;
+	}
 
       if (regexec (reg, str, 0, NULL, 0) == 0)
-        community_del_val (com, com_nthval (com, i));
+	community_del_val (com, com_nthval (com, i));
       else
-        i++;
+	i++;
     }
   return com;
 }
@@ -438,45 +422,21 @@ community_list_match (struct community *com, struct community_list *list)
   for (entry = list->head; entry; entry = entry->next)
     {
       if (entry->any)
-        return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
 
       if (entry->style == COMMUNITY_LIST_STANDARD)
-        {
-          if (community_include (entry->u.com, COMMUNITY_INTERNET))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	{
+	  if (community_include (entry->u.com, COMMUNITY_INTERNET))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
 
-          if (community_match (com, entry->u.com))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
+	  if (community_match (com, entry->u.com))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	}
       else if (entry->style == COMMUNITY_LIST_EXPANDED)
-        {
-          if (community_regexp_match (com, entry->reg))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
-    }
-  return 0;
-}
-
-int
-ecommunity_list_match (struct ecommunity *ecom, struct community_list *list)
-{
-  struct community_entry *entry;
-
-  for (entry = list->head; entry; entry = entry->next)
-    {
-      if (entry->any)
-        return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-
-      if (entry->style == EXTCOMMUNITY_LIST_STANDARD)
-        {
-          if (ecommunity_match (ecom, entry->u.ecom))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
-      else if (entry->style == EXTCOMMUNITY_LIST_EXPANDED)
-        {
-          if (ecommunity_regexp_match (ecom, entry->reg))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
+	{
+	  if (community_regexp_match (com, entry->reg))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	}
     }
   return 0;
 }
@@ -484,117 +444,105 @@ ecommunity_list_match (struct ecommunity *ecom, struct community_list *list)
 /* Perform exact matching.  In case of expanded community-list, do
    same thing as community_list_match().  */
 int
-community_list_exact_match (struct community *com,
-                            struct community_list *list)
+community_list_exact_match (struct community *com, struct community_list *list)
 {
   struct community_entry *entry;
 
   for (entry = list->head; entry; entry = entry->next)
     {
       if (entry->any)
-        return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
 
       if (entry->style == COMMUNITY_LIST_STANDARD)
-        {
-          if (community_include (entry->u.com, COMMUNITY_INTERNET))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	{
+	  if (community_include (entry->u.com, COMMUNITY_INTERNET))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
 
-          if (community_cmp (com, entry->u.com))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
+	  if (community_cmp (com, entry->u.com))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	}
       else if (entry->style == COMMUNITY_LIST_EXPANDED)
-        {
-          if (community_regexp_match (com, entry->reg))
-            return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
-        }
+	{
+	  if (community_regexp_match (com, entry->reg))
+	    return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+	}
     }
   return 0;
 }
 
-/* Delete all permitted communities in the list from com.  */
+/* Delete all permitted communities in the list from com1 */
 struct community *
 community_list_match_delete (struct community *com,
-                             struct community_list *list)
+			     struct community_list *list)
 {
   struct community_entry *entry;
 
   for (entry = list->head; entry; entry = entry->next)
     {
-      if (entry->any)
-        {
-          if (entry->direct == COMMUNITY_PERMIT) 
-            {
-              /* This is a tricky part.  Currently only
-               * route_set_community_delete() uses this function.  In the
-               * function com->size is zero, it free the community
-               * structure.  
-               */
-              com->size = 0;
-            }
-          return com;
-        }
+      if (entry->any && entry->direct == COMMUNITY_PERMIT)
+	{
+	  /* This is a tricky part.  Currently only
+	     route_set_community_delete() uses this function.  In the
+	     function com->size is zero, it free the community
+	     structure.  */
+	  com->size = 0;
+	  return com;
+	}
 
-      if ((entry->style == COMMUNITY_LIST_STANDARD) 
-          && (community_include (entry->u.com, COMMUNITY_INTERNET)
-              || community_match (com, entry->u.com) ))
-        {
-              if (entry->direct == COMMUNITY_PERMIT)
-                community_delete (com, entry->u.com);
-              else
-                break;
-        }
-      else if ((entry->style == COMMUNITY_LIST_EXPANDED)
-               && community_regexp_match (com, entry->reg))
-        {
-          if (entry->direct == COMMUNITY_PERMIT)
-            community_regexp_delete (com, entry->reg);
-          else
-            break;
-        }
+      if (entry->style == COMMUNITY_LIST_STANDARD)
+	{
+	  if (entry->direct == COMMUNITY_PERMIT)
+	    community_delete (com, entry->u.com);
+	}
+      else if (entry->style == COMMUNITY_LIST_EXPANDED)
+	{
+	  if (entry->direct == COMMUNITY_PERMIT)
+	    community_regexp_delete (com, entry->reg);
+	}
     }
   return com;
 }
 
 /* To avoid duplicated entry in the community-list, this function
    compares specified entry to existing entry.  */
-static int
-community_list_dup_check (struct community_list *list,
-                          struct community_entry *new)
+int
+community_list_dup_check (struct community_list *list, 
+			  struct community_entry *new)
 {
   struct community_entry *entry;
-
+  
   for (entry = list->head; entry; entry = entry->next)
     {
       if (entry->style != new->style)
-        continue;
+	continue;
 
       if (entry->direct != new->direct)
-        continue;
+	continue;
 
       if (entry->any != new->any)
-        continue;
+	continue;
 
       if (entry->any)
-        return 1;
+	return 1;
 
       switch (entry->style)
-        {
-        case COMMUNITY_LIST_STANDARD:
-          if (community_cmp (entry->u.com, new->u.com))
-            return 1;
-          break;
-        case EXTCOMMUNITY_LIST_STANDARD:
-          if (ecommunity_cmp (entry->u.ecom, new->u.ecom))
-            return 1;
-          break;
-        case COMMUNITY_LIST_EXPANDED:
-        case EXTCOMMUNITY_LIST_EXPANDED:
-          if (strcmp (entry->config, new->config) == 0)
-            return 1;
-          break;
-        default:
-          break;
-        }
+	{
+	case COMMUNITY_LIST_STANDARD:
+	  if (community_cmp (entry->u.com, new->u.com))
+	    return 1;
+	  break;
+	case EXTCOMMUNITY_LIST_STANDARD:
+	  if (ecommunity_cmp (entry->u.ecom, new->u.ecom))
+	    return 1;
+	  break;
+	case COMMUNITY_LIST_EXPANDED:
+	case EXTCOMMUNITY_LIST_EXPANDED:
+	  if (strcmp (entry->config, new->config) == 0)
+	    return 1;
+	  break;
+	default:
+	  break;
+	}
     }
   return 0;
 }
@@ -602,26 +550,30 @@ community_list_dup_check (struct community_list *list,
 /* Set community-list.  */
 int
 community_list_set (struct community_list_handler *ch,
-                    const char *name, const char *str, int direct, int style)
+		    char *name, char *str, int direct, int style)
 {
-  struct community_entry *entry = NULL;
+  struct community_entry *entry;
   struct community_list *list;
-  struct community *com = NULL;
-  regex_t *regex = NULL;
+  struct community *com;
+  regex_t *regex;
+
+  entry = NULL;
 
   /* Get community list. */
-  list = community_list_get (ch, name, COMMUNITY_LIST_MASTER);
+  list = community_list_get (ch, name, style);
 
   /* When community-list already has entry, new entry should have same
      style.  If you want to have mixed style community-list, you can
      comment out this check.  */
-  if (!community_list_empty_p (list))
+  if (! community_list_empty_p (list))
     {
       struct community_entry *first;
 
       first = list->head;
 
-      if (style != first->style)
+      if (style == COMMUNITY_LIST_AUTO)
+	style = first->style;
+      else if (style != first->style)
 	{
 	  return (first->style == COMMUNITY_LIST_STANDARD
 		  ? COMMUNITY_LIST_ERR_STANDARD_CONFLICT
@@ -629,24 +581,57 @@ community_list_set (struct community_list_handler *ch,
 	}
     }
 
-  if (str)
+  /* When str is NULL, it is matches any.  */
+  if (! str)
     {
-      if (style == COMMUNITY_LIST_STANDARD)
-	com = community_str2com (str);
+      entry = community_entry_new ();
+      entry->direct = direct;
+      entry->any = 1;
+      if (style == COMMUNITY_LIST_AUTO)
+	entry->style = COMMUNITY_LIST_STANDARD;
       else
-	regex = bgp_regcomp (str);
-
-      if (! com && ! regex)
-	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+	entry->style = style;
     }
+  else
+    {
+      /* Standard community-list parse.  String must be converted into
+	 community structure without problem.  */
+      if (style == COMMUNITY_LIST_STANDARD || style == COMMUNITY_LIST_AUTO)
+	{
+	  com = community_str2com (str);
+	  if (com)
+	    {
+	      entry = community_entry_new ();
+	      entry->u.com = com;
+	      entry->direct = direct;
+	      entry->style = COMMUNITY_LIST_STANDARD;
+	    }
+	  else if (style == COMMUNITY_LIST_STANDARD)
+	    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+	  
+	  /* We can't convert string into communities value.  When
+	     community-list type is auto, fall dawn to regular expression
+	     match.  */
+	}
 
-  entry = community_entry_new ();
-  entry->direct = direct;
-  entry->style = style;
-  entry->any = (str ? 0 : 1);
-  entry->u.com = com;
-  entry->reg = regex;
-  entry->config = (regex ? XSTRDUP (MTYPE_COMMUNITY_LIST_CONFIG, str) : NULL);
+      /* Expanded community-list parse.  String may include regular
+	 expression.  */
+      if (! entry && (style == COMMUNITY_LIST_EXPANDED
+		      || style == COMMUNITY_LIST_AUTO))
+	{
+	  regex = bgp_regcomp (str);
+	  if (regex)
+	    {
+	      entry = community_entry_new ();
+	      entry->reg = regex;
+	      entry->config = XSTRDUP (MTYPE_COMMUNITY_LIST_CONFIG, str);
+	      entry->direct = direct;
+	      entry->style = COMMUNITY_LIST_EXPANDED;
+	    }
+	  else
+	    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+	}
+    }
 
   /* Do not put duplicated community entry.  */
   if (community_list_dup_check (list, entry))
@@ -661,45 +646,60 @@ community_list_set (struct community_list_handler *ch,
    community-list entry belongs to the specified name.  */
 int
 community_list_unset (struct community_list_handler *ch,
-                      const char *name, const char *str, 
-                      int direct, int style)
+		      char *name, char *str, int direct, int style)
 {
-  struct community_entry *entry = NULL;
+  struct community_entry *entry;
   struct community_list *list;
-  struct community *com = NULL;
-  regex_t *regex = NULL;
+  struct community *com;
+  regex_t *regex;
+
+  entry = NULL;
 
   /* Lookup community list.  */
-  list = community_list_lookup (ch, name, COMMUNITY_LIST_MASTER);
+  list = community_list_lookup (ch, name, style);
   if (list == NULL)
     return COMMUNITY_LIST_ERR_CANT_FIND_LIST;
 
   /* Delete all of entry belongs to this community-list.  */
-  if (!str)
+  if (! str)
     {
       community_list_delete (list);
       return 0;
     }
 
-  if (style == COMMUNITY_LIST_STANDARD)
-    com = community_str2com (str);
-  else
-    regex = bgp_regcomp (str);
+  /* Community list string is specified.  Lookup entry from community
+     list.  */
+  if (style == COMMUNITY_LIST_STANDARD || style == COMMUNITY_LIST_AUTO)
+    {
+      com = community_str2com (str);
+      if (com)
+	{
+	  entry = community_list_entry_lookup (list, com, direct);
+	  community_free (com);
+	}
+      else if (style == COMMUNITY_LIST_STANDARD)
+	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
 
-  if (! com && ! regex)
-    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+      /* If we can't convert string into community and community-list
+	 type is auto, fall dawn to expanded community-list.  */
+    }
 
-  if (com)
-    entry = community_list_entry_lookup (list, com, direct);
-  else
-    entry = community_list_entry_lookup (list, str, direct);
+  /* Expanded community-list parse.  String may include regular
+     expression.  */
+  if (! entry 
+      && (style == COMMUNITY_LIST_EXPANDED || style == COMMUNITY_LIST_AUTO))
+    {
+      regex = bgp_regcomp (str);
+      if (regex)
+	{
+	  entry = community_list_entry_lookup (list, str, direct);
+	  bgp_regex_free (regex);
+	}
+      else
+	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+    }
 
-  if (com)
-    community_free (com);
-  if (regex)
-    bgp_regex_free (regex);
-
-  if (!entry)
+  if (! entry)
     return COMMUNITY_LIST_ERR_CANT_FIND_LIST;
 
   community_list_entry_delete (list, entry, style);
@@ -710,29 +710,30 @@ community_list_unset (struct community_list_handler *ch,
 /* Set extcommunity-list.  */
 int
 extcommunity_list_set (struct community_list_handler *ch,
-                       const char *name, const char *str, 
-                       int direct, int style)
+		       char *name, char *str, int direct, int style)
 {
-  struct community_entry *entry = NULL;
+  struct community_entry *entry;
   struct community_list *list;
-  struct ecommunity *ecom = NULL;
-  regex_t *regex = NULL;
+  struct ecommunity *ecom;
+  regex_t *regex;
 
   entry = NULL;
 
   /* Get community list. */
-  list = community_list_get (ch, name, EXTCOMMUNITY_LIST_MASTER);
+  list = community_list_get (ch, name, style);
 
   /* When community-list already has entry, new entry should have same
      style.  If you want to have mixed style community-list, you can
      comment out this check.  */
-  if (!community_list_empty_p (list))
+  if (! community_list_empty_p (list))
     {
       struct community_entry *first;
 
       first = list->head;
 
-      if (style != first->style)
+      if (style == EXTCOMMUNITY_LIST_AUTO)
+	style = first->style;
+      else if (style != first->style)
 	{
 	  return (first->style == EXTCOMMUNITY_LIST_STANDARD
 		  ? COMMUNITY_LIST_ERR_STANDARD_CONFLICT
@@ -740,32 +741,62 @@ extcommunity_list_set (struct community_list_handler *ch,
 	}
     }
 
-  if (str)
+  /* When str is NULL, it is matches any.  */
+  if (! str)
     {
-      if (style == EXTCOMMUNITY_LIST_STANDARD)
-	ecom = ecommunity_str2com (str, 0, 1);
+      entry = community_entry_new ();
+      entry->direct = direct;
+      entry->any = 1;
+      if (style == EXTCOMMUNITY_LIST_AUTO)
+	entry->style = EXTCOMMUNITY_LIST_STANDARD;
       else
-	regex = bgp_regcomp (str);
-
-      if (! ecom && ! regex)
-	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+	entry->style = style;
     }
-
-  if (ecom)
-    ecom->str = ecommunity_ecom2str (ecom, ECOMMUNITY_FORMAT_DISPLAY);
-
-  entry = community_entry_new ();
-  entry->direct = direct;
-  entry->style = style;
-  entry->any = (str ? 0 : 1);
-  if (ecom)
-    entry->config = ecommunity_ecom2str (ecom, ECOMMUNITY_FORMAT_COMMUNITY_LIST);
-  else if (regex)
-    entry->config = XSTRDUP (MTYPE_COMMUNITY_LIST_CONFIG, str);
   else
-    entry->config = NULL;
-  entry->u.ecom = ecom;
-  entry->reg = regex;
+    {
+      /* Standard extcommunity-list parse.  String is converted into
+	 ecommunity structure.  */
+      if (style == EXTCOMMUNITY_LIST_STANDARD
+	  || style == EXTCOMMUNITY_LIST_AUTO)
+	{
+	  /* Type is unknown.  String includes keyword.  */
+	  ecom = ecommunity_str2com (str, 0, 1);
+	  if (ecom)
+	    {
+	      entry = community_entry_new ();
+	      entry->config 
+		= ecommunity_ecom2str (ecom, ECOMMUNITY_FORMAT_COMMUNITY_LIST);
+	      ecom->str = ecommunity_ecom2str (ecom, ECOMMUNITY_FORMAT_DISPLAY);
+	      entry->u.ecom = ecom;
+	      entry->direct = direct;
+	      entry->style = EXTCOMMUNITY_LIST_STANDARD;
+	    }
+	  else if (style == EXTCOMMUNITY_LIST_STANDARD)
+	    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+
+	  /* We can't convert string into communities value.  When
+	     community-list type is auto, fall dawn to regular expression
+	     match.  */
+	}
+
+      /* Expanded extcommunity-list parse.  String may include regular
+	 expression.  */
+      if (! entry && (style == EXTCOMMUNITY_LIST_EXPANDED
+		      || style == EXTCOMMUNITY_LIST_AUTO))
+	{
+	  regex = bgp_regcomp (str);
+	  if (regex)
+	    {
+	      entry = community_entry_new ();
+	      entry->reg = regex;
+	      entry->config = XSTRDUP (MTYPE_COMMUNITY_LIST_CONFIG, str);
+	      entry->direct = direct;
+	      entry->style = EXTCOMMUNITY_LIST_EXPANDED;
+	    }
+	  else
+	    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+	}
+    }
 
   /* Do not put duplicated community entry.  */
   if (community_list_dup_check (list, entry))
@@ -780,45 +811,60 @@ extcommunity_list_set (struct community_list_handler *ch,
    extcommunity-list entry belongs to the specified name.  */
 int
 extcommunity_list_unset (struct community_list_handler *ch,
-                         const char *name, const char *str, 
-                         int direct, int style)
+			 char *name, char *str, int direct, int style)
 {
-  struct community_entry *entry = NULL;
+  struct community_entry *entry;
   struct community_list *list;
   struct ecommunity *ecom = NULL;
-  regex_t *regex = NULL;
+  regex_t *regex;
+
+  entry = NULL;
 
   /* Lookup extcommunity list.  */
-  list = community_list_lookup (ch, name, EXTCOMMUNITY_LIST_MASTER);
+  list = community_list_lookup (ch, name, style);
   if (list == NULL)
     return COMMUNITY_LIST_ERR_CANT_FIND_LIST;
 
   /* Delete all of entry belongs to this extcommunity-list.  */
-  if (!str)
+  if (! str)
     {
       community_list_delete (list);
       return 0;
     }
 
-  if (style == EXTCOMMUNITY_LIST_STANDARD)
-    ecom = ecommunity_str2com (str, 0, 1);
-  else
-    regex = bgp_regcomp (str);
+  /* Community list string is specified.  Lookup entry from community
+     list.  */
+  if (style == EXTCOMMUNITY_LIST_STANDARD || style == EXTCOMMUNITY_LIST_AUTO)
+    {
+      ecom = ecommunity_str2com (str, 0, 1);
+      if (ecom)
+	{
+	  entry = community_list_entry_lookup (list, ecom, direct);
+	  ecommunity_free (ecom);
+	}
+      else if (style == COMMUNITY_LIST_STANDARD)
+	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
 
-  if (! ecom && ! regex)
-    return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+      /* If we can't convert string into community and community-list
+	 type is auto, fall dawn to expanded community-list.  */
+    }
 
-  if (ecom)
-    entry = community_list_entry_lookup (list, ecom, direct);
-  else
-    entry = community_list_entry_lookup (list, str, direct);
+  /* Expanded community-list parse.  String may include regular
+     expression.  */
+  if (! entry 
+      && (style == COMMUNITY_LIST_EXPANDED || style == COMMUNITY_LIST_AUTO))
+    {
+      regex = bgp_regcomp (str);
+      if (regex)
+	{
+	  entry = community_list_entry_lookup (list, str, direct);
+	  bgp_regex_free (regex);
+	}
+      else
+	return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+    }
 
-  if (ecom)
-    ecommunity_free (ecom);
-  if (regex)
-    bgp_regex_free (regex);
-
-  if (!entry)
+  if (! entry)
     return COMMUNITY_LIST_ERR_CANT_FIND_LIST;
 
   community_list_entry_delete (list, entry, style);
@@ -828,16 +874,16 @@ extcommunity_list_unset (struct community_list_handler *ch,
 
 /* Initializa community-list.  Return community-list handler.  */
 struct community_list_handler *
-community_list_init (void)
+community_list_init ()
 {
   struct community_list_handler *ch;
   ch = XCALLOC (MTYPE_COMMUNITY_LIST_HANDLER,
-                sizeof (struct community_list_handler));
+		sizeof (struct community_list_handler));
   return ch;
 }
 
 /* Terminate community-list.  */
-static void
+void
 community_list_terminate (struct community_list_handler *ch)
 {
   struct community_list_master *cm;

@@ -20,18 +20,12 @@
  */
 
 #include <zebra.h>
-#include <lib/version.h>
 
 #include <pwd.h>
 
 #ifdef USE_PAM
 #include <security/pam_appl.h>
-#ifdef HAVE_PAM_MISC_H
 #include <security/pam_misc.h>
-#endif
-#ifdef HAVE_OPENPAM_H
-#include <security/openpam.h>
-#endif
 #endif /* USE_PAM */
 
 #include "memory.h"
@@ -41,18 +35,18 @@
 #ifdef USE_PAM
 static struct pam_conv conv = 
 {
-  PAM_CONV_FUNC,
+  misc_conv,
   NULL
 };
 
 int
-vtysh_pam (const char *user)
+vtysh_pam (char *user)
 {
   int ret;
   pam_handle_t *pamh = NULL;
 
   /* Start PAM. */
-  ret = pam_start(QUAGGA_PROGNAME, user, &conv, &pamh);
+  ret = pam_start("zebra", user, &conv, &pamh);
   /* printf ("ret %d\n", ret); */
 
   /* Is user really user? */
@@ -90,7 +84,7 @@ vtysh_pam (const char *user)
 }
 #endif /* USE_PAM */
 
-struct vtysh_user
+struct user
 {
   char *name;
   u_char nopassword;
@@ -98,28 +92,28 @@ struct vtysh_user
 
 struct list *userlist;
 
-struct vtysh_user *
+struct user *
 user_new ()
 {
-  struct vtysh_user *user;
-  user = XMALLOC (0, sizeof (struct vtysh_user));
-  memset (user, 0, sizeof (struct vtysh_user));
+  struct user *user;
+  user = XMALLOC (0, sizeof (struct user));
+  memset (user, 0, sizeof (struct user));
   return user;
 }
 
 void
-user_free (struct vtysh_user *user)
+user_free (struct user *user)
 {
   XFREE (0, user);
 }
 
-struct vtysh_user *
-user_lookup (const char *name)
+struct user *
+user_lookup (char *name)
 {
-  struct listnode *node, *nnode;
-  struct vtysh_user *user;
+  struct listnode *nn;
+  struct user *user;
 
-  for (ALL_LIST_ELEMENTS (userlist, node, nnode, user))
+  LIST_LOOP (userlist, user, nn)
     {
       if (strcmp (user->name, name) == 0)
 	return user;
@@ -130,20 +124,20 @@ user_lookup (const char *name)
 void
 user_config_write ()
 {
-  struct listnode *node, *nnode;
-  struct vtysh_user *user;
+  struct listnode *nn;
+  struct user *user;
 
-  for (ALL_LIST_ELEMENTS (userlist, node, nnode, user))
+  LIST_LOOP (userlist, user, nn)
     {
       if (user->nopassword)
 	printf (" username %s nopassword\n", user->name);
     }
 }
 
-struct vtysh_user *
-user_get (const char *name)
+struct user *
+user_get (char *name)
 {
-  struct vtysh_user *user;
+  struct user *user;
   user = user_lookup (name);
   if (user)
     return user;
@@ -162,7 +156,7 @@ DEFUN (username_nopassword,
        "\n"
        "\n")
 {
-  struct vtysh_user *user;
+  struct user *user;
   user = user_get (argv[0]);
   user->nopassword = 1;
   return CMD_SUCCESS;
@@ -171,7 +165,7 @@ DEFUN (username_nopassword,
 int
 vtysh_auth ()
 {
-  struct vtysh_user *user;
+  struct user *user;
   struct passwd *passwd;
 
   passwd = getpwuid (geteuid ());

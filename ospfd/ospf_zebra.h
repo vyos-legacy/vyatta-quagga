@@ -23,8 +23,6 @@
 #ifndef _ZEBRA_OSPF_ZEBRA_H
 #define _ZEBRA_OSPF_ZEBRA_H
 
-#include "vty.h"
-
 #define EXTERNAL_METRIC_TYPE_1      0
 #define EXTERNAL_METRIC_TYPE_2      1
 
@@ -42,39 +40,39 @@ struct ospf_distance
 };
 
 /* Prototypes */
-extern void ospf_zclient_start (void);
+void ospf_zclient_start ();
 
-extern void ospf_zebra_add (struct prefix_ipv4 *, struct ospf_route *);
-extern void ospf_zebra_delete (struct prefix_ipv4 *, struct ospf_route *);
+void ospf_zebra_add (struct prefix_ipv4 *, struct ospf_route *);
+void ospf_zebra_delete (struct prefix_ipv4 *, struct ospf_route *);
 
-extern void ospf_zebra_add_discard (struct prefix_ipv4 *);
-extern void ospf_zebra_delete_discard (struct prefix_ipv4 *);
+void ospf_zebra_add_discard (struct prefix_ipv4 *);
+void ospf_zebra_delete_discard (struct prefix_ipv4 *);
 
-extern int ospf_default_originate_timer (struct thread *);
+int ospf_default_originate_timer (struct thread *);
 
-extern int ospf_redistribute_check (struct ospf *, struct external_info *,
-				    int *);
-extern int ospf_distribute_check_connected (struct ospf *,
-					    struct external_info *);
-extern void ospf_distribute_list_update (struct ospf *, int);
+int ospf_redistribute_check (struct external_info *, int *);
+int ospf_distribute_check_connected (struct external_info *);
+void ospf_distribute_list_update (int);
 
-extern int ospf_is_type_redistributed (int);
-extern void ospf_distance_reset (struct ospf *);
-extern u_char ospf_distance_apply (struct prefix_ipv4 *, struct ospf_route *);
+int ospf_is_type_redistributed (int);
+int ospf_redistribute_unset (int);
 
-extern int ospf_redistribute_set (struct ospf *, int, int, int);
-extern int ospf_redistribute_unset (struct ospf *, int);
-extern int ospf_redistribute_default_set (struct ospf *, int, int, int);
-extern int ospf_redistribute_default_unset (struct ospf *);
-extern int ospf_distribute_list_out_set (struct ospf *, int, const char *);
-extern int ospf_distribute_list_out_unset (struct ospf *, int, const char *);
-extern void ospf_routemap_set (struct ospf *, int, const char *);
-extern void ospf_routemap_unset (struct ospf *, int);
-extern int ospf_distance_set (struct vty *, struct ospf *, const char *,
-			      const char *, const char *);
-extern int ospf_distance_unset (struct vty *, struct ospf *, const char *,
-				const char *, const char *);
-extern void ospf_zebra_init (void);
+void ospf_distance_reset ();
+u_char ospf_distance_apply (struct prefix_ipv4 *, struct ospf_route *);
+
+struct vty;
+
+int ospf_redistribute_set (int, int, int);
+int ospf_redistribute_unset (int);
+int ospf_redistribute_default_set (int, int, int);
+int ospf_redistribute_default_unset ();
+int ospf_distribute_list_out_set (int, char *);
+int ospf_distribute_list_out_unset (int, char *);
+void ospf_routemap_set (int, char *);
+void ospf_routemap_unset (int);
+int ospf_distance_set (struct vty *, char *, char *, char *);
+int ospf_distance_unset (struct vty *, char *, char *, char *);
+void ospf_zebra_init ();
 
 #endif /* _ZEBRA_OSPF_ZEBRA_H */
 

@@ -39,7 +39,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_ecommunity.h"
 
 /* Attribute strings for logging. */
-static struct message attr_str [] = 
+struct message attr_str [] = 
 {
   { BGP_ATTR_ORIGIN,           "ORIGIN" }, 
   { BGP_ATTR_AS_PATH,          "AS_PATH" }, 
@@ -58,14 +58,12 @@ static struct message attr_str [] =
   { BGP_ATTR_MP_UNREACH_NLRI,  "MP_UNREACH_NLRI" },
   { 0, NULL }
 };
-int attr_str_max = sizeof(attr_str)/sizeof(attr_str[0]);
 
 struct hash *cluster_hash;
 
-static void *
-cluster_hash_alloc (void *p)
+void *
+cluster_hash_alloc (struct cluster_list *val)
 {
-  struct cluster_list * val = (struct cluster_list *) p;
   struct cluster_list *cluster;
 
   cluster = XMALLOC (MTYPE_CLUSTER, sizeof (struct cluster_list));
@@ -85,14 +83,14 @@ cluster_hash_alloc (void *p)
 }
 
 /* Cluster list related functions. */
-static struct cluster_list *
-cluster_parse (struct in_addr * pnt, int length)
+struct cluster_list *
+cluster_parse (caddr_t pnt, int length)
 {
   struct cluster_list tmp;
   struct cluster_list *cluster;
 
   tmp.length = length;
-  tmp.list = pnt;
+  tmp.list = (struct in_addr *) pnt;
 
   cluster = hash_get (cluster_hash, &tmp, cluster_hash_alloc);
   cluster->refcnt++;
@@ -110,10 +108,9 @@ cluster_loop_check (struct cluster_list *cluster, struct in_addr originator)
   return 0;
 }
 
-static unsigned int
-cluster_hash_key_make (void *p)
+unsigned int
+cluster_hash_key_make (struct cluster_list *cluster)
 {
-  struct cluster_list * cluster = (struct cluster_list *) p;
   unsigned int key = 0;
   int length;
   caddr_t pnt;
@@ -127,19 +124,16 @@ cluster_hash_key_make (void *p)
   return key;
 }
 
-static int
-cluster_hash_cmp (void *p1, void *p2)
+int
+cluster_hash_cmp (struct cluster_list *cluster1, struct cluster_list *cluster2)
 {
-  struct cluster_list * cluster1 = (struct cluster_list *) p1;
-  struct cluster_list * cluster2 = (struct cluster_list *) p2;
-
   if (cluster1->length == cluster2->length &&
       memcmp (cluster1->list, cluster2->list, cluster1->length) == 0)
     return 1;
   return 0;
 }
 
-static void
+void
 cluster_free (struct cluster_list *cluster)
 {
   if (cluster->list)
@@ -147,7 +141,7 @@ cluster_free (struct cluster_list *cluster)
   XFREE (MTYPE_CLUSTER, cluster);
 }
 
-static struct cluster_list *
+struct cluster_list *
 cluster_dup (struct cluster_list *cluster)
 {
   struct cluster_list *new;
@@ -167,7 +161,7 @@ cluster_dup (struct cluster_list *cluster)
   return new;
 }
 
-static struct cluster_list *
+struct cluster_list *
 cluster_intern (struct cluster_list *cluster)
 {
   struct cluster_list *find;
@@ -193,8 +187,8 @@ cluster_unintern (struct cluster_list *cluster)
     }
 }
 
-static void
-cluster_init (void)
+void
+cluster_init ()
 {
   cluster_hash = hash_create (cluster_hash_key_make, cluster_hash_cmp);
 }
@@ -202,7 +196,7 @@ cluster_init (void)
 /* Unknown transit attribute. */
 struct hash *transit_hash;
 
-static void
+void
 transit_free (struct transit *transit)
 {
   if (transit->val)
@@ -210,15 +204,14 @@ transit_free (struct transit *transit)
   XFREE (MTYPE_TRANSIT, transit);
 }
 
-
-static void *
-transit_hash_alloc (void *p)
+void *
+transit_hash_alloc (struct transit *transit)
 {
   /* Transit structure is already allocated.  */
-  return p;
+  return transit;
 }
 
-static struct transit *
+struct transit *
 transit_intern (struct transit *transit)
 {
   struct transit *find;
@@ -246,10 +239,9 @@ transit_unintern (struct transit *transit)
     }
 }
 
-static unsigned int
-transit_hash_key_make (void *p)
+unsigned int
+transit_hash_key_make (struct transit *transit)
 {
-  struct transit * transit = (struct transit *) p;
   unsigned int key = 0;
   int length;
   caddr_t pnt;
@@ -263,174 +255,99 @@ transit_hash_key_make (void *p)
   return key;
 }
 
-static int
-transit_hash_cmp (void *p1, void *p2)
+int
+transit_hash_cmp (struct transit *transit1, struct transit *transit2)
 {
-  struct transit * transit1 = (struct transit *) p1;
-  struct transit * transit2 = (struct transit *) p2;
-
   if (transit1->length == transit2->length &&
       memcmp (transit1->val, transit2->val, transit1->length) == 0)
     return 1;
   return 0;
 }
 
-static void
+void
 transit_init ()
 {
   transit_hash = hash_create (transit_hash_key_make, transit_hash_cmp);
 }
 
 /* Attribute hash routines. */
+
 struct hash *attrhash;
 
-static struct attr_extra *
-bgp_attr_extra_new (void)
-{
-  return XCALLOC (MTYPE_ATTR_EXTRA, sizeof (struct attr_extra));
-}
-
-void
-bgp_attr_extra_free (struct attr *attr)
-{
-  if (attr->extra)
-    {
-      XFREE (MTYPE_ATTR_EXTRA, attr->extra);
-      attr->extra = NULL;
-    }
-}
-
-struct attr_extra *
-bgp_attr_extra_get (struct attr *attr)
-{
-  if (!attr->extra)
-    attr->extra = bgp_attr_extra_new();
-  return attr->extra;
-}
-
-/* Shallow copy of an attribute
- * Though, not so shallow that it doesn't copy the contents
- * of the attr_extra pointed to by 'extra'
- */
-void
-bgp_attr_dup (struct attr *new, struct attr *orig)
-{
-  *new = *orig;
-  if (orig->extra)
-    {
-      new->extra = bgp_attr_extra_new();
-      *new->extra = *orig->extra;
-    }
-}
-
-unsigned long int
-attr_count (void)
-{
-  return attrhash->count;
-}
-
-unsigned long int
-attr_unknown_count (void)
-{
-  return transit_hash->count;
-}
-
 unsigned int
-attrhash_key_make (void *p)
+attrhash_key_make (struct attr *attr)
 {
-  struct attr * attr = (struct attr *) p;
   unsigned int key = 0;
 
   key += attr->origin;
   key += attr->nexthop.s_addr;
   key += attr->med;
   key += attr->local_pref;
-  
-  if (attr->extra)
-    {
-      key += attr->extra->aggregator_as;
-      key += attr->extra->aggregator_addr.s_addr;
-      key += attr->extra->weight;
-      key += attr->extra->mp_nexthop_global_in.s_addr;
-    }
-  
+  key += attr->aggregator_as;
+  key += attr->aggregator_addr.s_addr;
+  key += attr->weight;
+
+  key += attr->mp_nexthop_global_in.s_addr;
   if (attr->aspath)
     key += aspath_key_make (attr->aspath);
   if (attr->community)
     key += community_hash_make (attr->community);
-  
-  if (attr->extra)
-    {
-      if (attr->extra->ecommunity)
-        key += ecommunity_hash_make (attr->extra->ecommunity);
-      if (attr->extra->cluster)
-        key += cluster_hash_key_make (attr->extra->cluster);
-      if (attr->extra->transit)
-        key += transit_hash_key_make (attr->extra->transit);
+  if (attr->ecommunity)
+    key += ecommunity_hash_make (attr->ecommunity);
+  if (attr->cluster)
+    key += cluster_hash_key_make (attr->cluster);
+  if (attr->transit)
+    key += transit_hash_key_make (attr->transit);
 
 #ifdef HAVE_IPV6
-      {
-        int i;
-        
-        key += attr->extra->mp_nexthop_len;
-        for (i = 0; i < 16; i++)
-          key += attr->extra->mp_nexthop_global.s6_addr[i];
-        for (i = 0; i < 16; i++)
-          key += attr->extra->mp_nexthop_local.s6_addr[i];
-      }
+ {
+   int i;
+   
+   key += attr->mp_nexthop_len;
+   for (i = 0; i < 16; i++)
+     key += attr->mp_nexthop_global.s6_addr[i];
+   for (i = 0; i < 16; i++)
+     key += attr->mp_nexthop_local.s6_addr[i];
+ }
 #endif /* HAVE_IPV6 */
-    }
 
   return key;
 }
 
 int
-attrhash_cmp (void *p1, void *p2)
+attrhash_cmp (struct attr *attr1, struct attr *attr2)
 {
-  struct attr * attr1 = (struct attr *) p1;
-  struct attr * attr2 = (struct attr *) p2;
-
   if (attr1->flag == attr2->flag
       && attr1->origin == attr2->origin
       && attr1->nexthop.s_addr == attr2->nexthop.s_addr
+      && attr1->med == attr2->med
+      && attr1->local_pref == attr2->local_pref
+      && attr1->aggregator_as == attr2->aggregator_as
+      && attr1->aggregator_addr.s_addr == attr2->aggregator_addr.s_addr
+      && attr1->weight == attr2->weight
+#ifdef HAVE_IPV6
+      && attr1->mp_nexthop_len == attr2->mp_nexthop_len
+      && IPV6_ADDR_SAME (&attr1->mp_nexthop_global, &attr2->mp_nexthop_global)
+      && IPV6_ADDR_SAME (&attr1->mp_nexthop_local, &attr2->mp_nexthop_local)
+#endif /* HAVE_IPV6 */
+      && IPV4_ADDR_SAME (&attr1->mp_nexthop_global_in, &attr2->mp_nexthop_global_in)
       && attr1->aspath == attr2->aspath
       && attr1->community == attr2->community
-      && attr1->med == attr2->med
-      && attr1->local_pref == attr2->local_pref)
-    {
-      struct attr_extra *ae1 = attr1->extra;
-      struct attr_extra *ae2 = attr2->extra;
-      
-      if (ae1 && ae2
-          && ae1->aggregator_as == ae2->aggregator_as
-          && ae1->aggregator_addr.s_addr == ae2->aggregator_addr.s_addr
-          && ae1->weight == ae2->weight
-#ifdef HAVE_IPV6
-          && ae1->mp_nexthop_len == ae2->mp_nexthop_len
-          && IPV6_ADDR_SAME (&ae1->mp_nexthop_global, &ae2->mp_nexthop_global)
-          && IPV6_ADDR_SAME (&ae1->mp_nexthop_local, &ae2->mp_nexthop_local)
-#endif /* HAVE_IPV6 */
-          && IPV4_ADDR_SAME (&ae1->mp_nexthop_global_in, &ae2->mp_nexthop_global_in)
-          && ae1->ecommunity == ae2->ecommunity
-          && ae1->cluster == ae2->cluster
-          && ae1->transit == ae2->transit)
-        return 1;
-      else if (ae1 || ae2)
-        return 0;
-      /* neither attribute has extra attributes, so they're same */
-      return 1;
-    }
+      && attr1->ecommunity == attr2->ecommunity
+      && attr1->cluster == attr2->cluster
+      && attr1->transit == attr2->transit)
+    return 1;
   else
     return 0;
 }
 
-static void
+void
 attrhash_init ()
 {
   attrhash = hash_create (attrhash_key_make, attrhash_cmp);
 }
 
-static void
+void
 attr_show_all_iterator (struct hash_backet *backet, struct vty *vty)
 {
   struct attr *attr = backet->data;
@@ -448,19 +365,13 @@ attr_show_all (struct vty *vty)
 		vty);
 }
 
-static void *
-bgp_attr_hash_alloc (void *p)
+void *
+bgp_attr_hash_alloc (struct attr *val)
 {
-  struct attr * val = (struct attr *) p;
   struct attr *attr;
 
   attr = XMALLOC (MTYPE_ATTR, sizeof (struct attr));
   *attr = *val;
-  if (val->extra)
-    {
-      attr->extra = bgp_attr_extra_new ();
-      *attr->extra = *val->extra;
-    }
   attr->refcnt = 0;
   return attr;
 }
@@ -486,31 +397,26 @@ bgp_attr_intern (struct attr *attr)
       else
 	attr->community->refcnt++;
     }
-  if (attr->extra)
+  if (attr->ecommunity)
     {
-      struct attr_extra *attre = attr->extra;
-      
-      if (attre->ecommunity)
-        {
-          if (! attre->ecommunity->refcnt)
-            attre->ecommunity = ecommunity_intern (attre->ecommunity);
-          else
-            attre->ecommunity->refcnt++;
-        }
-      if (attre->cluster)
-        {
-          if (! attre->cluster->refcnt)
-            attre->cluster = cluster_intern (attre->cluster);
-          else
-            attre->cluster->refcnt++;
-        }
-      if (attre->transit)
-        {
-          if (! attre->transit->refcnt)
-            attre->transit = transit_intern (attre->transit);
-          else
-            attre->transit->refcnt++;
-        }
+      if (! attr->ecommunity->refcnt)
+	attr->ecommunity = ecommunity_intern (attr->ecommunity);
+      else
+	attr->ecommunity->refcnt++;
+    }
+  if (attr->cluster)
+    {
+      if (! attr->cluster->refcnt)
+	attr->cluster = cluster_intern (attr->cluster);
+      else
+	attr->cluster->refcnt++;
+    }
+  if (attr->transit)
+    {
+      if (! attr->transit->refcnt)
+	attr->transit = transit_intern (attr->transit);
+      else
+	attr->transit->refcnt++;
     }
 
   find = (struct attr *) hash_get (attrhash, attr, bgp_attr_hash_alloc);
@@ -519,27 +425,23 @@ bgp_attr_intern (struct attr *attr)
   return find;
 }
 
-
 /* Make network statement's attribute. */
 struct attr *
 bgp_attr_default_set (struct attr *attr, u_char origin)
 {
   memset (attr, 0, sizeof (struct attr));
-  bgp_attr_extra_get (attr);
-  
+
   attr->origin = origin;
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_ORIGIN);
   attr->aspath = aspath_empty ();
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_AS_PATH);
-  attr->extra->weight = BGP_ATTR_DEFAULT_WEIGHT;
+  attr->weight = 32768;
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_NEXT_HOP);
 #ifdef HAVE_IPV6
-  attr->extra->mp_nexthop_len = IPV6_MAX_BYTELEN;
+  attr->mp_nexthop_len = 16;
 #endif
-
   return attr;
 }
-
 
 /* Make network statement's attribute. */
 struct attr *
@@ -547,16 +449,20 @@ bgp_attr_default_intern (u_char origin)
 {
   struct attr attr;
   struct attr *new;
-  struct attr_extra *attre;
-  
+
   memset (&attr, 0, sizeof (struct attr));
-  attre = bgp_attr_extra_get (&attr);
-  
-  bgp_attr_default_set(&attr, origin);
+
+  attr.origin = origin;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_ORIGIN);
+  attr.aspath = aspath_empty ();
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_AS_PATH);
+  attr.weight = 32768;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_NEXT_HOP);
+#ifdef HAVE_IPV6
+  attr.mp_nexthop_len = 16;
+#endif
 
   new = bgp_attr_intern (&attr);
-  bgp_attr_extra_free (&attr);
-  
   aspath_unintern (new->aspath);
   return new;
 }
@@ -568,11 +474,9 @@ bgp_attr_aggregate_intern (struct bgp *bgp, u_char origin,
 {
   struct attr attr;
   struct attr *new;
-  struct attr_extra *attre;
 
   memset (&attr, 0, sizeof (struct attr));
-  attre = bgp_attr_extra_get (&attr);
-  
+
   /* Origin attribute. */
   attr.origin = origin;
   attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_ORIGIN);
@@ -593,22 +497,20 @@ bgp_attr_aggregate_intern (struct bgp *bgp, u_char origin,
       attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES);
     }
 
-  attre->weight = BGP_ATTR_DEFAULT_WEIGHT;
+  attr.weight = 32768;
 #ifdef HAVE_IPV6
-  attre->mp_nexthop_len = IPV6_MAX_BYTELEN;
+  attr.mp_nexthop_len = 16;
 #endif
   if (! as_set)
     attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_ATOMIC_AGGREGATE);
   attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR);
   if (CHECK_FLAG (bgp->config, BGP_CONFIG_CONFEDERATION))
-    attre->aggregator_as = bgp->confed_id;
+    attr.aggregator_as = bgp->confed_id;
   else
-    attre->aggregator_as = bgp->as;
-  attre->aggregator_addr = bgp->router_id;
+    attr.aggregator_as = bgp->as;
+  attr.aggregator_addr = bgp->router_id;
 
   new = bgp_attr_intern (&attr);
-  bgp_attr_extra_free (&attr);
-  
   aspath_unintern (new->aspath);
   return new;
 }
@@ -620,27 +522,23 @@ bgp_attr_unintern (struct attr *attr)
   struct attr *ret;
   struct aspath *aspath;
   struct community *community;
-  struct ecommunity *ecommunity = NULL;
-  struct cluster_list *cluster = NULL;
-  struct transit *transit = NULL;
+  struct ecommunity *ecommunity;
+  struct cluster_list *cluster;
+  struct transit *transit;
 
   /* Decrement attribute reference. */
   attr->refcnt--;
   aspath = attr->aspath;
   community = attr->community;
-  if (attr->extra)
-    {
-      ecommunity = attr->extra->ecommunity;
-      cluster = attr->extra->cluster;
-      transit = attr->extra->transit;
-    }
+  ecommunity = attr->ecommunity;
+  cluster = attr->cluster;
+  transit = attr->transit;
 
   /* If reference becomes zero then free attribute object. */
   if (attr->refcnt == 0)
     {    
       ret = hash_release (attrhash, attr);
       assert (ret != NULL);
-      bgp_attr_extra_free (attr);
       XFREE (MTYPE_ATTR, attr);
     }
 
@@ -664,20 +562,16 @@ bgp_attr_flush (struct attr *attr)
     aspath_free (attr->aspath);
   if (attr->community && ! attr->community->refcnt)
     community_free (attr->community);
-  if (attr->extra)
-    {
-      struct attr_extra *attre = attr->extra;
-      if (attre->ecommunity && ! attre->ecommunity->refcnt)
-        ecommunity_free (attre->ecommunity);
-      if (attre->cluster && ! attre->cluster->refcnt)
-        cluster_free (attre->cluster);
-      if (attre->transit && ! attre->transit->refcnt)
-        transit_free (attre->transit);
-    }
+  if (attr->ecommunity && ! attr->ecommunity->refcnt)
+    ecommunity_free (attr->ecommunity);
+  if (attr->cluster && ! attr->cluster->refcnt)
+    cluster_free (attr->cluster);
+  if (attr->transit && ! attr->transit->refcnt)
+    transit_free (attr->transit);
 }
 
 /* Get origin attribute of the update message. */
-static int
+int
 bgp_attr_origin (struct peer *peer, bgp_size_t length, 
 		 struct attr *attr, u_char flag, u_char *startp)
 {
@@ -745,7 +639,7 @@ bgp_attr_origin (struct peer *peer, bgp_size_t length,
 
 /* Parse AS path information.  This function is wrapper of
    aspath_parse. */
-static int
+int
 bgp_attr_aspath (struct peer *peer, bgp_size_t length, 
 		 struct attr *attr, u_char flag, u_char *startp)
 {
@@ -769,7 +663,7 @@ bgp_attr_aspath (struct peer *peer, bgp_size_t length,
     }
 
   /* In case of IBGP, length will be zero. */
-  attr->aspath = aspath_parse (peer->ibuf, length);
+  attr->aspath = aspath_parse (stream_pnt (peer->ibuf), length);
   if (! attr->aspath)
     {
       zlog (peer->log, LOG_ERR, "Malformed AS path length is %d", length);
@@ -807,7 +701,7 @@ bgp_attr_aspath (struct peer *peer, bgp_size_t length,
     }
 
   /* Forward pointer. */
-/*  stream_forward_getp (peer->ibuf, length);*/
+  stream_forward (peer->ibuf, length);
 
   /* Set aspath attribute flag. */
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_AS_PATH);
@@ -816,7 +710,7 @@ bgp_attr_aspath (struct peer *peer, bgp_size_t length,
 }
 
 /* Nexthop attribute. */
-static int
+int
 bgp_attr_nexthop (struct peer *peer, bgp_size_t length, 
 		  struct attr *attr, u_char flag, u_char *startp)
 {
@@ -857,7 +751,7 @@ bgp_attr_nexthop (struct peer *peer, bgp_size_t length,
 }
 
 /* MED atrribute. */
-static int
+int
 bgp_attr_med (struct peer *peer, bgp_size_t length, 
 	      struct attr *attr, u_char flag, u_char *startp)
 {
@@ -886,7 +780,7 @@ bgp_attr_med (struct peer *peer, bgp_size_t length,
 }
 
 /* Local preference attribute. */
-static int
+int
 bgp_attr_local_pref (struct peer *peer, bgp_size_t length, 
 		     struct attr *attr, u_char flag)
 {
@@ -895,7 +789,7 @@ bgp_attr_local_pref (struct peer *peer, bgp_size_t length,
      receiving speaker. */
   if (peer_sort (peer) == BGP_PEER_EBGP)
     {
-      stream_forward_getp (peer->ibuf, length);
+      stream_forward (peer->ibuf, length);
       return 0;
     }
 
@@ -911,7 +805,7 @@ bgp_attr_local_pref (struct peer *peer, bgp_size_t length,
 }
 
 /* Atomic aggregate. */
-static int
+int
 bgp_attr_atomic (struct peer *peer, bgp_size_t length, 
 		 struct attr *attr, u_char flag)
 {
@@ -932,12 +826,10 @@ bgp_attr_atomic (struct peer *peer, bgp_size_t length,
 }
 
 /* Aggregator attribute */
-static int
+int
 bgp_attr_aggregator (struct peer *peer, bgp_size_t length,
 		     struct attr *attr, u_char flag)
 {
-  struct attr_extra *attre = bgp_attr_extra_get (attr);
-  
   if (length != 6)
     {
       zlog (peer->log, LOG_ERR, "Aggregator length is not 6 [%d]", length);
@@ -947,8 +839,8 @@ bgp_attr_aggregator (struct peer *peer, bgp_size_t length,
 		       BGP_NOTIFY_UPDATE_ATTR_LENG_ERR);
       return -1;
     }
-  attre->aggregator_as = stream_getw (peer->ibuf);
-  attre->aggregator_addr.s_addr = stream_get_ipv4 (peer->ibuf);
+  attr->aggregator_as = stream_getw (peer->ibuf);
+  attr->aggregator_addr.s_addr = stream_get_ipv4 (peer->ibuf);
 
   /* Set atomic aggregate flag. */
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR);
@@ -957,7 +849,7 @@ bgp_attr_aggregator (struct peer *peer, bgp_size_t length,
 }
 
 /* Community attribute. */
-static int
+int
 bgp_attr_community (struct peer *peer, bgp_size_t length, 
 		    struct attr *attr, u_char flag)
 {
@@ -965,9 +857,8 @@ bgp_attr_community (struct peer *peer, bgp_size_t length,
     attr->community = NULL;
   else
     {
-      attr->community = 
-        community_parse ((u_int32_t *)stream_pnt (peer->ibuf), length);
-      stream_forward_getp (peer->ibuf, length);
+      attr->community = community_parse (stream_pnt (peer->ibuf), length);
+      stream_forward (peer->ibuf, length);
     }
 
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES);
@@ -976,7 +867,7 @@ bgp_attr_community (struct peer *peer, bgp_size_t length,
 }
 
 /* Originator ID attribute. */
-static int
+int
 bgp_attr_originator_id (struct peer *peer, bgp_size_t length, 
 			struct attr *attr, u_char flag)
 {
@@ -990,8 +881,7 @@ bgp_attr_originator_id (struct peer *peer, bgp_size_t length,
       return -1;
     }
 
-  (bgp_attr_extra_get (attr))->originator_id.s_addr 
-    = stream_get_ipv4 (peer->ibuf);
+  attr->originator_id.s_addr = stream_get_ipv4 (peer->ibuf);
 
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID);
 
@@ -999,7 +889,7 @@ bgp_attr_originator_id (struct peer *peer, bgp_size_t length,
 }
 
 /* Cluster list attribute. */
-static int
+int
 bgp_attr_cluster_list (struct peer *peer, bgp_size_t length, 
 		       struct attr *attr, u_char flag)
 {
@@ -1014,10 +904,9 @@ bgp_attr_cluster_list (struct peer *peer, bgp_size_t length,
       return -1;
     }
 
-  (bgp_attr_extra_get (attr))->cluster 
-    = cluster_parse ((struct in_addr *)stream_pnt (peer->ibuf), length);
+  attr->cluster = cluster_parse (stream_pnt (peer->ibuf), length);
 
-  stream_forward_getp (peer->ibuf, length);;
+  stream_forward (peer->ibuf, length);;
 
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_CLUSTER_LIST);
 
@@ -1025,42 +914,35 @@ bgp_attr_cluster_list (struct peer *peer, bgp_size_t length,
 }
 
 /* Multiprotocol reachability information parse. */
-static int
+int
 bgp_mp_reach_parse (struct peer *peer, bgp_size_t length, struct attr *attr,
 		    struct bgp_nlri *mp_update)
 {
   u_int16_t afi;
   u_char safi;
+  u_char snpa_num;
+  u_char snpa_len;
+  u_char *lim;
   bgp_size_t nlri_len;
-  size_t start;
   int ret;
   struct stream *s;
-  struct attr_extra *attre = bgp_attr_extra_get(attr);
   
   /* Set end of packet. */
-  s = BGP_INPUT(peer);
-  start = stream_get_getp(s);
-  
-  /* safe to read statically sized header? */
-#define BGP_MP_REACH_MIN_SIZE 5
-  if ((length > STREAM_READABLE(s)) || (length < BGP_MP_REACH_MIN_SIZE))
-    return -1;
-  
+  s = peer->ibuf;
+  lim = stream_pnt (s) + length;
+
   /* Load AFI, SAFI. */
   afi = stream_getw (s);
   safi = stream_getc (s);
 
   /* Get nexthop length. */
-  attre->mp_nexthop_len = stream_getc (s);
-  
-  if (STREAM_READABLE(s) < attre->mp_nexthop_len)
-    return -1;
-  
+  attr->mp_nexthop_len = stream_getc (s);
+
   /* Nexthop length check. */
-  switch (attre->mp_nexthop_len)
+  switch (attr->mp_nexthop_len)
     {
     case 4:
-      stream_get (&attre->mp_nexthop_global_in, s, 4);
+      stream_get (&attr->mp_nexthop_global_in, s, 4);
       break;
     case 12:
       {
@@ -1069,52 +951,56 @@ bgp_mp_reach_parse (struct peer *peer, bgp_size_t length, struct attr *attr,
 
 	rd_high = stream_getl (s);
 	rd_low = stream_getl (s);
-	stream_get (&attre->mp_nexthop_global_in, s, 4);
+	stream_get (&attr->mp_nexthop_global_in, s, 4);
       }
       break;
 #ifdef HAVE_IPV6
     case 16:
-      stream_get (&attre->mp_nexthop_global, s, 16);
+      stream_get (&attr->mp_nexthop_global, s, 16);
       break;
     case 32:
-      stream_get (&attre->mp_nexthop_global, s, 16);
-      stream_get (&attre->mp_nexthop_local, s, 16);
-      if (! IN6_IS_ADDR_LINKLOCAL (&attre->mp_nexthop_local))
+      stream_get (&attr->mp_nexthop_global, s, 16);
+      stream_get (&attr->mp_nexthop_local, s, 16);
+      if (! IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_local))
 	{
 	  char buf1[INET6_ADDRSTRLEN];
 	  char buf2[INET6_ADDRSTRLEN];
 
 	  if (BGP_DEBUG (update, UPDATE_IN))
-	    zlog_debug ("%s got two nexthop %s %s but second one is not a link-local nexthop", peer->host,
-		       inet_ntop (AF_INET6, &attre->mp_nexthop_global,
+	    zlog_warn ("%s got two nexthop %s %s but second one is not a link-local nexthop", peer->host,
+		       inet_ntop (AF_INET6, &attr->mp_nexthop_global,
 				  buf1, INET6_ADDRSTRLEN),
-		       inet_ntop (AF_INET6, &attre->mp_nexthop_local,
+		       inet_ntop (AF_INET6, &attr->mp_nexthop_local,
 				  buf2, INET6_ADDRSTRLEN));
 
-	  attre->mp_nexthop_len = 16;
+	  attr->mp_nexthop_len = 16;
 	}
       break;
 #endif /* HAVE_IPV6 */
     default:
       zlog_info ("Wrong multiprotocol next hop length: %d", 
-		 attre->mp_nexthop_len);
+		 attr->mp_nexthop_len);
       return -1;
+      break;
     }
 
-  if (!STREAM_READABLE(s))
-    return -1;
+  snpa_num = stream_getc (s);
+
+  while (snpa_num--)
+    {
+      snpa_len = stream_getc (s);
+      stream_forward (s, (snpa_len + 1) >> 1);
+    }
   
-  {
-    u_char val; 
-    if ((val = stream_getc (s)))
-    zlog_warn ("%s sent non-zero value, %u, for defunct SNPA-length field",
-                peer->host, val);
-  }
-  
-  /* must have nrli_len, what is left of the attribute */
-  nlri_len = length - (stream_get_getp(s) - start);
-  if ((!nlri_len) || (nlri_len > STREAM_READABLE(s)))
-    return -1;
+  /* If peer is based on old draft-00. I read NLRI length from the
+     packet. */
+  if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+    {
+      bgp_size_t nlri_total_len;
+      nlri_total_len = stream_getw (s);
+    }
+
+  nlri_len = lim - stream_pnt (s);
  
   if (safi != BGP_SAFI_VPNV4)
     {
@@ -1128,32 +1014,30 @@ bgp_mp_reach_parse (struct peer *peer, bgp_size_t length, struct attr *attr,
   mp_update->nlri = stream_pnt (s);
   mp_update->length = nlri_len;
 
-  stream_forward_getp (s, nlri_len);
+  stream_forward (s, nlri_len);
 
   return 0;
 }
 
 /* Multiprotocol unreachable parse */
-static int
-bgp_mp_unreach_parse (struct peer *peer, bgp_size_t length, 
+int
+bgp_mp_unreach_parse (struct peer *peer, int length, 
 		      struct bgp_nlri *mp_withdraw)
 {
   struct stream *s;
   u_int16_t afi;
   u_char safi;
+  u_char *lim;
   u_int16_t withdraw_len;
   int ret;
 
   s = peer->ibuf;
-  
-#define BGP_MP_UNREACH_MIN_SIZE 3
-  if ((length > STREAM_READABLE(s)) || (length <  BGP_MP_UNREACH_MIN_SIZE))
-    return -1;
-  
+  lim = stream_pnt (s) + length;
+
   afi = stream_getw (s);
   safi = stream_getc (s);
-  
-  withdraw_len = length - BGP_MP_UNREACH_MIN_SIZE;
+
+  withdraw_len = lim - stream_pnt (s);
 
   if (safi != BGP_SAFI_VPNV4)
     {
@@ -1167,26 +1051,22 @@ bgp_mp_unreach_parse (struct peer *peer, bgp_size_t length,
   mp_withdraw->nlri = stream_pnt (s);
   mp_withdraw->length = withdraw_len;
 
-  stream_forward_getp (s, withdraw_len);
+  stream_forward (s, withdraw_len);
 
   return 0;
 }
 
 /* Extended Community attribute. */
-static int
+int
 bgp_attr_ext_communities (struct peer *peer, bgp_size_t length, 
 			  struct attr *attr, u_char flag)
 {
   if (length == 0)
-    {
-      if (attr->extra)
-        attr->extra->ecommunity = NULL;
-    }
+    attr->ecommunity = NULL;
   else
     {
-      (bgp_attr_extra_get (attr))->ecommunity = 
-        ecommunity_parse ((u_int8_t *)stream_pnt (peer->ibuf), length);
-      stream_forward_getp (peer->ibuf, length);
+      attr->ecommunity = ecommunity_parse (stream_pnt (peer->ibuf), length);
+      stream_forward (peer->ibuf, length);
     }
   attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_EXT_COMMUNITIES);
 
@@ -1194,24 +1074,19 @@ bgp_attr_ext_communities (struct peer *peer, bgp_size_t length,
 }
 
 /* BGP unknown attribute treatment. */
-static int
+int
 bgp_attr_unknown (struct peer *peer, struct attr *attr, u_char flag,
 		  u_char type, bgp_size_t length, u_char *startp)
 {
   bgp_size_t total;
   struct transit *transit;
-  struct attr_extra *attre;
 
-  if (BGP_DEBUG (normal, NORMAL))
-  zlog_debug ("%s Unknown attribute is received (type %d, length %d)",
-	      peer->host, type, length);
-  
   if (BGP_DEBUG (events, EVENTS))
-    zlog (peer->log, LOG_DEBUG, 
+    zlog (peer->log, LOG_INFO, 
 	  "Unknown attribute type %d length %d is received", type, length);
 
   /* Forward read pointer of input stream. */
-  stream_forward_getp (peer->ibuf, length);
+  stream_forward (peer->ibuf, length);
 
   /* Adjest total length to include type and length. */
   total = length + (CHECK_FLAG (flag, BGP_ATTR_FLAG_EXTLEN) ? 4 : 3);
@@ -1242,13 +1117,13 @@ bgp_attr_unknown (struct peer *peer, struct attr *attr, u_char flag,
   SET_FLAG (*startp, BGP_ATTR_FLAG_PARTIAL);
 
   /* Store transitive attribute to the end of attr->transit. */
-  if (! ((attre = bgp_attr_extra_get(attr))->transit) )
+  if (! attr->transit)
     {
-      attre->transit = XMALLOC (MTYPE_TRANSIT, sizeof (struct transit));
-      memset (attre->transit, 0, sizeof (struct transit));
+      attr->transit = XMALLOC (MTYPE_TRANSIT, sizeof (struct transit));
+      memset (attr->transit, 0, sizeof (struct transit));
     }
 
-  transit = attre->transit;
+  transit = attr->transit;
 
   if (transit->val)
     transit->val = XREALLOC (MTYPE_TRANSIT_VAL, transit->val, 
@@ -1288,9 +1163,8 @@ bgp_attr_parse (struct peer *peer, struct attr *attr, bgp_size_t size,
       /* Check remaining length check.*/
       if (endp - BGP_INPUT_PNT (peer) < BGP_ATTR_MIN_LEN)
 	{
-	  /* XXX warning: long int format, int arg (arg 5) */
 	  zlog (peer->log, LOG_WARNING, 
-		"%s error BGP attribute length %ld is smaller than min len",
+		"%s error BGP attribute length %d is smaller than min len",
 		peer->host, endp - STREAM_PNT (BGP_INPUT (peer)));
 
 	  bgp_notify_send (peer, 
@@ -1393,23 +1267,13 @@ bgp_attr_parse (struct peer *peer, struct attr *attr, bgp_size_t size,
 
       /* If error occured immediately return to the caller. */
       if (ret < 0)
-        {
-          zlog (peer->log, LOG_WARNING,
-                "%s: Attribute %s, parse error", 
-                peer->host, 
-                LOOKUP (attr_str, type));
-           bgp_notify_send (peer, 
-                            BGP_NOTIFY_UPDATE_ERR,
-                            BGP_NOTIFY_UPDATE_MAL_ATTR);
-           return ret;
-        }
+	return ret;
 
       /* Check the fetched length. */
       if (BGP_INPUT_PNT (peer) != attr_endp)
 	{
 	  zlog (peer->log, LOG_WARNING, 
-		"%s: BGP attribute %s, fetch error", 
-                peer->host, LOOKUP (attr_str, type));
+		"%s BGP attribute fetch error", peer->host);
 	  bgp_notify_send (peer, 
 			   BGP_NOTIFY_UPDATE_ERR, 
 			   BGP_NOTIFY_UPDATE_ATTR_LENG_ERR);
@@ -1421,8 +1285,7 @@ bgp_attr_parse (struct peer *peer, struct attr *attr, bgp_size_t size,
   if (BGP_INPUT_PNT (peer) != endp)
     {
       zlog (peer->log, LOG_WARNING, 
-	    "%s BGP attribute %s, length mismatch",
-	    peer->host, LOOKUP (attr_str, type));
+	    "%s BGP attribute length mismatch", peer->host);
       bgp_notify_send (peer, 
 		       BGP_NOTIFY_UPDATE_ERR, 
 		       BGP_NOTIFY_UPDATE_ATTR_LENG_ERR);
@@ -1430,8 +1293,8 @@ bgp_attr_parse (struct peer *peer, struct attr *attr, bgp_size_t size,
     }
 
   /* Finally intern unknown attribute. */
-  if (attr->extra && attr->extra->transit)
-    attr->extra->transit = transit_intern (attr->extra->transit);
+  if (attr->transit)
+    attr->transit = transit_intern (attr->transit);
 
   return 0;
 }
@@ -1478,15 +1341,14 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
 		      afi_t afi, safi_t safi, struct peer *from,
 		      struct prefix_rd *prd, u_char *tag)
 {
-  size_t cp;
-  unsigned int aspath_data_size;
+  unsigned long cp;
   struct aspath *aspath;
 
   if (! bgp)
     bgp = bgp_get_default ();
 
   /* Remember current pointer. */
-  cp = stream_get_endp (s);
+  cp = stream_get_putp (s);
 
   /* Origin attribute. */
   stream_putc (s, BGP_ATTR_FLAG_TRANS);
@@ -1499,8 +1361,9 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
   /* If remote-peer is EBGP */
   if (peer_sort (peer) == BGP_PEER_EBGP
       && (! CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_AS_PATH_UNCHANGED)
-	  || attr->aspath->segments == NULL)
-      && (! CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)))
+	  || attr->aspath->length == 0)
+      && ! (CHECK_FLAG (from->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)
+	    && CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)))
     {    
       aspath = aspath_dup (attr->aspath);
 
@@ -1528,20 +1391,19 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
     aspath = attr->aspath;
 
   /* AS path attribute extended length bit check. */
-  aspath_data_size = aspath_size (aspath);
-  if (aspath_data_size > 255)
+  if (aspath->length > 255)
     {
       stream_putc (s, BGP_ATTR_FLAG_TRANS|BGP_ATTR_FLAG_EXTLEN);
       stream_putc (s, BGP_ATTR_AS_PATH);
-      stream_putw (s, aspath_data_size);
+      stream_putw (s, aspath->length);
     }
   else
     {
       stream_putc (s, BGP_ATTR_FLAG_TRANS);
-      stream_putc (s, BGP_ATTR_AS_PATH);
-      stream_putc (s, aspath_data_size);
+      stream_putc(s, BGP_ATTR_AS_PATH);
+      stream_putc (s, aspath->length);
     }
-  aspath_put (s, aspath);
+  stream_put (s, aspath->data, aspath->length);
 
   if (aspath != attr->aspath)
     aspath_free (aspath);
@@ -1593,12 +1455,11 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
   /* Aggregator. */
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR))
     {
-      assert (attr->extra);
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS);
       stream_putc (s, BGP_ATTR_AGGREGATOR);
       stream_putc (s, 6);
-      stream_putw (s, attr->extra->aggregator_as);
-      stream_put_ipv4 (s, attr->extra->aggregator_addr.s_addr);
+      stream_putw (s, attr->aggregator_as);
+      stream_put_ipv4 (s, attr->aggregator_addr.s_addr);
     }
 
   /* Community attribute. */
@@ -1625,32 +1486,34 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
       && from
       && peer_sort (from) == BGP_PEER_IBGP)
     {
-      assert (attr->extra);
-      
       /* Originator ID. */
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
       stream_putc (s, BGP_ATTR_ORIGINATOR_ID);
       stream_putc (s, 4);
 
       if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-	stream_put_in_addr (s, &attr->extra->originator_id);
-      else 
-        stream_put_in_addr (s, &from->remote_id);
+	stream_put_in_addr (s, &attr->originator_id);
+      else
+	{
+	  if (from)
+	    stream_put_in_addr (s, &from->remote_id);
+	  else
+	    stream_put_in_addr (s, &attr->originator_id);
+	}
 
       /* Cluster list. */
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
       stream_putc (s, BGP_ATTR_CLUSTER_LIST);
       
-      if (attr->extra->cluster)
+      if (attr->cluster)
 	{
-	  stream_putc (s, attr->extra->cluster->length + 4);
+	  stream_putc (s, attr->cluster->length + 4);
 	  /* If this peer configuration's parent BGP has cluster_id. */
 	  if (bgp->config & BGP_CONFIG_CLUSTER_ID)
 	    stream_put_in_addr (s, &bgp->cluster_id);
 	  else
 	    stream_put_in_addr (s, &bgp->router_id);
-	  stream_put (s, attr->extra->cluster->list, 
-	              attr->extra->cluster->length);
+	  stream_put (s, attr->cluster->list, attr->cluster->length);
 	}
       else
 	{
@@ -1668,46 +1531,56 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
   if (p->family == AF_INET6)
     {
       unsigned long sizep;
-      struct attr_extra *attre = attr->extra;
-      
-      assert (attr->extra);
-      
+      unsigned long draftp = 0;
+
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
       stream_putc (s, BGP_ATTR_MP_REACH_NLRI);
-      sizep = stream_get_endp (s);
-      stream_putc (s, 0);	/* Marker: Attribute length. */
+      sizep = stream_get_putp (s);
+      stream_putc (s, 0);	/* Length of this attribute. */
       stream_putw (s, AFI_IP6);	/* AFI */
       stream_putc (s, safi);	/* SAFI */
 
-      stream_putc (s, attre->mp_nexthop_len);
+      stream_putc (s, attr->mp_nexthop_len);
 
-      if (attre->mp_nexthop_len == 16)
-	stream_put (s, &attre->mp_nexthop_global, 16);
-      else if (attre->mp_nexthop_len == 32)
+      if (attr->mp_nexthop_len == 16)
+	stream_put (s, &attr->mp_nexthop_global, 16);
+      else if (attr->mp_nexthop_len == 32)
 	{
-	  stream_put (s, &attre->mp_nexthop_global, 16);
-	  stream_put (s, &attre->mp_nexthop_local, 16);
+	  stream_put (s, &attr->mp_nexthop_global, 16);
+	  stream_put (s, &attr->mp_nexthop_local, 16);
 	}
       
       /* SNPA */
       stream_putc (s, 0);
 
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	{
+	  draftp = stream_get_putp (s);
+	  stream_putw (s, 0);
+	}
+      
       /* Prefix write. */
       stream_put_prefix (s, p);
 
       /* Set MP attribute length. */
-      stream_putc_at (s, sizep, (stream_get_endp (s) - sizep) - 1);
+      stream_putc_at (s, sizep, (stream_get_putp (s) - sizep) - 1);
+
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	stream_putw_at (s, draftp, (stream_get_putp (s) - draftp) - 2);
     }
 #endif /* HAVE_IPV6 */
 
   if (p->family == AF_INET && safi == SAFI_MULTICAST)
     {
       unsigned long sizep;
+      unsigned long draftp = 0;
 
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
       stream_putc (s, BGP_ATTR_MP_REACH_NLRI);
-      sizep = stream_get_endp (s);
-      stream_putc (s, 0);	/* Marker: Attribute Length. */
+      sizep = stream_get_putp (s);
+      stream_putc (s, 0);	/* Length of this attribute. */
       stream_putw (s, AFI_IP);	/* AFI */
       stream_putc (s, SAFI_MULTICAST);	/* SAFI */
 
@@ -1717,20 +1590,32 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
       /* SNPA */
       stream_putc (s, 0);
 
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	{
+	  draftp = stream_get_putp (s);
+	  stream_putw (s, 0);
+	}
+      
       /* Prefix write. */
       stream_put_prefix (s, p);
 
       /* Set MP attribute length. */
-      stream_putc_at (s, sizep, (stream_get_endp (s) - sizep) - 1);
+      stream_putc_at (s, sizep, (stream_get_putp (s) - sizep) - 1);
+
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	stream_putw_at (s, draftp, (stream_get_putp (s) - draftp) - 2);
     }
 
   if (p->family == AF_INET && safi == SAFI_MPLS_VPN)
     {
       unsigned long sizep;
+      unsigned long draftp = 0;
 
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
       stream_putc (s, BGP_ATTR_MP_REACH_NLRI);
-      sizep = stream_get_endp (s);
+      sizep = stream_get_putp (s);
       stream_putc (s, 0);	/* Length of this attribute. */
       stream_putw (s, AFI_IP);	/* AFI */
       stream_putc (s, BGP_SAFI_VPNV4);	/* SAFI */
@@ -1738,11 +1623,18 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
       stream_putc (s, 12);
       stream_putl (s, 0);
       stream_putl (s, 0);
-      stream_put (s, &attr->extra->mp_nexthop_global_in, 4);
+      stream_put (s, &attr->mp_nexthop_global_in, 4);
 
       /* SNPA */
       stream_putc (s, 0);
 
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	{
+	  draftp = stream_get_putp (s);
+	  stream_putw (s, 0);
+	}
+      
       /* Tag, RD, Prefix write. */
       stream_putc (s, p->prefixlen + 88);
       stream_put (s, tag, 3);
@@ -1750,87 +1642,38 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
       stream_put (s, &p->u.prefix, PSIZE (p->prefixlen));
 
       /* Set MP attribute length. */
-      stream_putc_at (s, sizep, (stream_get_endp (s) - sizep) - 1);
+      stream_putc_at (s, sizep, (stream_get_putp (s) - sizep) - 1);
+
+      /* In case of old draft BGP-4+. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	stream_putw_at (s, draftp, (stream_get_putp (s) - draftp) - 2);
     }
 
   /* Extended Communities attribute. */
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_SEND_EXT_COMMUNITY) 
       && (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_EXT_COMMUNITIES)))
     {
-      struct attr_extra *attre = attr->extra;
-      
-      assert (attre);
-      
-      if (peer_sort (peer) == BGP_PEER_IBGP 
-          || peer_sort (peer) == BGP_PEER_CONFED)
+      if (attr->ecommunity->size * 8 > 255)
 	{
-	  if (attre->ecommunity->size * 8 > 255)
-	    {
-	      stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS|BGP_ATTR_FLAG_EXTLEN);
-	      stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
-	      stream_putw (s, attre->ecommunity->size * 8);
-	    }
-	  else
-	    {
-	      stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS);
-	      stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
-	      stream_putc (s, attre->ecommunity->size * 8);
-	    }
-	  stream_put (s, attre->ecommunity->val, attre->ecommunity->size * 8);
+	  stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS|BGP_ATTR_FLAG_EXTLEN);
+	  stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
+	  stream_putw (s, attr->ecommunity->size * 8);
 	}
       else
 	{
-	  u_int8_t *pnt;
-	  int tbit;
-	  int ecom_tr_size = 0;
-	  int i;
-
-	  for (i = 0; i < attre->ecommunity->size; i++)
-	    {
-	      pnt = attre->ecommunity->val + (i * 8);
-	      tbit = *pnt;
-
-	      if (CHECK_FLAG (tbit, ECOMMUNITY_FLAG_NON_TRANSITIVE))
-		continue;
-
-	      ecom_tr_size++;
-	    }
-
-	  if (ecom_tr_size)
-	    {
-	      if (ecom_tr_size * 8 > 255)
-		{
-		  stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS|BGP_ATTR_FLAG_EXTLEN);
-		  stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
-		  stream_putw (s, ecom_tr_size * 8);
-		}
-	      else
-		{
-		  stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS);
-		  stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
-		  stream_putc (s, ecom_tr_size * 8);
-		}
-
-	      for (i = 0; i < attre->ecommunity->size; i++)
-		{
-		  pnt = attre->ecommunity->val + (i * 8);
-		  tbit = *pnt;
-
-		  if (CHECK_FLAG (tbit, ECOMMUNITY_FLAG_NON_TRANSITIVE))
-		    continue;
-
-		  stream_put (s, pnt, 8);
-		}
-	    }
+	  stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS);
+	  stream_putc (s, BGP_ATTR_EXT_COMMUNITIES);
+	  stream_putc (s, attr->ecommunity->size * 8);
 	}
+      stream_put (s, attr->ecommunity->val, attr->ecommunity->size * 8);
     }
 
   /* Unknown transit attribute. */
-  if (attr->extra && attr->extra->transit)
-    stream_put (s, attr->extra->transit->val, attr->extra->transit->length);
+  if (attr->transit)
+    stream_put (s, attr->transit->val, attr->transit->length);
 
   /* Return total size of attribute. */
-  return stream_get_endp (s) - cp;
+  return stream_get_putp (s) - cp;
 }
 
 bgp_size_t
@@ -1842,12 +1685,12 @@ bgp_packet_withdraw (struct peer *peer, struct stream *s, struct prefix *p,
   unsigned long attrlen_pnt;
   bgp_size_t size;
 
-  cp = stream_get_endp (s);
+  cp = stream_get_putp (s);
 
   stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
   stream_putc (s, BGP_ATTR_MP_UNREACH_NLRI);
 
-  attrlen_pnt = stream_get_endp (s);
+  attrlen_pnt = stream_get_putp (s);
   stream_putc (s, 0);		/* Length of this attribute. */
 
   stream_putw (s, family2afi (p->family));
@@ -1873,15 +1716,15 @@ bgp_packet_withdraw (struct peer *peer, struct stream *s, struct prefix *p,
     }
 
   /* Set MP attribute length. */
-  size = stream_get_endp (s) - attrlen_pnt - 1;
+  size = stream_get_putp (s) - attrlen_pnt - 1;
   stream_putc_at (s, attrlen_pnt, size);
 
-  return stream_get_endp (s) - cp;
+  return stream_get_putp (s) - cp;
 }
 
 /* Initialization of attribute. */
 void
-bgp_attr_init (void)
+bgp_attr_init ()
 {
   void attrhash_init ();
 
@@ -1895,16 +1738,14 @@ bgp_attr_init (void)
 
 /* Make attribute packet. */
 void
-bgp_dump_routes_attr (struct stream *s, struct attr *attr, 
-                      struct prefix *prefix)
+bgp_dump_routes_attr (struct stream *s, struct attr *attr)
 {
   unsigned long cp;
   unsigned long len;
-  unsigned int aspathlen;
   struct aspath *aspath;
 
   /* Remember current pointer. */
-  cp = stream_get_endp (s);
+  cp = stream_get_putp (s);
 
   /* Place holder of length. */
   stream_putw (s, 0);
@@ -1917,33 +1758,25 @@ bgp_dump_routes_attr (struct stream *s, struct attr *attr,
 
   aspath = attr->aspath;
 
-  if ( (aspathlen = aspath_size (aspath)) > 255 )
+  if (aspath->length > 255)
     {
       stream_putc (s, BGP_ATTR_FLAG_TRANS|BGP_ATTR_FLAG_EXTLEN);
       stream_putc (s, BGP_ATTR_AS_PATH);
-      stream_putw (s, aspathlen);
+      stream_putw (s, aspath->length);
     }
   else
     {
       stream_putc (s, BGP_ATTR_FLAG_TRANS);
       stream_putc (s, BGP_ATTR_AS_PATH);
-      stream_putc (s, aspathlen);
+      stream_putc (s, aspath->length);
     }
-  aspath_put (s, aspath);
+  stream_put (s, aspath->data, aspath->length);
 
   /* Nexthop attribute. */
-  /* If it's an IPv6 prefix, don't dump the IPv4 nexthop to save space */
-  if(prefix != NULL
-#ifdef HAVE_IPV6
-     && prefix->family != AF_INET6
-#endif /* HAVE_IPV6 */
-     )
-    {
-      stream_putc (s, BGP_ATTR_FLAG_TRANS);
-      stream_putc (s, BGP_ATTR_NEXT_HOP);
-      stream_putc (s, 4);
-      stream_put_ipv4 (s, attr->nexthop.s_addr);
-    }
+  stream_putc (s, BGP_ATTR_FLAG_TRANS);
+  stream_putc (s, BGP_ATTR_NEXT_HOP);
+  stream_putc (s, 4);
+  stream_put_ipv4 (s, attr->nexthop.s_addr);
 
   /* MED attribute. */
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC))
@@ -1974,12 +1807,11 @@ bgp_dump_routes_attr (struct stream *s, struct attr *attr,
   /* Aggregator. */
   if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR))
     {
-      assert (attr->extra);
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL|BGP_ATTR_FLAG_TRANS);
       stream_putc (s, BGP_ATTR_AGGREGATOR);
       stream_putc (s, 6);
-      stream_putw (s, attr->extra->aggregator_as);
-      stream_put_ipv4 (s, attr->extra->aggregator_addr.s_addr);
+      stream_putw (s, attr->aggregator_as);
+      stream_put_ipv4 (s, attr->aggregator_addr.s_addr);
     }
 
   /* Community attribute. */
@@ -2000,41 +1832,7 @@ bgp_dump_routes_attr (struct stream *s, struct attr *attr,
       stream_put (s, attr->community->val, attr->community->size * 4);
     }
 
-#ifdef HAVE_IPV6
-  /* Add a MP_NLRI attribute to dump the IPv6 next hop */
-  if (prefix != NULL && prefix->family == AF_INET6 && attr->extra &&
-     (attr->extra->mp_nexthop_len == 16 || attr->extra->mp_nexthop_len == 32) )
-    {
-      int sizep;
-      struct attr_extra *attre = attr->extra;
-      
-      stream_putc(s, BGP_ATTR_FLAG_OPTIONAL);
-      stream_putc(s, BGP_ATTR_MP_REACH_NLRI);
-      sizep = stream_get_endp (s);
-
-      /* MP header */
-      stream_putc (s, 0);		/* Marker: Attribute length. */
-      stream_putw(s, AFI_IP6);		/* AFI */
-      stream_putc(s, SAFI_UNICAST);	/* SAFI */
-
-      /* Next hop */
-      stream_putc(s, attre->mp_nexthop_len);
-      stream_put(s, &attre->mp_nexthop_global, 16);
-      if (attre->mp_nexthop_len == 32)
-        stream_put(s, &attre->mp_nexthop_local, 16);
-
-      /* SNPA */
-      stream_putc(s, 0);
-
-      /* Prefix */
-      stream_put_prefix(s, prefix);
-
-      /* Set MP attribute length. */
-      stream_putc_at (s, sizep, (stream_get_endp (s) - sizep) - 1);
-    }
-#endif /* HAVE_IPV6 */
-
   /* Return total size of attribute. */
-  len = stream_get_endp (s) - cp - 2;
+  len = stream_get_putp (s) - cp - 2;
   stream_putw_at (s, cp, len);
 }

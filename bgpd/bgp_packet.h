@@ -18,13 +18,10 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_PACKET_H
-#define _QUAGGA_BGP_PACKET_H
-
-#define BGP_NLRI_LENGTH       1U
-#define BGP_TOTAL_ATTR_LEN    2U
-#define BGP_UNFEASIBLE_LEN    2U
-#define BGP_WRITE_PACKET_MAX 10U
+#define BGP_NLRI_LENGTH       1
+#define BGP_TOTAL_ATTR_LEN    2
+#define BGP_UNFEASIBLE_LEN    2
+#define BGP_WRITE_PACKET_MAX 10
 
 /* When to refresh */
 #define REFRESH_IMMEDIATE 1
@@ -38,18 +35,15 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #define ORF_COMMON_PART_DENY       0x20 
 
 /* Packet send and receive function prototypes. */
-extern int bgp_read (struct thread *);
-extern int bgp_write (struct thread *);
+int bgp_read (struct thread *);
+int bgp_write (struct thread *);
 
-extern void bgp_keepalive_send (struct peer *);
-extern void bgp_open_send (struct peer *);
-extern void bgp_notify_send (struct peer *, u_int8_t, u_int8_t);
-extern void bgp_notify_send_with_data (struct peer *, u_int8_t, u_int8_t, 
-                                u_int8_t *, size_t);
-extern void bgp_route_refresh_send (struct peer *, afi_t, safi_t, u_char, u_char, int);
-extern void bgp_capability_send (struct peer *, afi_t, safi_t, int, int);
-extern void bgp_default_update_send (struct peer *, struct attr *,
+void bgp_keepalive_send (struct peer *);
+void bgp_open_send (struct peer *);
+void bgp_notify_send (struct peer *, u_char, u_char);
+void bgp_notify_send_with_data (struct peer *, u_char, u_char, u_char *, size_t);
+void bgp_route_refresh_send (struct peer *, afi_t, safi_t, u_char, u_char, int);
+void bgp_capability_send (struct peer *, afi_t, safi_t, int, int);
+void bgp_default_update_send (struct peer *, struct attr *,
 			      afi_t, safi_t, struct peer *);
-extern void bgp_default_withdraw_send (struct peer *, afi_t, safi_t);
-
-#endif /* _QUAGGA_BGP_PACKET_H */
+void bgp_default_withdraw_send (struct peer *, afi_t, safi_t);

@@ -34,7 +34,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "log.h"
 #include "plist.h"
 #include "linklist.h"
-#include "workqueue.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_table.h"
@@ -64,8 +63,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
 
-extern struct in_addr router_id_zebra;
-
 /* BGP process wide configuration pointer to export.  */
 struct bgp_master *bm;
 
@@ -85,6 +82,7 @@ bgp_option_set (int flag)
       break;
     default:
       return BGP_ERR_INVALID_FLAG;
+      break;
     }
   return 0;
 }
@@ -104,6 +102,7 @@ bgp_option_unset (int flag)
       break;
     default:
       return BGP_ERR_INVALID_FLAG;
+      break;
     }
   return 0;
 }
@@ -159,7 +158,7 @@ int
 bgp_router_id_set (struct bgp *bgp, struct in_addr *id)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (bgp_config_check (bgp, BGP_CONFIG_ROUTER_ID)
       && IPV4_ADDR_SAME (&bgp->router_id, id))
@@ -169,26 +168,56 @@ bgp_router_id_set (struct bgp *bgp, struct in_addr *id)
   bgp_config_set (bgp, BGP_CONFIG_ROUTER_ID);
 
   /* Set all peer's local identifier with this value. */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       IPV4_ADDR_COPY (&peer->local_id, id);
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_RID_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
     }
   return 0;
 }
 
+/* Unset BGP router identifier. */
+int
+bgp_router_id_unset (struct bgp *bgp)
+{
+  struct peer *peer;
+  struct listnode *nn;
+
+  if (! bgp_config_check (bgp, BGP_CONFIG_ROUTER_ID))
+    return 0;
+
+  bgp->router_id.s_addr = 0;
+  bgp_config_unset (bgp, BGP_CONFIG_ROUTER_ID);
+
+  /* Clear peer router id configuration.  */
+  LIST_LOOP (bgp->peer, peer, nn)
+    {
+      peer->local_id.s_addr = 0;
+    }
+
+  /* Set router-id from interface's address. */
+  bgp_if_update_all ();
+
+  /* Reset all BGP sessions to use new router-id.  */
+  LIST_LOOP (bgp->peer, peer, nn)
+    {
+      if (peer->status == Established)
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
+    }
+
+  return 0;
+}
+
 /* BGP's cluster-id control. */
 int
 bgp_cluster_id_set (struct bgp *bgp, struct in_addr *cluster_id)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (bgp_config_check (bgp, BGP_CONFIG_CLUSTER_ID)
       && IPV4_ADDR_SAME (&bgp->cluster_id, cluster_id))
@@ -198,17 +227,14 @@ bgp_cluster_id_set (struct bgp *bgp, struct in_addr *cluster_id)
   bgp_config_set (bgp, BGP_CONFIG_CLUSTER_ID);
 
   /* Clear all IBGP peer. */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (peer_sort (peer) != BGP_PEER_IBGP)
 	continue;
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_CLID_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
     }
   return 0;
 }
@@ -217,7 +243,7 @@ int
 bgp_cluster_id_unset (struct bgp *bgp)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! bgp_config_check (bgp, BGP_CONFIG_CLUSTER_ID))
     return 0;
@@ -226,17 +252,14 @@ bgp_cluster_id_unset (struct bgp *bgp)
   bgp_config_unset (bgp, BGP_CONFIG_CLUSTER_ID);
 
   /* Clear all IBGP peer. */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (peer_sort (peer) != BGP_PEER_IBGP)
 	continue;
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_CLID_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
     }
   return 0;
 }
@@ -266,7 +289,7 @@ int
 bgp_confederation_id_set (struct bgp *bgp, as_t as)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   int already_confed;
 
   if (as == 0)
@@ -280,7 +303,7 @@ bgp_confederation_id_set (struct bgp *bgp, as_t as)
   /* If we were doing confederation already, this is just an external
      AS change.  Just Reset EBGP sessions, not CONFED sessions.  If we
      were not doing confederation before, reset all EBGP sessions.  */
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       /* We're looking for peers who's AS is not local or part of our
 	 confederation.  */
@@ -290,12 +313,8 @@ bgp_confederation_id_set (struct bgp *bgp, as_t as)
 	    {
 	      peer->local_as = as;
 	      if (peer->status == Established)
-               {
-                 peer->last_reset = PEER_DOWN_CONFED_ID_CHANGE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                              BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
-
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	      else
 		BGP_EVENT_ADD (peer, BGP_Stop);
 	    }
@@ -310,11 +329,8 @@ bgp_confederation_id_set (struct bgp *bgp, as_t as)
 	      if (peer_sort (peer) == BGP_PEER_EBGP)
 		peer->local_as = as;
 	      if (peer->status == Established)
-               {
-                 peer->last_reset = PEER_DOWN_CONFED_ID_CHANGE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                              BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	      else
 		BGP_EVENT_ADD (peer, BGP_Stop);
 	    }
@@ -327,24 +343,20 @@ int
 bgp_confederation_id_unset (struct bgp *bgp)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   bgp->confed_id = 0;
   bgp_config_unset (bgp, BGP_CONFIG_CONFEDERATION);
       
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       /* We're looking for peers who's AS is not local */
       if (peer_sort (peer) != BGP_PEER_IBGP)
 	{
 	  peer->local_as = bgp->as;
 	  if (peer->status == Established)
-           {
-             peer->last_reset = PEER_DOWN_CONFED_ID_CHANGE;
-             bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                              BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-           }
-
+	    bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			     BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	  else
 	    BGP_EVENT_ADD (peer, BGP_Stop);
 	}
@@ -373,7 +385,7 @@ int
 bgp_confederation_peers_add (struct bgp *bgp, as_t as)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! bgp)
     return BGP_ERR_INVALID_BGP;
@@ -397,17 +409,14 @@ bgp_confederation_peers_add (struct bgp *bgp, as_t as)
 
   if (bgp_config_check (bgp, BGP_CONFIG_CONFEDERATION))
     {
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, nn)
 	{
 	  if (peer->as == as)
 	    {
 	      peer->local_as = bgp->as;
 	      if (peer->status == Established)
-               {
-                 peer->last_reset = PEER_DOWN_CONFED_PEER_CHANGE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                                  BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	      else
 	        BGP_EVENT_ADD (peer, BGP_Stop);
 	    }
@@ -423,7 +432,7 @@ bgp_confederation_peers_remove (struct bgp *bgp, as_t as)
   int i;
   int j;
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! bgp)
     return -1;
@@ -453,17 +462,14 @@ bgp_confederation_peers_remove (struct bgp *bgp, as_t as)
      CONFED */
   if (bgp_config_check (bgp, BGP_CONFIG_CONFEDERATION))
     {
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, nn)
 	{
 	  if (peer->as == as)
 	    {
 	      peer->local_as = bgp->confed_id;
 	      if (peer->status == Established)
-               {
-                 peer->last_reset = PEER_DOWN_CONFED_PEER_CHANGE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                                  BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	      else
 		BGP_EVENT_ADD (peer, BGP_Stop);
 	    }
@@ -480,6 +486,7 @@ bgp_default_local_preference_set (struct bgp *bgp, u_int32_t local_pref)
   if (! bgp)
     return -1;
 
+  bgp_config_set (bgp, BGP_CONFIG_DEFAULT_LOCAL_PREF);
   bgp->default_local_pref = local_pref;
 
   return 0;
@@ -491,28 +498,12 @@ bgp_default_local_preference_unset (struct bgp *bgp)
   if (! bgp)
     return -1;
 
+  bgp_config_unset (bgp, BGP_CONFIG_DEFAULT_LOCAL_PREF);
   bgp->default_local_pref = BGP_DEFAULT_LOCAL_PREF;
 
   return 0;
 }
 
-/* If peer is RSERVER_CLIENT in at least one address family and is not member
-    of a peer_group for that family, return 1.
-    Used to check wether the peer is included in list bgp->rsclient. */
-int
-peer_rsclient_active (struct peer *peer)
-{
-  int i;
-  int j;
-
-  for (i=AFI_IP; i < AFI_MAX; i++)
-    for (j=SAFI_UNICAST; j < SAFI_MAX; j++)
-      if (CHECK_FLAG(peer->af_flags[i][j], PEER_FLAG_RSERVER_CLIENT)
-            && ! peer->af_group[i][j])
-        return 1;
-  return 0;
-}
-
 /* Peer comparison function for sorting.  */
 static int
 peer_cmp (struct peer *p1, struct peer *p2)
@@ -554,9 +545,6 @@ peer_af_flag_reset (struct peer *peer, afi_t afi, safi_t safi)
 	  free (filter->aslist[i].name);
 	  filter->aslist[i].name = NULL;
 	}
-   }
- for (i = RMAP_IN; i < RMAP_MAX; i++)
-       {
       if (filter->map[i].name)
 	{
 	  free (filter->map[i].name);
@@ -599,11 +587,10 @@ peer_af_flag_reset (struct peer *peer, afi_t afi, safi_t safi)
 
   /* Clear neighbor maximum-prefix */
   peer->pmax[afi][safi] = 0;
-  peer->pmax_threshold[afi][safi] = MAXIMUM_PREFIX_THRESHOLD_DEFAULT;
 }
 
 /* peer global config reset */
-static void
+void
 peer_global_config_reset (struct peer *peer)
 {
   peer->weight = 0;
@@ -684,101 +671,18 @@ peer_sort (struct peer *peer)
     }
 }
 
-static inline void
-peer_free (struct peer *peer)
-{
-  assert (peer->status == Deleted);
-  
-  /* this /ought/ to have been done already through bgp_stop earlier,
-   * but just to be sure.. 
-   */
-  bgp_timer_set (peer);
-  BGP_READ_OFF (peer->t_read);
-  BGP_WRITE_OFF (peer->t_write);
-  BGP_EVENT_FLUSH (peer);
-  
-  if (peer->desc)
-    XFREE (MTYPE_PEER_DESC, peer->desc);
-  
-  /* Free allocated host character. */
-  if (peer->host)
-    XFREE (MTYPE_BGP_PEER_HOST, peer->host);
-  
-  /* Update source configuration.  */
-  if (peer->update_source)
-    sockunion_free (peer->update_source);
-  
-  if (peer->update_if)
-    XFREE (MTYPE_PEER_UPDATE_SOURCE, peer->update_if);
-    
-  if (peer->clear_node_queue)
-    work_queue_free (peer->clear_node_queue);
-  
-  bgp_sync_delete (peer);
-  memset (peer, 0, sizeof (struct peer));
-  
-  XFREE (MTYPE_BGP_PEER, peer);
-}
-                                                
-/* increase reference count on a struct peer */
-struct peer *
-peer_lock (struct peer *peer)
-{
-  assert (peer && (peer->lock >= 0));
-  assert (peer->status != Deleted);
-    
-  peer->lock++;
-  
-  return peer;
-}
-
-/* decrease reference count on a struct peer
- * struct peer is freed and NULL returned if last reference
- */
-struct peer *
-peer_unlock (struct peer *peer)
-{
-  assert (peer && (peer->lock > 0));
-  
-  peer->lock--;
-  
-  if (peer->lock == 0)
-    {
-#if 0
-      zlog_debug ("unlocked and freeing");
-      zlog_backtrace (LOG_DEBUG);
-#endif
-      peer_free (peer);
-      return NULL;
-    }
-
-#if 0
-  if (peer->lock == 1)
-    {
-      zlog_debug ("unlocked to 1");
-      zlog_backtrace (LOG_DEBUG);
-    }
-#endif
-
-  return peer;
-}
-  
-/* Allocate new peer object, implicitely locked.  */
+/* Allocate new peer object.  */
 static struct peer *
-peer_new (struct bgp *bgp)
+peer_new ()
 {
   afi_t afi;
   safi_t safi;
   struct peer *peer;
   struct servent *sp;
-  
-  /* bgp argument is absolutely required */
-  assert (bgp);
-  if (!bgp)
-    return NULL;
-  
+
   /* Allocate new peer. */
-  peer = XCALLOC (MTYPE_BGP_PEER, sizeof (struct peer));
+  peer = XMALLOC (MTYPE_BGP_PEER, sizeof (struct peer));
+  memset (peer, 0, sizeof (struct peer));
 
   /* Set default value. */
   peer->fd = -1;
@@ -787,9 +691,8 @@ peer_new (struct bgp *bgp)
   peer->v_asorig = BGP_DEFAULT_ASORIGINATE;
   peer->status = Idle;
   peer->ostatus = Idle;
+  peer->version = BGP_VERSION_4;
   peer->weight = 0;
-  peer->bgp = bgp;
-  peer = peer_lock (peer); /* initial reference */
 
   /* Set default flags.  */
   for (afi = AFI_IP; afi < AFI_MAX; afi++)
@@ -819,7 +722,7 @@ peer_new (struct bgp *bgp)
 }
 
 /* Create new BGP peer.  */
-static struct peer *
+struct peer *
 peer_create (union sockunion *su, struct bgp *bgp, as_t local_as,
 	     as_t remote_as, afi_t afi, safi_t safi)
 {
@@ -827,7 +730,8 @@ peer_create (union sockunion *su, struct bgp *bgp, as_t local_as,
   struct peer *peer;
   char buf[SU_ADDRSTRLEN];
 
-  peer = peer_new (bgp);
+  peer = peer_new ();
+  peer->bgp = bgp;
   peer->su = *su;
   peer->local_as = local_as;
   peer->as = remote_as;
@@ -838,8 +742,6 @@ peer_create (union sockunion *su, struct bgp *bgp, as_t local_as,
     peer->v_routeadv = BGP_DEFAULT_IBGP_ROUTEADV;
   else
     peer->v_routeadv = BGP_DEFAULT_EBGP_ROUTEADV;
-    
-  peer = peer_lock (peer); /* bgp peer list reference */
   listnode_add_sort (bgp->peer, peer);
 
   active = peer_active (peer);
@@ -850,15 +752,12 @@ peer_create (union sockunion *su, struct bgp *bgp, as_t local_as,
   /* Last read time set */
   peer->readtime = time (NULL);
 
-  /* Last reset time set */
-  peer->resettime = time (NULL);
-
   /* Default TTL set. */
   peer->ttl = (peer_sort (peer) == BGP_PEER_IBGP ? 255 : 1);
 
   /* Make peer's address string. */
   sockunion2str (su, buf, SU_ADDRSTRLEN);
-  peer->host = XSTRDUP (MTYPE_BGP_PEER_HOST, buf);
+  peer->host = strdup (buf);
 
   /* Set up peer's events and timers. */
   if (! active && peer_active (peer))
@@ -873,16 +772,15 @@ peer_create_accept (struct bgp *bgp)
 {
   struct peer *peer;
 
-  peer = peer_new (bgp);
-  
-  peer = peer_lock (peer); /* bgp peer list reference */
+  peer = peer_new ();
+  peer->bgp = bgp;
   listnode_add_sort (bgp->peer, peer);
 
   return peer;
 }
 
 /* Change peer's AS number.  */
-static void
+void
 peer_as_change (struct peer *peer, as_t as)
 {
   int type;
@@ -891,23 +789,13 @@ peer_as_change (struct peer *peer, as_t as)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_REMOTE_AS_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
     }
   type = peer_sort (peer);
   peer->as = as;
-
-  if (bgp_config_check (peer->bgp, BGP_CONFIG_CONFEDERATION)
-      && ! bgp_confederation_peers_check (peer->bgp, as)
-      && peer->bgp->as != as)
-    peer->local_as = peer->bgp->confed_id;
-  else
-    peer->local_as = peer->bgp->as;
 
   /* Advertisement-interval reset */
   if (peer_sort (peer) == BGP_PEER_IBGP)
@@ -1050,11 +938,8 @@ peer_activate (struct peer *peer, afi_t afi, safi_t safi)
 		    }
 		}
 	      else
-               {
-                 peer->last_reset = PEER_DOWN_AF_ACTIVATE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                                  BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	    }
 	}
     }
@@ -1066,13 +951,13 @@ peer_deactivate (struct peer *peer, afi_t afi, safi_t safi)
 {
   struct peer_group *group;
   struct peer *peer1;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       group = peer->group;
 
-      for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer1))
+      LIST_LOOP (group->peer, peer1, nn)
 	{
 	  if (peer1->af_group[afi][safi])
 	    return BGP_ERR_PEER_GROUP_MEMBER_EXISTS;
@@ -1109,62 +994,18 @@ peer_deactivate (struct peer *peer, afi_t afi, safi_t safi)
 		  peer->pcount[afi][safi] = 0;
 		}
 	      else
-               {
-                 peer->last_reset = PEER_DOWN_NEIGHBOR_DELETE;
-                 bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                                  BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-               }
+		bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+				 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	    }
 	  else
-           {
-             peer->last_reset = PEER_DOWN_NEIGHBOR_DELETE;
-             bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                              BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-           }
+	    bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			     BGP_NOTIFY_CEASE_CONFIG_CHANGE);
 	}
     }
   return 0;
 }
 
-void
-peer_nsf_stop (struct peer *peer)
-{
-  afi_t afi;
-  safi_t safi;
-
-  UNSET_FLAG (peer->sflags, PEER_STATUS_NSF_WAIT);
-  UNSET_FLAG (peer->sflags, PEER_STATUS_NSF_MODE);
-
-  for (afi = AFI_IP ; afi < AFI_MAX ; afi++)
-    for (safi = SAFI_UNICAST ; safi < SAFI_UNICAST_MULTICAST ; safi++)
-      peer->nsf[afi][safi] = 0;
-
-  if (peer->t_gr_restart)
-    {
-      BGP_TIMER_OFF (peer->t_gr_restart);
-      if (BGP_DEBUG (events, EVENTS))
-	zlog_debug ("%s graceful restart timer stopped", peer->host);
-    }
-  if (peer->t_gr_stale)
-    {
-      BGP_TIMER_OFF (peer->t_gr_stale);
-      if (BGP_DEBUG (events, EVENTS))
-	zlog_debug ("%s graceful restart stalepath timer stopped", peer->host);
-    }
-  bgp_clear_route_all (peer);
-}
-
-/* Delete peer from confguration.
- *
- * The peer is moved to a dead-end "Deleted" neighbour-state, to allow
- * it to "cool off" and refcounts to hit 0, at which state it is freed.
- *
- * This function /should/ take care to be idempotent, to guard against
- * it being called multiple times through stray events that come in
- * that happen to result in this function being called again.  That
- * said, getting here for a "Deleted" peer is a bug in the neighbour
- * FSM.
- */
+/* Delete peer from confguration. */
 int
 peer_delete (struct peer *peer)
 {
@@ -1174,79 +1015,60 @@ peer_delete (struct peer *peer)
   struct bgp *bgp;
   struct bgp_filter *filter;
 
-  assert (peer->status != Deleted);
-  
   bgp = peer->bgp;
-
-  if (CHECK_FLAG (peer->sflags, PEER_STATUS_NSF_WAIT))
-    peer_nsf_stop (peer);
 
   /* If this peer belongs to peer group.  Clearn up the
      relationship.  */
   if (peer->group)
     {
-      struct listnode *pn;
-
-      if ((pn = listnode_lookup (peer->group->peer, peer)))
-        {
-          peer = peer_unlock (peer); /* group->peer list reference */
-          list_delete_node (peer->group->peer, pn);
-        }
+      listnode_delete (peer->group->peer, peer);
       peer->group = NULL;
     }
-  
+
   /* Withdraw all information from routing table.  We can not use
-   * BGP_EVENT_ADD (peer, BGP_Stop) at here.  Because the event is
-   * executed after peer structure is deleted.
-   */
-  peer->last_reset = PEER_DOWN_NEIGHBOR_DELETE;
+     BGP_EVENT_ADD (peer, BGP_Stop) at here.  Because the event is
+     executed after peer structure is deleted. */
   bgp_stop (peer);
-  bgp_fsm_change_status (peer, Deleted);
-  bgp_timer_set (peer); /* stops all timers for Deleted */
-  
+  bgp_fsm_change_status (peer, Idle);
+
+  /* Stop all timers. */
+  BGP_TIMER_OFF (peer->t_start);
+  BGP_TIMER_OFF (peer->t_connect);
+  BGP_TIMER_OFF (peer->t_holdtime);
+  BGP_TIMER_OFF (peer->t_keepalive);
+  BGP_TIMER_OFF (peer->t_asorig);
+  BGP_TIMER_OFF (peer->t_routeadv);
+
   /* Delete from all peer list. */
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
-    {
-      struct listnode *pn;
-      
-      if ((pn = listnode_lookup (bgp->peer, peer)))
-        {
-          peer_unlock (peer); /* bgp peer list reference */
-          list_delete_node (bgp->peer, pn);
-        }
-      
-      if (peer_rsclient_active (peer)
-          && (pn = listnode_lookup (bgp->rsclient, peer)))
-        {
-          peer_unlock (peer); /* rsclient list reference */
-          list_delete_node (bgp->rsclient, pn);
-        }
-    }
+    listnode_delete (bgp->peer, peer);
 
-  /* Free RIB for any family in which peer is RSERVER_CLIENT, and is not
-      member of a peer_group. */
-  for (afi = AFI_IP; afi < AFI_MAX; afi++)
-    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
-      if (peer->rib[afi][safi] && ! peer->af_group[afi][safi])
-        bgp_table_finish (peer->rib[afi][safi]);
-
-  /* Buffers.  */
+  /* Buffer.  */
   if (peer->ibuf)
     stream_free (peer->ibuf);
+
   if (peer->obuf)
     stream_fifo_free (peer->obuf);
+
   if (peer->work)
     stream_free (peer->work);
-  peer->obuf = NULL;
-  peer->work = peer->ibuf = NULL;
+
+  /* Free allocated host character. */
+  if (peer->host)
+    free (peer->host);
 
   /* Local and remote addresses. */
   if (peer->su_local)
-    sockunion_free (peer->su_local);
+    XFREE (MTYPE_TMP, peer->su_local);
   if (peer->su_remote)
-    sockunion_free (peer->su_remote);
-  peer->su_local = peer->su_remote = NULL;
-  
+    XFREE (MTYPE_TMP, peer->su_remote);
+
+  /* Peer description string.  */
+  if (peer->desc)
+    XFREE (MTYPE_TMP, peer->desc);
+
+  bgp_sync_delete (peer);
+
   /* Free filter related memory.  */
   for (afi = AFI_IP; afi < AFI_MAX; afi++)
     for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -1261,16 +1083,8 @@ peer_delete (struct peer *peer)
 	      free (filter->plist[i].name);
 	    if (filter->aslist[i].name)
 	      free (filter->aslist[i].name);
-            
-            filter->dlist[i].name = NULL;
-            filter->plist[i].name = NULL;
-            filter->aslist[i].name = NULL;
-          }
-        for (i = RMAP_IN; i < RMAP_MAX; i++)
-          {
 	    if (filter->map[i].name)
 	      free (filter->map[i].name);
-            filter->map[i].name = NULL;
 	  }
 
 	if (filter->usmap.name)
@@ -1278,24 +1092,34 @@ peer_delete (struct peer *peer)
 
 	if (peer->default_rmap[afi][safi].name)
 	  free (peer->default_rmap[afi][safi].name);
-        
-        filter->usmap.name = NULL;
-        peer->default_rmap[afi][safi].name = NULL;
       }
-  
-  peer_unlock (peer); /* initial reference */
+
+  /* Update source configuration.  */
+  if (peer->update_source)
+    {
+      sockunion_free (peer->update_source);
+      peer->update_source = NULL;
+    }
+  if (peer->update_if)
+    {
+      XFREE (MTYPE_PEER_UPDATE_SOURCE, peer->update_if);
+      peer->update_if = NULL;
+    }
+
+  /* Free peer structure. */
+  XFREE (MTYPE_BGP_PEER, peer);
 
   return 0;
 }
 
-static int
+int
 peer_group_cmp (struct peer_group *g1, struct peer_group *g2)
 {
   return strcmp (g1->name, g2->name);
 }
 
 /* If peer is configured at least one address family return 1. */
-static int
+int
 peer_group_active (struct peer *peer)
 {
   if (peer->af_group[AFI_IP][SAFI_UNICAST]
@@ -1315,19 +1139,19 @@ peer_group_new ()
 					sizeof (struct peer_group));
 }
 
-static void
+void
 peer_group_free (struct peer_group *group)
 {
   XFREE (MTYPE_PEER_GROUP, group);
 }
 
 struct peer_group *
-peer_group_lookup (struct bgp *bgp, const char *name)
+peer_group_lookup (struct bgp *bgp, char *name)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+  LIST_LOOP (bgp->group, group, nn)
     {
       if (strcmp (group->name, name) == 0)
 	return group;
@@ -1336,7 +1160,7 @@ peer_group_lookup (struct bgp *bgp, const char *name)
 }
 
 struct peer_group *
-peer_group_get (struct bgp *bgp, const char *name)
+peer_group_get (struct bgp *bgp, char *name)
 {
   struct peer_group *group;
 
@@ -1348,10 +1172,11 @@ peer_group_get (struct bgp *bgp, const char *name)
   group->bgp = bgp;
   group->name = strdup (name);
   group->peer = list_new ();
-  group->conf = peer_new (bgp);
+  group->conf = peer_new ();
   if (! bgp_flag_check (bgp, BGP_FLAG_NO_DEFAULT_IPV4))
     group->conf->afc[AFI_IP][SAFI_UNICAST] = 1;
   group->conf->host = strdup (name);
+  group->conf->bgp = bgp;
   group->conf->group = group;
   group->conf->as = 0; 
   group->conf->ttl = 1;
@@ -1367,7 +1192,7 @@ peer_group_get (struct bgp *bgp, const char *name)
   return 0;
 }
 
-static void 
+void 
 peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
 			     afi_t afi, safi_t safi)
 {
@@ -1419,39 +1244,9 @@ peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
 
   /* maximum-prefix */
   peer->pmax[afi][safi] = conf->pmax[afi][safi];
-  peer->pmax_threshold[afi][safi] = conf->pmax_threshold[afi][safi];
-  peer->pmax_restart[afi][safi] = conf->pmax_restart[afi][safi];
 
   /* allowas-in */
   peer->allowas_in[afi][safi] = conf->allowas_in[afi][safi];
-
-  /* route-server-client */
-  if (CHECK_FLAG(conf->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
-    {
-      /* Make peer's RIB point to group's RIB. */
-      peer->rib[afi][safi] = group->conf->rib[afi][safi];
-
-      /* Import policy. */
-      if (pfilter->map[RMAP_IMPORT].name)
-        free (pfilter->map[RMAP_IMPORT].name);
-      if (gfilter->map[RMAP_IMPORT].name)
-        {
-          pfilter->map[RMAP_IMPORT].name = strdup (gfilter->map[RMAP_IMPORT].name);
-          pfilter->map[RMAP_IMPORT].map = gfilter->map[RMAP_IMPORT].map;
-        }
-      else
-        {
-          pfilter->map[RMAP_IMPORT].name = NULL;
-          pfilter->map[RMAP_IMPORT].map = NULL;
-        }
-
-      /* Export policy. */
-      if (gfilter->map[RMAP_EXPORT].name && ! pfilter->map[RMAP_EXPORT].name)
-        {
-          pfilter->map[RMAP_EXPORT].name = strdup (gfilter->map[RMAP_EXPORT].name);
-          pfilter->map[RMAP_EXPORT].map = gfilter->map[RMAP_EXPORT].map;
-        }
-    }
 
   /* default-originate route-map */
   if (conf->default_rmap[afi][safi].name)
@@ -1508,12 +1303,12 @@ peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
       pfilter->aslist[in].name = strdup (gfilter->aslist[in].name);
       pfilter->aslist[in].aslist = gfilter->aslist[in].aslist;
     }
-  if (gfilter->map[RMAP_IN].name && ! pfilter->map[RMAP_IN].name)
+  if (gfilter->map[in].name && ! pfilter->map[in].name)
     {
-      if (pfilter->map[RMAP_IN].name)
-        free (pfilter->map[RMAP_IN].name);
-      pfilter->map[RMAP_IN].name = strdup (gfilter->map[RMAP_IN].name);
-      pfilter->map[RMAP_IN].map = gfilter->map[RMAP_IN].map;
+      if (pfilter->map[in].name)
+	free (pfilter->map[in].name);
+      pfilter->map[in].name = strdup (gfilter->map[in].name);
+      pfilter->map[in].map = gfilter->map[in].map;
     }
 
   /* outbound filter apply */
@@ -1559,42 +1354,19 @@ peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
       pfilter->aslist[out].name = NULL;
       pfilter->aslist[out].aslist = NULL;
     }
-  if (gfilter->map[RMAP_OUT].name)
+  if (gfilter->map[out].name)
     {
-      if (pfilter->map[RMAP_OUT].name)
-        free (pfilter->map[RMAP_OUT].name);
-      pfilter->map[RMAP_OUT].name = strdup (gfilter->map[RMAP_OUT].name);
-      pfilter->map[RMAP_OUT].map = gfilter->map[RMAP_OUT].map;
+      if (pfilter->map[out].name)
+	free (pfilter->map[out].name);
+      pfilter->map[out].name = strdup (gfilter->map[out].name);
+      pfilter->map[out].map = gfilter->map[out].map;
     }
   else
     {
-      if (pfilter->map[RMAP_OUT].name)
-        free (pfilter->map[RMAP_OUT].name);
-      pfilter->map[RMAP_OUT].name = NULL;
-      pfilter->map[RMAP_OUT].map = NULL;
-    }
-
- /* RS-client's import/export route-maps. */
-  if (gfilter->map[RMAP_IMPORT].name)
-    {
-      if (pfilter->map[RMAP_IMPORT].name)
-        free (pfilter->map[RMAP_IMPORT].name);
-      pfilter->map[RMAP_IMPORT].name = strdup (gfilter->map[RMAP_IMPORT].name);
-      pfilter->map[RMAP_IMPORT].map = gfilter->map[RMAP_IMPORT].map;
-    }
-  else
-    {
-      if (pfilter->map[RMAP_IMPORT].name)
-        free (pfilter->map[RMAP_IMPORT].name);
-      pfilter->map[RMAP_IMPORT].name = NULL;
-      pfilter->map[RMAP_IMPORT].map = NULL;
-    }
-  if (gfilter->map[RMAP_EXPORT].name && ! pfilter->map[RMAP_EXPORT].name)
-    {
-      if (pfilter->map[RMAP_EXPORT].name)
-        free (pfilter->map[RMAP_EXPORT].name);
-      pfilter->map[RMAP_EXPORT].name = strdup (gfilter->map[RMAP_EXPORT].name);
-      pfilter->map[RMAP_EXPORT].map = gfilter->map[RMAP_EXPORT].map;
+      if (pfilter->map[out].name)
+	free (pfilter->map[out].name);
+      pfilter->map[out].name = NULL;
+      pfilter->map[out].map = NULL;
     }
 
   if (gfilter->usmap.name)
@@ -1615,11 +1387,11 @@ peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
 
 /* Peer group's remote AS configuration.  */
 int
-peer_group_remote_as (struct bgp *bgp, const char *group_name, as_t *as)
+peer_group_remote_as (struct bgp *bgp, char *group_name, as_t *as)
 {
   struct peer_group *group;
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   group = peer_group_lookup (bgp, group_name);
   if (! group)
@@ -1632,7 +1404,7 @@ peer_group_remote_as (struct bgp *bgp, const char *group_name, as_t *as)
      number must be updated to same number.  */
   peer_as_change (group->conf, *as);
 
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (peer->as != *as)
 	peer_as_change (peer, *as);
@@ -1646,11 +1418,11 @@ peer_group_delete (struct peer_group *group)
 {
   struct bgp *bgp;
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   bgp = group->bgp;
 
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->group = NULL;
       peer_delete (peer);
@@ -1675,12 +1447,12 @@ int
 peer_group_remote_as_delete (struct peer_group *group)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! group->conf->as)
     return 0;
 
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->group = NULL;
       peer_delete (peer);
@@ -1716,8 +1488,6 @@ peer_group_bind (struct bgp *bgp, union sockunion *su,
       peer = peer_create (su, bgp, bgp->as, group->conf->as, afi, safi);
       peer->group = group;
       peer->af_group[afi][safi] = 1;
-
-      peer = peer_lock (peer); /* group->peer list reference */
       listnode_add (group->peer, peer);
       peer_group2peer_config_copy (group, peer, afi, safi);
 
@@ -1757,12 +1527,8 @@ peer_group_bind (struct bgp *bgp, union sockunion *su,
   if (! peer->group)
     {
       peer->group = group;
-      
-      peer = peer_lock (peer); /* group->peer list reference */
       listnode_add (group->peer, peer);
     }
-  else
-    assert (group && peer->group == group);
 
   if (first_member)
     {
@@ -1783,49 +1549,11 @@ peer_group_bind (struct bgp *bgp, union sockunion *su,
 	  UNSET_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND);
 	}
     }
-
-  if (CHECK_FLAG(peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
-    {
-      struct listnode *pn;
-      
-      /* If it's not configured as RSERVER_CLIENT in any other address
-          family, without being member of a peer_group, remove it from
-          list bgp->rsclient.*/
-      if (! peer_rsclient_active (peer)
-          && (pn = listnode_lookup (bgp->rsclient, peer)))
-        {
-          peer_unlock (peer); /* peer rsclient reference */
-          list_delete_node (bgp->rsclient, pn);
-        }
-
-      bgp_table_finish (peer->rib[afi][safi]);
-
-      /* Import policy. */
-      if (peer->filter[afi][safi].map[RMAP_IMPORT].name)
-        {
-          free (peer->filter[afi][safi].map[RMAP_IMPORT].name);
-          peer->filter[afi][safi].map[RMAP_IMPORT].name = NULL;
-          peer->filter[afi][safi].map[RMAP_IMPORT].map = NULL;
-        }
-
-      /* Export policy. */
-      if (! CHECK_FLAG(group->conf->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)
-              && peer->filter[afi][safi].map[RMAP_EXPORT].name)
-        {
-          free (peer->filter[afi][safi].map[RMAP_EXPORT].name);
-          peer->filter[afi][safi].map[RMAP_EXPORT].name = NULL;
-          peer->filter[afi][safi].map[RMAP_EXPORT].map = NULL;
-        }
-    }
-
   peer_group2peer_config_copy (group, peer, afi, safi);
 
   if (peer->status == Established)
-    {
-      peer->last_reset = PEER_DOWN_RMAP_BIND;
-      bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                      BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-    }
+    bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+		     BGP_NOTIFY_CEASE_CONFIG_CHANGE);
   else
     BGP_EVENT_ADD (peer, BGP_Stop);
 
@@ -1846,13 +1574,8 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
   peer->afc[afi][safi] = 0;
   peer_af_flag_reset (peer, afi, safi);
 
-  if (peer->rib[afi][safi])
-    peer->rib[afi][safi] = NULL;
-
   if (! peer_group_active (peer))
     {
-      assert (listnode_lookup (group->peer, peer));
-      peer_unlock (peer); /* peer group list reference */
       listnode_delete (group->peer, peer);
       peer->group = NULL;
       if (group->conf->as)
@@ -1864,11 +1587,8 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
     }
 
   if (peer->status == Established)
-    {
-      peer->last_reset = PEER_DOWN_RMAP_UNBIND;
-      bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                      BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-    }
+    bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+		     BGP_NOTIFY_CEASE_CONFIG_CHANGE);
   else
     BGP_EVENT_ADD (peer, BGP_Stop);
 
@@ -1876,18 +1596,17 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
 }
 
 /* BGP instance creation by `router bgp' commands. */
-static struct bgp *
-bgp_create (as_t *as, const char *name)
+struct bgp *
+bgp_create (as_t *as, char *name)
 {
   struct bgp *bgp;
   afi_t afi;
   safi_t safi;
 
-  if ( (bgp = XCALLOC (MTYPE_BGP, sizeof (struct bgp))) == NULL)
-    return NULL;
-  
-  bgp->peer_self = peer_new (bgp);
-  bgp->peer_self->host = strdup ("Static announcement");
+  bgp = XCALLOC (MTYPE_BGP, sizeof (struct bgp));
+
+  bgp->peer_self = peer_new ();
+  bgp->peer_self->host = "Static announcement";
 
   bgp->peer = list_new ();
   bgp->peer->cmp = (int (*)(void *, void *)) peer_cmp;
@@ -1895,22 +1614,17 @@ bgp_create (as_t *as, const char *name)
   bgp->group = list_new ();
   bgp->group->cmp = (int (*)(void *, void *)) peer_group_cmp;
 
-  bgp->rsclient = list_new ();
-  bgp->rsclient->cmp = (int (*)(void*, void*)) peer_cmp;
-
   for (afi = AFI_IP; afi < AFI_MAX; afi++)
     for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
       {
-	bgp->route[afi][safi] = bgp_table_init (afi, safi);
-	bgp->aggregate[afi][safi] = bgp_table_init (afi, safi);
-	bgp->rib[afi][safi] = bgp_table_init (afi, safi);
+	bgp->route[afi][safi] = bgp_table_init ();
+	bgp->aggregate[afi][safi] = bgp_table_init ();
+	bgp->rib[afi][safi] = bgp_table_init ();
       }
 
   bgp->default_local_pref = BGP_DEFAULT_LOCAL_PREF;
   bgp->default_holdtime = BGP_DEFAULT_HOLDTIME;
   bgp->default_keepalive = BGP_DEFAULT_KEEPALIVE;
-  bgp->restart_time = BGP_DEFAULT_RESTART_TIME;
-  bgp->stalepath_time = BGP_DEFAULT_STALEPATH_TIME;
 
   bgp->as = *as;
 
@@ -1922,21 +1636,21 @@ bgp_create (as_t *as, const char *name)
 
 /* Return first entry of BGP. */
 struct bgp *
-bgp_get_default (void)
+bgp_get_default ()
 {
   if (bm->bgp->head)
-    return (listgetdata (listhead (bm->bgp)));
+    return bm->bgp->head->data;
   return NULL;
 }
 
 /* Lookup BGP entry. */
 struct bgp *
-bgp_lookup (as_t as, const char *name)
+bgp_lookup (as_t as, char *name)
 {
   struct bgp *bgp;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     if (bgp->as == as
 	&& ((bgp->name == NULL && name == NULL) 
 	    || (bgp->name && name && strcmp (bgp->name, name) == 0)))
@@ -1946,12 +1660,12 @@ bgp_lookup (as_t as, const char *name)
 
 /* Lookup BGP structure by view name. */
 struct bgp *
-bgp_lookup_by_name (const char *name)
+bgp_lookup_by_name (char *name)
 {
   struct bgp *bgp;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     if ((bgp->name == NULL && name == NULL)
 	|| (bgp->name && name && strcmp (bgp->name, name) == 0))
       return bgp;
@@ -1960,7 +1674,7 @@ bgp_lookup_by_name (const char *name)
 
 /* Called from VTY commands. */
 int
-bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
+bgp_get (struct bgp **bgp_val, as_t *as, char *name)
 {
   struct bgp *bgp;
 
@@ -2007,7 +1721,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 
   bgp = bgp_create (as, name);
   listnode_add (bm->bgp, bgp);
-  bgp_router_id_set(bgp, &router_id_zebra);
+  bgp_if_update_all ();
   *bgp_val = bgp;
 
   return 0;
@@ -2018,8 +1732,7 @@ int
 bgp_delete (struct bgp *bgp)
 {
   struct peer *peer;
-  struct peer_group *group;
-  struct listnode *node;
+  struct listnode *nn;
   struct listnode *next;
   afi_t afi;
   safi_t safi;
@@ -2034,20 +1747,18 @@ bgp_delete (struct bgp *bgp)
       if (i != ZEBRA_ROUTE_BGP)
 	bgp_redistribute_unset (bgp, afi, i);
 
-  for (ALL_LIST_ELEMENTS (bgp->group, node, next, group))
-    peer_group_delete (group);
+  bgp->group->del = (void (*)(void *)) peer_group_delete;
   list_delete (bgp->group);
 
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, next, peer))
-    peer_delete (peer);
-  list_delete (bgp->peer);
-
-  for (ALL_LIST_ELEMENTS (bgp->rsclient, node, next, peer))
-    peer_delete (peer);
-  list_delete (bgp->rsclient);
+  for (nn = bgp->peer->head; nn; nn = next)
+    {
+      peer = nn->data;
+      next = nn->next;
+      peer_delete (peer);
+    }
 
   listnode_delete (bm->bgp, bgp);
-  
+
   if (bgp->name)
     free (bgp->name);
   
@@ -2070,7 +1781,7 @@ struct peer *
 peer_lookup (struct bgp *bgp, union sockunion *su)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! bgp)
     bgp = bgp_get_default ();
@@ -2078,7 +1789,7 @@ peer_lookup (struct bgp *bgp, union sockunion *su)
   if (! bgp)
     return NULL;
   
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (sockunion_same (&peer->su, su)
 	  && ! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
@@ -2092,14 +1803,14 @@ peer_lookup_with_open (union sockunion *su, as_t remote_as,
 		       struct in_addr *remote_id, int *as)
 {
   struct peer *peer;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct bgp *bgp;
 
   bgp = bgp_get_default ();
   if (! bgp)
     return NULL;
 
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (sockunion_same (&peer->su, su)
 	  && ! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
@@ -2111,7 +1822,7 @@ peer_lookup_with_open (union sockunion *su, as_t remote_as,
 	    *as = 1;
 	}
     }
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (sockunion_same (&peer->su, su)
 	  &&  ! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
@@ -2161,7 +1872,7 @@ enum peer_change_type
   peer_change_reset_out,
 };
 
-static void
+void
 peer_change_action (struct peer *peer, afi_t afi, safi_t safi,
 		    enum peer_change_type type)
 {
@@ -2194,9 +1905,6 @@ struct peer_flag_action
 
   /* Action when the flag is changed.  */
   enum peer_change_type type;
-
-  /* Peer down cause */
-  u_char peer_down;
 };
 
 struct peer_flag_action peer_flag_action_list[] = 
@@ -2206,8 +1914,9 @@ struct peer_flag_action peer_flag_action_list[] =
     { PEER_FLAG_DONT_CAPABILITY,          0, peer_change_none },
     { PEER_FLAG_OVERRIDE_CAPABILITY,      0, peer_change_none },
     { PEER_FLAG_STRICT_CAP_MATCH,         0, peer_change_none },
+    { PEER_FLAG_NO_ROUTE_REFRESH_CAP,     0, peer_change_reset },
     { PEER_FLAG_DYNAMIC_CAPABILITY,       0, peer_change_reset },
-    { PEER_FLAG_DISABLE_CONNECTED_CHECK,  0, peer_change_reset },
+    { PEER_FLAG_ENFORCE_MULTIHOP,         0, peer_change_reset },
     { 0, 0, 0 }
   };
 
@@ -2226,12 +1935,11 @@ struct peer_flag_action peer_af_flag_action_list[] =
     { PEER_FLAG_ALLOWAS_IN,               0, peer_change_reset_in },
     { PEER_FLAG_ORF_PREFIX_SM,            1, peer_change_reset },
     { PEER_FLAG_ORF_PREFIX_RM,            1, peer_change_reset },
-    { PEER_FLAG_NEXTHOP_LOCAL_UNCHANGED,  0, peer_change_reset_out },
     { 0, 0, 0 }
   };
 
 /* Proper action set. */
-static int
+int
 peer_flag_action_set (struct peer_flag_action *action_list, int size,
 		      struct peer_flag_action *action, u_int32_t flag)
 {
@@ -2280,28 +1988,13 @@ peer_flag_action_set (struct peer_flag_action *action_list, int size,
   return found;
 }
 
-static void
+void
 peer_flag_modify_action (struct peer *peer, u_int32_t flag)
 {
   if (flag == PEER_FLAG_SHUTDOWN)
     {
       if (CHECK_FLAG (peer->flags, flag))
 	{
-	  if (CHECK_FLAG (peer->sflags, PEER_STATUS_NSF_WAIT))
-	    peer_nsf_stop (peer);
-
-	  UNSET_FLAG (peer->sflags, PEER_STATUS_PREFIX_OVERFLOW);
-	  if (peer->t_pmax_restart)
-	    {
-	      BGP_TIMER_OFF (peer->t_pmax_restart);
-              if (BGP_DEBUG (events, EVENTS))
-		zlog_debug ("%s Maximum-prefix restart timer canceled",
-			    peer->host);
-	    }
-
-      if (CHECK_FLAG (peer->sflags, PEER_STATUS_NSF_WAIT))
-	peer_nsf_stop (peer);
-
 	  if (peer->status == Established)
 	    bgp_notify_send (peer, BGP_NOTIFY_CEASE,
 			     BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN);
@@ -2316,28 +2009,35 @@ peer_flag_modify_action (struct peer *peer, u_int32_t flag)
     }
   else if (peer->status == Established)
     {
-      if (flag == PEER_FLAG_DYNAMIC_CAPABILITY)
-	peer->last_reset = PEER_DOWN_CAPABILITY_CHANGE;
-      else if (flag == PEER_FLAG_PASSIVE)
-	peer->last_reset = PEER_DOWN_PASSIVE_CHANGE;
-      else if (flag == PEER_FLAG_DISABLE_CONNECTED_CHECK)
-	peer->last_reset = PEER_DOWN_MULTIHOP_CHANGE;
+      if (flag == PEER_FLAG_NO_ROUTE_REFRESH_CAP
+	  && CHECK_FLAG (peer->cap, PEER_CAP_DYNAMIC_RCV))
+	{
+	  if (CHECK_FLAG (peer->flags, flag))
+	    UNSET_FLAG (peer->cap, PEER_CAP_REFRESH_ADV);
+	  else
+	    SET_FLAG (peer->cap, PEER_CAP_REFRESH_ADV);
 
-      bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-		       BGP_NOTIFY_CEASE_CONFIG_CHANGE);
+	  bgp_capability_send (peer, AFI_IP, SAFI_UNICAST,
+			       CAPABILITY_CODE_REFRESH,
+			       CHECK_FLAG (peer->flags, flag) ?
+			       CAPABILITY_ACTION_UNSET : CAPABILITY_ACTION_SET);
+	}
+      else
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
     }
   else
     BGP_EVENT_ADD (peer, BGP_Stop);
 }
 
 /* Change specified peer flag. */
-static int
+int
 peer_flag_modify (struct peer *peer, u_int32_t flag, int set)
 {
   int found;
   int size;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct peer_flag_action action;
 
   memset (&action, 0, sizeof (struct peer_flag_action));
@@ -2394,7 +2094,7 @@ peer_flag_modify (struct peer *peer, u_int32_t flag, int set)
   /* peer-group member updates. */
   group = peer->group;
 
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (set && CHECK_FLAG (peer->flags, flag) == flag)
 	continue;
@@ -2425,7 +2125,7 @@ peer_flag_unset (struct peer *peer, u_int32_t flag)
   return peer_flag_modify (peer, flag, 0);
 }
 
-static int
+int
 peer_is_group_member (struct peer *peer, afi_t afi, safi_t safi)
 {
   if (peer->af_group[afi][safi])
@@ -2433,13 +2133,13 @@ peer_is_group_member (struct peer *peer, afi_t afi, safi_t safi)
   return 0;
 }
 
-static int
+int
 peer_af_flag_modify (struct peer *peer, afi_t afi, safi_t safi, u_int32_t flag,
 		     int set)
 {
   int found;
   int size;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct peer_group *group;
   struct peer_flag_action action;
 
@@ -2497,19 +2197,7 @@ peer_af_flag_modify (struct peer *peer, afi_t afi, safi_t safi, u_int32_t flag,
       if (! set && flag == PEER_FLAG_SOFT_RECONFIG)
 	bgp_clear_adj_in (peer, afi, safi);
       else
-       {
-         if (flag == PEER_FLAG_REFLECTOR_CLIENT)
-           peer->last_reset = PEER_DOWN_RR_CLIENT_CHANGE;
-         else if (flag == PEER_FLAG_RSERVER_CLIENT)
-           peer->last_reset = PEER_DOWN_RS_CLIENT_CHANGE;
-         else if (flag == PEER_FLAG_ORF_PREFIX_SM)
-           peer->last_reset = PEER_DOWN_CAPABILITY_CHANGE;
-         else if (flag == PEER_FLAG_ORF_PREFIX_RM)
-           peer->last_reset = PEER_DOWN_CAPABILITY_CHANGE;
-
-         peer_change_action (peer, afi, safi, action.type);
-       }
-
+	peer_change_action (peer, afi, safi, action.type);
     }
 
   /* Peer group member updates.  */
@@ -2517,7 +2205,7 @@ peer_af_flag_modify (struct peer *peer, afi_t afi, safi_t safi, u_int32_t flag,
     {
       group = peer->group;
       
-      for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+      LIST_LOOP (group->peer, peer, nn)
 	{
 	  if (! peer->af_group[afi][safi])
 	    continue;
@@ -2538,18 +2226,7 @@ peer_af_flag_modify (struct peer *peer, afi_t afi, safi_t safi, u_int32_t flag,
 	      if (! set && flag == PEER_FLAG_SOFT_RECONFIG)
 		bgp_clear_adj_in (peer, afi, safi);
 	      else
-               {
-                 if (flag == PEER_FLAG_REFLECTOR_CLIENT)
-                   peer->last_reset = PEER_DOWN_RR_CLIENT_CHANGE;
-                 else if (flag == PEER_FLAG_RSERVER_CLIENT)
-                   peer->last_reset = PEER_DOWN_RS_CLIENT_CHANGE;
-                 else if (flag == PEER_FLAG_ORF_PREFIX_SM)
-                   peer->last_reset = PEER_DOWN_CAPABILITY_CHANGE;
-                 else if (flag == PEER_FLAG_ORF_PREFIX_RM)
-                   peer->last_reset = PEER_DOWN_CAPABILITY_CHANGE;
-
-                 peer_change_action (peer, afi, safi, action.type);
-               }
+		peer_change_action (peer, afi, safi, action.type);
 	    }
 	}
     }
@@ -2573,7 +2250,7 @@ int
 peer_ebgp_multihop_set (struct peer *peer, int ttl)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer_sort (peer) == BGP_PEER_IBGP)
     return 0;
@@ -2588,7 +2265,7 @@ peer_ebgp_multihop_set (struct peer *peer, int ttl)
   else
     {
       group = peer->group;
-      for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+      LIST_LOOP (group->peer, peer, nn)
 	{
 	  if (peer_sort (peer) == BGP_PEER_IBGP)
 	    continue;
@@ -2606,7 +2283,7 @@ int
 peer_ebgp_multihop_unset (struct peer *peer)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer_sort (peer) == BGP_PEER_IBGP)
     return 0;
@@ -2624,7 +2301,7 @@ peer_ebgp_multihop_unset (struct peer *peer)
   else
     {
       group = peer->group;
-      for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+      LIST_LOOP (group->peer, peer, nn)
 	{
 	  if (peer_sort (peer) == BGP_PEER_IBGP)
 	    continue;
@@ -2663,10 +2340,10 @@ peer_description_unset (struct peer *peer)
 
 /* Neighbor update-source. */
 int
-peer_update_source_if_set (struct peer *peer, const char *ifname)
+peer_update_source_if_set (struct peer *peer, char *ifname)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer->update_if)
     {
@@ -2689,11 +2366,8 @@ peer_update_source_if_set (struct peer *peer, const char *ifname)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
       return 0;
@@ -2701,7 +2375,7 @@ peer_update_source_if_set (struct peer *peer, const char *ifname)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (peer->update_if)
 	{
@@ -2721,11 +2395,8 @@ peer_update_source_if_set (struct peer *peer, const char *ifname)
       peer->update_if = XSTRDUP (MTYPE_PEER_UPDATE_SOURCE, ifname);
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
     }
@@ -2736,7 +2407,7 @@ int
 peer_update_source_addr_set (struct peer *peer, union sockunion *su)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer->update_source)
     {
@@ -2758,11 +2429,8 @@ peer_update_source_addr_set (struct peer *peer, union sockunion *su)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
       return 0;
@@ -2770,7 +2438,7 @@ peer_update_source_addr_set (struct peer *peer, union sockunion *su)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (peer->update_source)
 	{
@@ -2789,11 +2457,8 @@ peer_update_source_addr_set (struct peer *peer, union sockunion *su)
       peer->update_source = sockunion_dup (su);
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
     }
@@ -2805,7 +2470,7 @@ peer_update_source_unset (struct peer *peer)
 {
   union sockunion *su;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP)
       && ! peer->update_source
@@ -2840,11 +2505,8 @@ peer_update_source_unset (struct peer *peer)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
       return 0;
@@ -2852,7 +2514,7 @@ peer_update_source_unset (struct peer *peer)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (! peer->update_source && ! peer->update_if)
 	continue;
@@ -2870,11 +2532,8 @@ peer_update_source_unset (struct peer *peer)
 	}
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_UPDATE_SOURCE_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+			 BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
 	BGP_EVENT_ADD (peer, BGP_Stop);
     }
@@ -2883,10 +2542,10 @@ peer_update_source_unset (struct peer *peer)
 
 int
 peer_default_originate_set (struct peer *peer, afi_t afi, safi_t safi,
-			    const char *rmap)
+			    char *rmap)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   /* Adress family must be activated.  */
   if (! peer->afc[afi][safi])
@@ -2920,7 +2579,7 @@ peer_default_originate_set (struct peer *peer, afi_t afi, safi_t safi,
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       SET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_DEFAULT_ORIGINATE);
 
@@ -2942,7 +2601,7 @@ int
 peer_default_originate_unset (struct peer *peer, afi_t afi, safi_t safi)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   /* Adress family must be activated.  */
   if (! peer->afc[afi][safi])
@@ -2971,7 +2630,7 @@ peer_default_originate_unset (struct peer *peer, afi_t afi, safi_t safi)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_DEFAULT_ORIGINATE);
 
@@ -3005,7 +2664,7 @@ int
 peer_weight_set (struct peer *peer, u_int16_t weight)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   SET_FLAG (peer->config, PEER_CONFIG_WEIGHT);
   peer->weight = weight;
@@ -3015,7 +2674,7 @@ peer_weight_set (struct peer *peer, u_int16_t weight)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->weight = group->conf->weight;
     }
@@ -3026,7 +2685,7 @@ int
 peer_weight_unset (struct peer *peer)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   /* Set default weight. */
   if (peer_group_active (peer))
@@ -3041,7 +2700,7 @@ peer_weight_unset (struct peer *peer)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->weight = 0;
     }
@@ -3052,7 +2711,7 @@ int
 peer_timers_set (struct peer *peer, u_int32_t keepalive, u_int32_t holdtime)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   /* Not for peer group memeber.  */
   if (peer_group_active (peer))
@@ -3080,7 +2739,7 @@ peer_timers_set (struct peer *peer, u_int32_t keepalive, u_int32_t holdtime)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       SET_FLAG (peer->config, PEER_CONFIG_TIMER);
       peer->holdtime = group->conf->holdtime;
@@ -3093,7 +2752,7 @@ int
 peer_timers_unset (struct peer *peer)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer_group_active (peer))
     return BGP_ERR_INVALID_FOR_PEER_GROUP_MEMBER;
@@ -3108,7 +2767,7 @@ peer_timers_unset (struct peer *peer)
 
   /* peer-group member updates. */
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       UNSET_FLAG (peer->config, PEER_CONFIG_TIMER);
       peer->holdtime = 0;
@@ -3186,9 +2845,27 @@ peer_advertise_interval_unset (struct peer *peer)
   return 0;
 }
 
+int
+peer_version_set (struct peer *peer, int version)
+{
+  if (version != BGP_VERSION_4 && version != BGP_VERSION_MP_4_DRAFT_00)
+    return BGP_ERR_INVALID_VALUE;
+
+  peer->version = version;
+
+  return 0;
+}
+
+int
+peer_version_unset (struct peer *peer)
+{
+  peer->version = BGP_VERSION_4;
+  return 0;
+}
+
 /* neighbor interface */
 int
-peer_interface_set (struct peer *peer, const char *str)
+peer_interface_set (struct peer *peer, char *str)
 {
   if (peer->ifname)
     free (peer->ifname);
@@ -3212,7 +2889,7 @@ int
 peer_allowas_in_set (struct peer *peer, afi_t afi, safi_t safi, int allow_num)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (allow_num < 1 || allow_num > 10)
     return BGP_ERR_INVALID_VALUE;
@@ -3228,7 +2905,7 @@ peer_allowas_in_set (struct peer *peer, afi_t afi, safi_t safi, int allow_num)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (peer->allowas_in[afi][safi] != allow_num)
 	{
@@ -3245,7 +2922,7 @@ int
 peer_allowas_in_unset (struct peer *peer, afi_t afi, safi_t safi)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_ALLOWAS_IN))
     {
@@ -3257,7 +2934,7 @@ peer_allowas_in_unset (struct peer *peer, afi_t afi, safi_t safi)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_ALLOWAS_IN))
 	{
@@ -3273,7 +2950,7 @@ peer_local_as_set (struct peer *peer, as_t as, int no_prepend)
 {
   struct bgp *bgp = peer->bgp;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer_sort (peer) != BGP_PEER_EBGP
       && peer_sort (peer) != BGP_PEER_INTERNAL)
@@ -3299,11 +2976,8 @@ peer_local_as_set (struct peer *peer, as_t as, int no_prepend)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_LOCAL_AS_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+        bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+                         BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
         BGP_EVENT_ADD (peer, BGP_Stop);
 
@@ -3311,7 +2985,7 @@ peer_local_as_set (struct peer *peer, as_t as, int no_prepend)
     }
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->change_local_as = as;
       if (no_prepend)
@@ -3320,11 +2994,8 @@ peer_local_as_set (struct peer *peer, as_t as, int no_prepend)
 	UNSET_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND);
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_LOCAL_AS_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+        bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+                         BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
         BGP_EVENT_ADD (peer, BGP_Stop);
     }
@@ -3336,7 +3007,7 @@ int
 peer_local_as_unset (struct peer *peer)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (peer_group_active (peer))
     return BGP_ERR_INVALID_FOR_PEER_GROUP_MEMBER;
@@ -3350,11 +3021,8 @@ peer_local_as_unset (struct peer *peer)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_LOCAL_AS_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+        bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+                         BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
         BGP_EVENT_ADD (peer, BGP_Stop);
 
@@ -3362,17 +3030,14 @@ peer_local_as_unset (struct peer *peer)
     }
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       peer->change_local_as = 0;
       UNSET_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND);
 
       if (peer->status == Established)
-       {
-         peer->last_reset = PEER_DOWN_LOCAL_AS_CHANGE;
-         bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                          BGP_NOTIFY_CEASE_CONFIG_CHANGE);
-       }
+        bgp_notify_send (peer, BGP_NOTIFY_CEASE,
+                         BGP_NOTIFY_CEASE_CONFIG_CHANGE);
       else
         BGP_EVENT_ADD (peer, BGP_Stop);
     }
@@ -3382,11 +3047,11 @@ peer_local_as_unset (struct peer *peer)
 /* Set distribute list to the peer. */
 int
 peer_distribute_set (struct peer *peer, afi_t afi, safi_t safi, int direct, 
-		     const char *name)
+		     char *name)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3411,7 +3076,7 @@ peer_distribute_set (struct peer *peer, afi_t afi, safi_t safi, int direct,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3433,7 +3098,7 @@ peer_distribute_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
   struct bgp_filter *filter;
   struct bgp_filter *gfilter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3470,7 +3135,7 @@ peer_distribute_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
     return 0;
 
     group = peer->group;
-    for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+    LIST_LOOP (group->peer, peer, nn)
       {
 	filter = &peer->filter[afi][safi];
 
@@ -3487,22 +3152,21 @@ peer_distribute_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
 }
 
 /* Update distribute list. */
-static void
+void
 peer_distribute_update (struct access_list *access)
 {
   afi_t afi;
   safi_t safi;
   int direct;
-  struct listnode *mnode, *mnnode;
-  struct listnode *node, *nnode;
+  struct listnode *nn, *nm;
   struct bgp *bgp;
   struct peer *peer;
   struct peer_group *group;
   struct bgp_filter *filter;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3519,7 +3183,7 @@ peer_distribute_update (struct access_list *access)
 		  }
 	      }
 	}
-      for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+      LIST_LOOP (bgp->group, group, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3542,11 +3206,11 @@ peer_distribute_update (struct access_list *access)
 /* Set prefix list to the peer. */
 int
 peer_prefix_list_set (struct peer *peer, afi_t afi, safi_t safi, int direct, 
-		      const char *name)
+		      char *name)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3571,7 +3235,7 @@ peer_prefix_list_set (struct peer *peer, afi_t afi, safi_t safi, int direct,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3592,7 +3256,7 @@ peer_prefix_list_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
   struct bgp_filter *filter;
   struct bgp_filter *gfilter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3629,7 +3293,7 @@ peer_prefix_list_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3646,11 +3310,10 @@ peer_prefix_list_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
 }
 
 /* Update prefix-list list. */
-static void
+void
 peer_prefix_list_update (struct prefix_list *plist)
 {
-  struct listnode *mnode, *mnnode;
-  struct listnode *node, *nnode;
+  struct listnode *nn, *nm;
   struct bgp *bgp;
   struct peer *peer;
   struct peer_group *group;
@@ -3659,9 +3322,9 @@ peer_prefix_list_update (struct prefix_list *plist)
   safi_t safi;
   int direct;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3678,7 +3341,7 @@ peer_prefix_list_update (struct prefix_list *plist)
 		  }
 	      }
 	}
-      for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+      LIST_LOOP (bgp->group, group, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3700,11 +3363,11 @@ peer_prefix_list_update (struct prefix_list *plist)
 
 int
 peer_aslist_set (struct peer *peer, afi_t afi, safi_t safi, int direct,
-		 const char *name)
+		 char *name)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3726,7 +3389,7 @@ peer_aslist_set (struct peer *peer, afi_t afi, safi_t safi, int direct,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3747,7 +3410,7 @@ peer_aslist_unset (struct peer *peer,afi_t afi, safi_t safi, int direct)
   struct bgp_filter *filter;
   struct bgp_filter *gfilter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3784,7 +3447,7 @@ peer_aslist_unset (struct peer *peer,afi_t afi, safi_t safi, int direct)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3800,22 +3463,21 @@ peer_aslist_unset (struct peer *peer,afi_t afi, safi_t safi, int direct)
   return 0;
 }
 
-static void
+void
 peer_aslist_update ()
 {
   afi_t afi;
   safi_t safi;
   int direct;
-  struct listnode *mnode, *mnnode;
-  struct listnode *node, *nnode;
+  struct listnode *nn, *nm;
   struct bgp *bgp;
   struct peer *peer;
   struct peer_group *group;
   struct bgp_filter *filter;
 
-  for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3832,7 +3494,7 @@ peer_aslist_update ()
 		  }
 	      }
 	}
-      for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+      LIST_LOOP (bgp->group, group, nm)
 	{
 	  for (afi = AFI_IP; afi < AFI_MAX; afi++)
 	    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
@@ -3855,21 +3517,19 @@ peer_aslist_update ()
 /* Set route-map to the peer. */
 int
 peer_route_map_set (struct peer *peer, afi_t afi, safi_t safi, int direct, 
-		    const char *name)
+		    char *name)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
 
-  if (direct != RMAP_IN && direct != RMAP_OUT &&
-      direct != RMAP_IMPORT && direct != RMAP_EXPORT)
+  if (direct != FILTER_IN && direct != FILTER_OUT)
     return BGP_ERR_INVALID_VALUE;
 
-  if ( (direct == RMAP_OUT || direct == RMAP_IMPORT)
-      && peer_is_group_member (peer, afi, safi))
+  if (direct == FILTER_OUT && peer_is_group_member (peer, afi, safi))
     return BGP_ERR_INVALID_FOR_PEER_GROUP_MEMBER;
 
   filter = &peer->filter[afi][safi];
@@ -3884,7 +3544,7 @@ peer_route_map_set (struct peer *peer, afi_t afi, safi_t safi, int direct,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3906,17 +3566,15 @@ peer_route_map_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
   struct bgp_filter *filter;
   struct bgp_filter *gfilter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
 
-  if (direct != RMAP_IN && direct != RMAP_OUT &&
-      direct != RMAP_IMPORT && direct != RMAP_EXPORT)
+  if (direct != FILTER_IN && direct != FILTER_OUT)
     return BGP_ERR_INVALID_VALUE;
 
-  if ( (direct == RMAP_OUT || direct == RMAP_IMPORT)
-      && peer_is_group_member (peer, afi, safi))
+  if (direct == FILTER_OUT && peer_is_group_member (peer, afi, safi))
     return BGP_ERR_INVALID_FOR_PEER_GROUP_MEMBER;
 
   filter = &peer->filter[afi][safi];
@@ -3945,7 +3603,7 @@ peer_route_map_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -3962,12 +3620,11 @@ peer_route_map_unset (struct peer *peer, afi_t afi, safi_t safi, int direct)
 
 /* Set unsuppress-map to the peer. */
 int
-peer_unsuppress_map_set (struct peer *peer, afi_t afi, safi_t safi, 
-                         const char *name)
+peer_unsuppress_map_set (struct peer *peer, afi_t afi, safi_t safi, char *name)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -3987,7 +3644,7 @@ peer_unsuppress_map_set (struct peer *peer, afi_t afi, safi_t safi,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -4008,7 +3665,7 @@ peer_unsuppress_map_unset (struct peer *peer, afi_t afi, safi_t safi)
 {
   struct bgp_filter *filter;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -4027,7 +3684,7 @@ peer_unsuppress_map_unset (struct peer *peer, afi_t afi, safi_t safi)
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       filter = &peer->filter[afi][safi];
 
@@ -4044,19 +3701,16 @@ peer_unsuppress_map_unset (struct peer *peer, afi_t afi, safi_t safi)
 
 int
 peer_maximum_prefix_set (struct peer *peer, afi_t afi, safi_t safi,
-			 u_int32_t max, u_char threshold,
-			 int warning, u_int16_t restart)
+			 u_int32_t max, int warning)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
 
   SET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX);
   peer->pmax[afi][safi] = max;
-  peer->pmax_threshold[afi][safi] = threshold;
-  peer->pmax_restart[afi][safi] = restart;
   if (warning)
     SET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING);
   else
@@ -4066,15 +3720,13 @@ peer_maximum_prefix_set (struct peer *peer, afi_t afi, safi_t safi,
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (! peer->af_group[afi][safi])
 	continue;
 
       SET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX);
       peer->pmax[afi][safi] = max;
-      peer->pmax_threshold[afi][safi] = threshold;
-      peer->pmax_restart[afi][safi] = restart;
       if (warning)
 	SET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING);
       else
@@ -4087,7 +3739,7 @@ int
 peer_maximum_prefix_unset (struct peer *peer, afi_t afi, safi_t safi)
 {
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_PEER_INACTIVE;
@@ -4108,22 +3760,18 @@ peer_maximum_prefix_unset (struct peer *peer, afi_t afi, safi_t safi)
 	UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING);
 
       peer->pmax[afi][safi] = peer->group->conf->pmax[afi][safi];
-      peer->pmax_threshold[afi][safi] = peer->group->conf->pmax_threshold[afi][safi];
-      peer->pmax_restart[afi][safi] = peer->group->conf->pmax_restart[afi][safi];
       return 0;
     }
 
   UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX);
   UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING);
   peer->pmax[afi][safi] = 0;
-  peer->pmax_threshold[afi][safi] = 0;
-  peer->pmax_restart[afi][safi] = 0;
 
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     return 0;
 
   group = peer->group;
-  for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
+  LIST_LOOP (group->peer, peer, nn)
     {
       if (! peer->af_group[afi][safi])
 	continue;
@@ -4131,8 +3779,6 @@ peer_maximum_prefix_unset (struct peer *peer, afi_t afi, safi_t safi)
       UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX);
       UNSET_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING);
       peer->pmax[afi][safi] = 0;
-      peer->pmax_threshold[afi][safi] = 0;
-      peer->pmax_restart[afi][safi] = 0;
     }
   return 0;
 }
@@ -4142,20 +3788,7 @@ peer_clear (struct peer *peer)
 {
   if (! CHECK_FLAG (peer->flags, PEER_FLAG_SHUTDOWN))
     {
-      if (CHECK_FLAG (peer->sflags, PEER_STATUS_PREFIX_OVERFLOW))
-	{
-	  UNSET_FLAG (peer->sflags, PEER_STATUS_PREFIX_OVERFLOW);
-	  if (peer->t_pmax_restart)
-	    {
-	      BGP_TIMER_OFF (peer->t_pmax_restart);
-	      if (BGP_DEBUG (events, EVENTS))
-		zlog_debug ("%s Maximum-prefix restart timer canceled",
-			    peer->host);
-	    }
-	  BGP_EVENT_ADD (peer, BGP_Start);
-	  return 0;
-	}
-
+      UNSET_FLAG (peer->sflags, PEER_STATUS_PREFIX_OVERFLOW);
       peer->v_start = BGP_INIT_START_TIMER;
       if (peer->status == Established)
 	bgp_notify_send (peer, BGP_NOTIFY_CEASE,
@@ -4175,14 +3808,6 @@ peer_clear_soft (struct peer *peer, afi_t afi, safi_t safi,
 
   if (! peer->afc[afi][safi])
     return BGP_ERR_AF_UNCONFIGURED;
-
-  if (stype == BGP_CLEAR_SOFT_RSCLIENT)
-    {
-      if (! CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
-        return 0;
-      bgp_check_local_routes_rsclient (peer, afi, safi);
-      bgp_soft_reconfig_rsclient (peer, afi, safi);
-    }
 
   if (stype == BGP_CLEAR_SOFT_OUT || stype == BGP_CLEAR_SOFT_BOTH)
     bgp_announce_route (peer, afi, safi);
@@ -4242,8 +3867,7 @@ peer_clear_soft (struct peer *peer, afi_t afi, safi_t safi,
   return 0;
 }
 
-/* Display peer uptime.*/
-/* XXX: why does this function return char * when it takes buffer? */
+/* Display peer uptime. */
 char *
 peer_uptime (time_t uptime2, char *buf, size_t len)
 {
@@ -4253,10 +3877,8 @@ peer_uptime (time_t uptime2, char *buf, size_t len)
   /* Check buffer length. */
   if (len < BGP_UPTIME_LEN)
     {
-      zlog_warn ("peer_uptime (): buffer shortage %lu", (u_long)len);
-      /* XXX: should return status instead of buf... */
-      snprintf (buf, len, "<error> "); 
-      return buf;
+      zlog_warn ("peer_uptime (): buffer shortage %d", len);
+      return "";
     }
 
   /* If there is no connection has been done before print `never'. */
@@ -4287,7 +3909,7 @@ peer_uptime (time_t uptime2, char *buf, size_t len)
   return buf;
 }
 
-static void
+void
 bgp_config_write_filter (struct vty *vty, struct peer *peer,
 			 afi_t afi, safi_t safi)
 {
@@ -4323,23 +3945,14 @@ bgp_config_write_filter (struct vty *vty, struct peer *peer,
 	     filter->plist[out].name, VTY_NEWLINE);
 
   /* route-map. */
-  if (filter->map[RMAP_IN].name)
-    if (! gfilter || ! gfilter->map[RMAP_IN].name
-       || strcmp (filter->map[RMAP_IN].name, gfilter->map[RMAP_IN].name) != 0)
+  if (filter->map[in].name)
+    if (! gfilter || ! gfilter->map[in].name
+	|| strcmp (filter->map[in].name, gfilter->map[in].name) != 0)
       vty_out (vty, " neighbor %s route-map %s in%s", addr, 
-              filter->map[RMAP_IN].name, VTY_NEWLINE);
-  if (filter->map[RMAP_OUT].name && ! gfilter)
+	       filter->map[in].name, VTY_NEWLINE);
+  if (filter->map[out].name && ! gfilter)
     vty_out (vty, " neighbor %s route-map %s out%s", addr, 
-            filter->map[RMAP_OUT].name, VTY_NEWLINE);
-  if (filter->map[RMAP_IMPORT].name && ! gfilter)
-    vty_out (vty, " neighbor %s route-map %s import%s", addr,
-        filter->map[RMAP_IMPORT].name, VTY_NEWLINE);
-  if (filter->map[RMAP_EXPORT].name)
-    if (! gfilter || ! gfilter->map[RMAP_EXPORT].name
-    || strcmp (filter->map[RMAP_EXPORT].name,
-                    gfilter->map[RMAP_EXPORT].name) != 0)
-    vty_out (vty, " neighbor %s route-map %s export%s", addr,
-        filter->map[RMAP_EXPORT].name, VTY_NEWLINE);
+	     filter->map[out].name, VTY_NEWLINE);
 
   /* unsuppress-map */
   if (filter->usmap.name && ! gfilter)
@@ -4358,7 +3971,7 @@ bgp_config_write_filter (struct vty *vty, struct peer *peer,
 }
 
 /* BGP peer configuration display function. */
-static void
+void
 bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
 		       struct peer *peer, afi_t afi, safi_t safi)
 {
@@ -4439,11 +4052,11 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
 	  vty_out (vty, " neighbor %s ebgp-multihop %d%s", addr, peer->ttl,
 		   VTY_NEWLINE);
 
-      /* disable-connected-check.  */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+      /* Enforce multihop.  */
+      if (CHECK_FLAG (peer->flags, PEER_FLAG_ENFORCE_MULTIHOP))
 	if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
-	  vty_out (vty, " neighbor %s disable-connected-check%s", addr, VTY_NEWLINE);
+	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_ENFORCE_MULTIHOP))
+	  vty_out (vty, " neighbor %s enforce-multihop%s", addr, VTY_NEWLINE);
 
       /* Update-source. */
       if (peer->update_if)
@@ -4458,6 +4071,11 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
 	  vty_out (vty, " neighbor %s update-source %s%s", addr,
 		   sockunion2str (peer->update_source, buf, SU_ADDRSTRLEN),
 		   VTY_NEWLINE);
+
+      /* BGP version print. */
+      if (peer->version == BGP_VERSION_MP_4_DRAFT_00)
+	vty_out (vty, " neighbor %s version %s%s",
+		 addr,"4-", VTY_NEWLINE);
 
       /* advertisement-interval */
       if (CHECK_FLAG (peer->config, PEER_CONFIG_ROUTEADV))
@@ -4480,6 +4098,13 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
 	    g_peer->weight != peer->weight)
 	  vty_out (vty, " neighbor %s weight %d%s", addr, peer->weight,
 		   VTY_NEWLINE);
+
+      /* Route refresh. */
+      if (CHECK_FLAG (peer->flags, PEER_FLAG_NO_ROUTE_REFRESH_CAP))
+        if (! peer_group_active (peer) ||
+	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_NO_ROUTE_REFRESH_CAP))
+	  vty_out (vty, " no neighbor %s capability route-refresh%s", addr,
+	  VTY_NEWLINE);
 
       /* Dynamic capability.  */
       if (CHECK_FLAG (peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
@@ -4622,19 +4247,12 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX))
     if (! peer->af_group[afi][safi]
 	|| g_peer->pmax[afi][safi] != peer->pmax[afi][safi]
-        || g_peer->pmax_threshold[afi][safi] != peer->pmax_threshold[afi][safi]
 	|| CHECK_FLAG (g_peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING)
 	   != CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING))
-      {
-	vty_out (vty, " neighbor %s maximum-prefix %ld", addr, peer->pmax[afi][safi]);
-	if (peer->pmax_threshold[afi][safi] != MAXIMUM_PREFIX_THRESHOLD_DEFAULT)
-	  vty_out (vty, " %d", peer->pmax_threshold[afi][safi]);
-	if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING))
-	  vty_out (vty, " warning-only");
-	if (peer->pmax_restart[afi][safi])
-	  vty_out (vty, " restart %d", peer->pmax_restart[afi][safi]);
-	vty_out (vty, "%s", VTY_NEWLINE);
-      }
+      vty_out (vty, " neighbor %s maximum-prefix %ld%s%s",
+	       addr, peer->pmax[afi][safi],
+	       CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_MAX_PREFIX_WARNING)
+	       ? " warning-only" : "", VTY_NEWLINE);
 
   /* Route server client. */
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)
@@ -4699,12 +4317,7 @@ bgp_config_write_family_header (struct vty *vty, afi_t afi, safi_t safi,
 	vty_out (vty, "vpnv4 unicast");
     }
   else if (afi == AFI_IP6)
-    {
-      vty_out (vty, "ipv6");
-      
-      if (safi == SAFI_MULTICAST)
-        vty_out (vty, " multicast");
-    }
+    vty_out (vty, "ipv6");
 
   vty_out (vty, "%s", VTY_NEWLINE);
 
@@ -4712,20 +4325,20 @@ bgp_config_write_family_header (struct vty *vty, afi_t afi, safi_t safi,
 }
 
 /* Address family based peer configuration display.  */
-static int
+int
 bgp_config_write_family (struct vty *vty, struct bgp *bgp, afi_t afi,
 			 safi_t safi)
 {
   int write = 0;
   struct peer *peer;
   struct peer_group *group;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   bgp_config_write_network (vty, bgp, afi, safi, &write);
 
   bgp_config_write_redistribute (vty, bgp, afi, safi, &write);
 
-  for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+  LIST_LOOP (bgp->group, group, nn)
     {
       if (group->conf->afc[afi][safi])
 	{
@@ -4733,7 +4346,7 @@ bgp_config_write_family (struct vty *vty, struct bgp *bgp, afi_t afi,
 	  bgp_config_write_peer (vty, bgp, group->conf, afi, safi);
 	}
     }
-  for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+  LIST_LOOP (bgp->peer, peer, nn)
     {
       if (peer->afc[afi][safi])
 	{
@@ -4757,8 +4370,7 @@ bgp_config_write (struct vty *vty)
   struct bgp *bgp;
   struct peer_group *group;
   struct peer *peer;
-  struct listnode *node, *nnode;
-  struct listnode *mnode, *mnnode;
+  struct listnode *nn, *nm, *no;
 
   /* BGP Multiple instance. */
   if (bgp_option_check (BGP_OPT_MULTIPLE_INSTANCE))
@@ -4775,7 +4387,7 @@ bgp_config_write (struct vty *vty)
     }
 
   /* BGP configuration. */
-  for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
+  LIST_LOOP (bm->bgp, bgp, nn)
     {
       if (write)
 	vty_out (vty, "!%s", VTY_NEWLINE);
@@ -4803,10 +4415,6 @@ bgp_config_write (struct vty *vty)
 	vty_out (vty, " bgp router-id %s%s", inet_ntoa (bgp->router_id), 
 		 VTY_NEWLINE);
 
-      /* BGP log-neighbor-changes. */
-      if (bgp_flag_check (bgp, BGP_FLAG_LOG_NEIGHBOR_CHANGES))
-	vty_out (vty, " bgp log-neighbor-changes%s", VTY_NEWLINE);
-
       /* BGP configuration. */
       if (bgp_flag_check (bgp, BGP_FLAG_ALWAYS_COMPARE_MED))
 	vty_out (vty, " bgp always-compare-med%s", VTY_NEWLINE);
@@ -4829,22 +4437,25 @@ bgp_config_write (struct vty *vty)
 	vty_out (vty, " bgp cluster-id %s%s", inet_ntoa (bgp->cluster_id),
 		 VTY_NEWLINE);
 
-      /* Confederation identifier*/
+      /* Confederation Information */
       if (CHECK_FLAG (bgp->config, BGP_CONFIG_CONFEDERATION))
-       vty_out (vty, " bgp confederation identifier %i%s", bgp->confed_id,
-                VTY_NEWLINE);
-
-      /* Confederation peer */
-      if (bgp->confed_peers_cnt > 0)
 	{
-	  int i;
+	  vty_out (vty, " bgp confederation identifier %i%s", bgp->confed_id,
+		   VTY_NEWLINE);
+	  if (bgp->confed_peers_cnt > 0)
+	    {
+	      int i;
 
-	  vty_out (vty, " bgp confederation peers");
+	      vty_out (vty, " bgp confederation peers");
 
-         for (i = 0; i < bgp->confed_peers_cnt; i++)
-           vty_out(vty, " %d", bgp->confed_peers[i]);
+	      for (i = 0; i < bgp->confed_peers_cnt; i++)
+		{
+		  vty_out(vty, " ");
+		  vty_out(vty, "%d", bgp->confed_peers[i]);
+		}
 
-          vty_out (vty, "%s", VTY_NEWLINE);
+	      vty_out (vty, "%s", VTY_NEWLINE);
+	    }
 	}
 
       /* BGP enforce-first-as. */
@@ -4854,19 +4465,10 @@ bgp_config_write (struct vty *vty)
       /* BGP deterministic-med. */
       if (bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
 	vty_out (vty, " bgp deterministic-med%s", VTY_NEWLINE);
-
-      /* BGP graceful-restart. */
-      if (bgp->stalepath_time != BGP_DEFAULT_STALEPATH_TIME)
-	vty_out (vty, " bgp graceful-restart stalepath-time %d%s",
-		 bgp->stalepath_time, VTY_NEWLINE);
-      if (bgp_flag_check (bgp, BGP_FLAG_GRACEFUL_RESTART))
-       vty_out (vty, " bgp graceful-restart%s", VTY_NEWLINE);
-
+      
       /* BGP bestpath method. */
       if (bgp_flag_check (bgp, BGP_FLAG_ASPATH_IGNORE))
 	vty_out (vty, " bgp bestpath as-path ignore%s", VTY_NEWLINE);
-      if (bgp_flag_check (bgp, BGP_FLAG_ASPATH_CONFED))
-	vty_out (vty, " bgp bestpath as-path confed%s", VTY_NEWLINE);
       if (bgp_flag_check (bgp, BGP_FLAG_COMPARE_ROUTER_ID))
 	vty_out (vty, " bgp bestpath compare-routerid%s", VTY_NEWLINE);
       if (bgp_flag_check (bgp, BGP_FLAG_MED_CONFED)
@@ -4905,13 +4507,13 @@ bgp_config_write (struct vty *vty)
 		 bgp->default_holdtime, VTY_NEWLINE);
 
       /* peer-group */
-      for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
+      LIST_LOOP (bgp->group, group, nm)
 	{
 	  bgp_config_write_peer (vty, bgp, group->conf, AFI_IP, SAFI_UNICAST);
 	}
 
       /* Normal neighbor configuration. */
-      for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+      LIST_LOOP (bgp->peer, peer, no)
 	{
 	  if (! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
 	    bgp_config_write_peer (vty, bgp, peer, AFI_IP, SAFI_UNICAST);
@@ -4933,16 +4535,13 @@ bgp_config_write (struct vty *vty)
       /* IPv6 unicast configuration.  */
       write += bgp_config_write_family (vty, bgp, AFI_IP6, SAFI_UNICAST);
 
-      /* IPv6 multicast configuration.  */
-      write += bgp_config_write_family (vty, bgp, AFI_IP6, SAFI_MULTICAST);
-
       write++;
     }
   return write;
 }
 
 void
-bgp_master_init (void)
+bgp_master_init ()
 {
   memset (&bgp_master, 0, sizeof (struct bgp_master));
 
@@ -4952,11 +4551,14 @@ bgp_master_init (void)
   bm->master = thread_master_create ();
   bm->start_time = time (NULL);
 }
-
 
 void
-bgp_init (void)
+bgp_init ()
 {
+  void bgp_zebra_init ();
+  void bgp_route_map_init ();
+  void bgp_filter_init ();
+
   /* BGP VTY commands installation.  */
   bgp_vty_init ();
 
@@ -4997,25 +4599,3 @@ bgp_init (void)
   bgp_snmp_init ();
 #endif /* HAVE_SNMP */
 }
-
-void
-bgp_terminate ()
-{
-  struct bgp *bgp;
-  struct peer *peer;
-  struct listnode *node, *nnode;
-  struct listnode *mnode, *mnnode;
-
-  for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
-    for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
-      if (peer->status == Established)
-          bgp_notify_send (peer, BGP_NOTIFY_CEASE,
-                           BGP_NOTIFY_CEASE_PEER_UNCONFIG);
-  
-  bgp_cleanup_routes ();
-  if (bm->process_main_queue)
-    work_queue_free (bm->process_main_queue);
-  if (bm->process_rsclient_queue)
-    work_queue_free (bm->process_rsclient_queue);
-}
-

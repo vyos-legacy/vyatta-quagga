@@ -33,10 +33,10 @@ DEFUN (show_debugging_ripng,
        show_debugging_ripng_cmd,
        "show debugging ripng",
        SHOW_STR
-       DEBUG_STR
-       "RIPng configuration\n")
+       "RIPng configuration\n"
+       "Debugging information\n")
 {
-  vty_out (vty, "RIPng debugging status:%s", VTY_NEWLINE);
+  vty_out (vty, "Zebra debugging status:%s", VTY_NEWLINE);
 
   if (IS_RIPNG_DEBUG_EVENT)
     vty_out (vty, "  RIPng event debugging is on%s", VTY_NEWLINE);
@@ -207,8 +207,7 @@ DEFUN (no_debug_ripng_zebra,
 struct cmd_node debug_node =
 {
   DEBUG_NODE,
-  "",				/* Debug node has no interface. */
-  1 /* VTYSH */
+  ""				/* Debug node has no interface. */
 };
 
 int

@@ -23,8 +23,6 @@
 #ifndef _ZEBRA_OSPF_NEIGHBOR_H
 #define _ZEBRA_OSPF_NEIGHBOR_H
 
-#include <ospfd/ospf_packet.h>
-
 /* Neighbor Data Structure */
 struct ospf_neighbor
 {
@@ -80,14 +78,9 @@ struct ospf_neighbor
   struct thread *t_ls_upd;
   struct thread *t_hello_reply;
 
-  /* NBMA configured neighbour */
+  /* Statistics Field */
+  u_int32_t state_change;
   struct ospf_nbr_nbma *nbr_nbma;
-
-  /* Statistics */
-  struct timeval ts_last_progress;  /* last advance of NSM            */
-  struct timeval ts_last_regress;   /* last regressive NSM change     */
-  const char *last_regress_str;     /* Event which last regressed NSM */
-  u_int32_t state_change;           /* NSM state change counter       */
 };
 
 /* Macros. */
@@ -95,26 +88,19 @@ struct ospf_neighbor
 #define NBR_IS_BDR(n)   IPV4_ADDR_SAME (&n->address.u.prefix4, &n->bd_router)
 
 /* Prototypes. */
-extern struct ospf_neighbor *ospf_nbr_new (struct ospf_interface *);
-extern void ospf_nbr_free (struct ospf_neighbor *);
-extern void ospf_nbr_delete (struct ospf_neighbor *);
-extern int ospf_nbr_bidirectional (struct in_addr *, struct in_addr *, int);
-extern void ospf_nbr_add_self (struct ospf_interface *);
-extern int ospf_nbr_count (struct ospf_interface *, int);
+struct ospf_neighbor *ospf_nbr_new (struct ospf_interface *);
+void ospf_nbr_free (struct ospf_neighbor *);
+void ospf_nbr_delete (struct ospf_neighbor *);
+int ospf_nbr_bidirectional (struct in_addr *, struct in_addr *, int);
+void ospf_nbr_add_self (struct ospf_interface *);
+int ospf_nbr_count (struct route_table *, int);
 #ifdef HAVE_OPAQUE_LSA
-extern int ospf_nbr_count_opaque_capable (struct ospf_interface *);
+int ospf_opaque_capable_nbr_count (struct route_table *nbrs, int status);
 #endif /* HAVE_OPAQUE_LSA */
-extern struct ospf_neighbor *ospf_nbr_get (struct ospf_interface *,
-					   struct ospf_header *,
-					   struct ip *, struct prefix *);
-extern struct ospf_neighbor *ospf_nbr_lookup (struct ospf_interface *,
-					      struct ip *,
-					      struct ospf_header *);
-extern struct ospf_neighbor *ospf_nbr_lookup_by_addr (struct route_table *,
-						      struct in_addr *);
-extern struct ospf_neighbor *ospf_nbr_lookup_by_routerid (struct route_table
-							  *,
-							  struct in_addr *);
-extern void ospf_renegotiate_optional_capabilities (struct ospf *top);
+struct ospf_neighbor *ospf_nbr_lookup_by_addr (struct route_table *,
+					       struct in_addr *);
+struct ospf_neighbor *ospf_nbr_lookup_by_routerid (struct route_table *,
+						   struct in_addr *);
+void ospf_renegotiate_optional_capabilities (struct ospf *top);
 
 #endif /* _ZEBRA_OSPF_NEIGHBOR_H */

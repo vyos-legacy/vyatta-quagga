@@ -96,7 +96,7 @@
 	(term_debug_ospf_ ## a & OSPF_DEBUG_ ## b)
 #define IS_DEBUG_OSPF_EVENT IS_DEBUG_OSPF(event,EVENT)
 
-#define IS_DEBUG_OSPF_NSSA  IS_DEBUG_OSPF(nssa,NSSA)
+#define IS_DEBUG_OSPF_NSSA  IS_DEBUG_OSPF(event,NSSA)
 
 #define IS_CONF_DEBUG_OSPF_PACKET(a, b) \
 	(conf_debug_ospf_packet[a] & OSPF_DEBUG_ ## b)
@@ -121,23 +121,19 @@ extern unsigned long term_debug_ospf_zebra;
 extern unsigned long term_debug_ospf_nssa;
 
 /* Message Strings. */
-extern const char *ospf_packet_type_str[];
+extern char *ospf_packet_type_str[];
 extern char *ospf_lsa_type_str[];
 
 /* Prototypes. */
-extern const char *ospf_area_name_string (struct ospf_area *);
-extern const char *ospf_area_desc_string (struct ospf_area *);
-extern const char *ospf_if_name_string (struct ospf_interface *);
-extern void ospf_nbr_state_message (struct ospf_neighbor *, char *, size_t);
-extern char *ospf_options_dump (u_char);
-extern const char *ospf_timer_dump (struct thread *, char *, size_t);
-extern const char *ospf_timeval_dump (struct timeval *, char *, size_t);
-extern void ospf_ip_header_dump (struct ip *);
-extern void ospf_packet_dump (struct stream *);
-extern void ospf_lsa_header_dump (struct lsa_header *);
-extern void debug_init (void);
-
-/* Appropriate buffer size to use with ospf_timer_dump and ospf_timeval_dump: */
-#define OSPF_TIME_DUMP_SIZE	16
+char *ospf_area_name_string (struct ospf_area *);
+char *ospf_area_desc_string (struct ospf_area *);
+char *ospf_if_name_string (struct ospf_interface *);
+void ospf_nbr_state_message (struct ospf_neighbor *, char *, size_t);
+char *ospf_options_dump (u_char);
+char *ospf_timer_dump (struct thread *, char *, size_t);
+void ospf_ip_header_dump (struct stream *);
+void ospf_packet_dump (struct stream *);
+void ospf_lsa_header_dump (struct lsa_header *);
+void debug_init ();
 
 #endif /* _ZEBRA_OSPF_DUMP_H */

@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_ATTR_H
-#define _QUAGGA_BGP_ATTR_H
-
 /* Simple bit mapping. */
 #define BITMAP_NBBY 8
 
@@ -29,9 +26,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #define CHECK_BITMAP(MAP, NUM) \
         CHECK_FLAG (MAP[(NUM) / BITMAP_NBBY], 1 << ((NUM) % BITMAP_NBBY))
-
-#define BGP_MED_MAX UINT32_MAX
-
 
 /* BGP Attribute type range. */
 #define BGP_ATTR_TYPE_RANGE     256
@@ -45,73 +39,46 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 /* BGP attribute header must bigger than 2. */
 #define BGP_ATTR_MIN_LEN        2       /* Attribute flag and type. */
-#define BGP_ATTR_DEFAULT_WEIGHT 32768
 
-/* Additional/uncommon BGP attributes.
- * lazily allocated as and when a struct attr
- * requires it.
- */
-struct attr_extra
-{
-  /* Multi-Protocol Nexthop, AFI IPv6 */
-#ifdef HAVE_IPV6
-  struct in6_addr mp_nexthop_global;
-  struct in6_addr mp_nexthop_local;
-#endif /* HAVE_IPV6 */
-
-  /* Extended Communities attribute. */
-  struct ecommunity *ecommunity;
-  
-  /* Route-Reflector Cluster attribute */
-  struct cluster_list *cluster;
-  
-  /* Unknown transitive attribute. */
-  struct transit *transit;
-
-  struct in_addr mp_nexthop_global_in;
-  struct in_addr mp_nexthop_local_in;
-  
-  /* Aggregator Router ID attribute */
-  struct in_addr aggregator_addr;
-  
-  /* Route Reflector Originator attribute */
-  struct in_addr originator_id;
-  
-  /* Local weight, not actually an attribute */
-  u_int32_t weight;
-  
-  /* Aggregator ASN */
-  as_t aggregator_as;
-  
-  /* MP Nexthop length */
-  u_char mp_nexthop_len;
-};
-
-/* BGP core attribute structure. */
+/* BGP attribute structure. */
 struct attr
 {
-  /* AS Path structure */
-  struct aspath *aspath;
-
-  /* Community structure */
-  struct community *community;	
-  
-  /* Lazily allocated pointer to extra attributes */
-  struct attr_extra *extra;
-  
   /* Reference count of this attribute. */
   unsigned long refcnt;
 
   /* Flag of attribute is set or not. */
   u_int32_t flag;
-  
-  /* Apart from in6_addr, the remaining static attributes */
+
+  /* Attributes. */
+  u_char origin;
   struct in_addr nexthop;
   u_int32_t med;
   u_int32_t local_pref;
+  as_t aggregator_as;
+  struct in_addr aggregator_addr;
+  u_int32_t weight;
+  struct in_addr originator_id;
+  struct cluster_list *cluster;
 
-  /* Path origin attribute */
-  u_char origin;
+  u_char mp_nexthop_len;
+#ifdef HAVE_IPV6
+  struct in6_addr mp_nexthop_global;
+  struct in6_addr mp_nexthop_local;
+#endif /* HAVE_IPV6 */
+  struct in_addr mp_nexthop_global_in;
+  struct in_addr mp_nexthop_local_in;
+
+  /* AS Path structure */
+  struct aspath *aspath;
+
+  /* Community structure */
+  struct community *community;	
+
+  /* Extended Communities attribute. */
+  struct ecommunity *ecommunity;
+
+  /* Unknown transitive attribute. */
+  struct transit *transit;
 };
 
 /* Router Reflector related structure. */
@@ -133,41 +100,26 @@ struct transit
 #define ATTR_FLAG_BIT(X)  (1 << ((X) - 1))
 
 /* Prototypes. */
-extern void bgp_attr_init (void);
-extern int bgp_attr_parse (struct peer *, struct attr *, bgp_size_t,
+void bgp_attr_init ();
+int bgp_attr_parse (struct peer *, struct attr *, bgp_size_t,
 		    struct bgp_nlri *, struct bgp_nlri *);
-extern int bgp_attr_check (struct peer *, struct attr *);
-extern struct attr_extra *bgp_attr_extra_get (struct attr *);
-extern void bgp_attr_extra_free (struct attr *);
-extern void bgp_attr_dup (struct attr *, struct attr *);
-extern struct attr *bgp_attr_intern (struct attr *attr);
-extern void bgp_attr_unintern (struct attr *);
-extern void bgp_attr_flush (struct attr *);
-extern struct attr *bgp_attr_default_set (struct attr *attr, u_char);
-extern struct attr *bgp_attr_default_intern (u_char);
-extern struct attr *bgp_attr_aggregate_intern (struct bgp *, u_char,
-                                        struct aspath *, 
-                                        struct community *, int as_set);
-extern bgp_size_t bgp_packet_attribute (struct bgp *bgp, struct peer *, 
-                                 struct stream *, struct attr *, 
-                                 struct prefix *, afi_t, safi_t, 
-                                 struct peer *, struct prefix_rd *, u_char *);
-extern bgp_size_t bgp_packet_withdraw (struct peer *peer, struct stream *s, 
-                                struct prefix *p, afi_t, safi_t, 
-                                struct prefix_rd *, u_char *);
-extern void bgp_dump_routes_attr (struct stream *, struct attr *,
-				  struct prefix *);
-extern int attrhash_cmp (void *, void *);
-extern unsigned int attrhash_key_make (void *);
-extern void attr_show_all (struct vty *);
-extern unsigned long int attr_count (void);
-extern unsigned long int attr_unknown_count (void);
+int bgp_attr_check (struct peer *, struct attr *);
+struct attr *bgp_attr_intern (struct attr *attr);
+void bgp_attr_unintern (struct attr *);
+void bgp_attr_flush (struct attr *);
+struct attr *bgp_attr_default_set (struct attr *attr, u_char);
+struct attr *bgp_attr_default_intern (u_char);
+struct attr *bgp_attr_aggregate_intern (struct bgp *, u_char, struct aspath *, struct community *, int as_set);
+bgp_size_t bgp_packet_attribute (struct bgp *bgp, struct peer *, struct stream *, struct attr *, struct prefix *, afi_t, safi_t, struct peer *, struct prefix_rd *, u_char *);
+bgp_size_t bgp_packet_withdraw (struct peer *peer, struct stream *s, struct prefix *p, afi_t, safi_t, struct prefix_rd *, u_char *);
+void bgp_dump_routes_attr (struct stream *, struct attr *);
+unsigned int attrhash_key_make (struct attr *);
+int attrhash_cmp (struct attr *, struct attr *);
+void attr_show_all (struct vty *);
 
 /* Cluster list prototypes. */
-extern int cluster_loop_check (struct cluster_list *, struct in_addr);
-extern void cluster_unintern (struct cluster_list *);
+int cluster_loop_check (struct cluster_list *, struct in_addr);
+void cluster_unintern (struct cluster_list *);
 
 /* Transit attribute prototypes. */
 void transit_unintern (struct transit *);
-
-#endif /* _QUAGGA_BGP_ATTR_H */

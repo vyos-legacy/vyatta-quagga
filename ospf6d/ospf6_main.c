@@ -20,51 +20,28 @@
  */
 
 #include <zebra.h>
-#include <lib/version.h>
-
 #include "getopt.h"
 #include "thread.h"
 #include "log.h"
+#include "version.h"
 #include "command.h"
 #include "vty.h"
 #include "memory.h"
-#include "if.h"
-#include "filter.h"
-#include "prefix.h"
-#include "plist.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "ospf6d.h"
+#include "ospf6_network.h"
+
+void ospf6_init ();
+void ospf6_terminate ();
+void nexthop_init ();
+int ospf6_receive (struct thread *);
+
+extern int ospf6_sock;
 
 /* Default configuration file name for ospf6d. */
 #define OSPF6_DEFAULT_CONFIG       "ospf6d.conf"
-
 /* Default port values. */
 #define OSPF6_VTY_PORT             2606
-
-/* ospf6d privileges */
-zebra_capabilities_t _caps_p [] =
-{
-  ZCAP_NET_RAW,
-  ZCAP_BIND
-};
-
-struct zebra_privs_t ospf6d_privs =
-{
-#if defined(QUAGGA_USER)
-  .user = QUAGGA_USER,
-#endif
-#if defined QUAGGA_GROUP
-  .group = QUAGGA_GROUP,
-#endif
-#ifdef VTY_GROUP
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = 2,
-  .cap_num_i = 0
-};
 
 /* ospf6d options, we use GNU getopt library. */
 struct option longopts[] = 
@@ -74,19 +51,16 @@ struct option longopts[] =
   { "pid_file",    required_argument, NULL, 'i'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
-  { "dryrun",      no_argument,       NULL, 'C'},
   { "help",        no_argument,       NULL, 'h'},
   { 0 }
 };
 
 /* Configuration file and directory. */
+char config_current[] = OSPF6_DEFAULT_CONFIG;
 char config_default[] = SYSCONFDIR OSPF6_DEFAULT_CONFIG;
 
 /* ospf6d program name. */
-char *progname;
 
 /* is daemon? */
 int daemon_mode = 0;
@@ -95,7 +69,14 @@ int daemon_mode = 0;
 struct thread_master *master;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_OSPF6D_PID;
+char *pid_file = PATH_OSPF6D_PID;
+
+/* for reload */
+char _cwd[64];
+char _progpath[64];
+int _argc;
+char **_argv;
+char **_envp;
 
 /* Help information display. */
 static void
@@ -112,70 +93,112 @@ Daemon which manages OSPF version 3.\n\n\
 -i, --pid_file     Set process identifier file name\n\
 -A, --vty_addr     Set vty's bind address\n\
 -P, --vty_port     Set vty's port number\n\
--u, --user         User to run as\n\
--g, --group        Group to run as\n\
 -v, --version      Print program version\n\
--C, --dryrun       Check configuration for validity and exit\n\
 -h, --help         Display this help and exit\n\
 \n\
-Report bugs to zebra@zebra.org\n", progname);
+Report bugs to yasu@sfc.wide.ad.jp\n", progname);
     }
 
   exit (status);
 }
+
+
+void
+_reload ()
+{
+  zlog_notice ("OSPF6d (Zebra-%s ospf6d-%s) reloaded",
+               ZEBRA_VERSION, OSPF6_DAEMON_VERSION);
+  ospf6_zebra_finish ();
+  vty_finish ();
+  execve (_progpath, _argv, _envp);
+}
+
+void
+terminate (int i)
+{
+  ospf6_delete (ospf6);
+  unlink (PATH_OSPF6D_PID);
+  zlog_notice ("OSPF6d (Zebra-%s ospf6d-%s) terminated",
+               ZEBRA_VERSION, OSPF6_DAEMON_VERSION);
+  exit (i);
+}
 
 /* SIGHUP handler. */
 void 
-sighup (void)
+sighup (int sig)
 {
   zlog_info ("SIGHUP received");
+  _reload ();
 }
 
 /* SIGINT handler. */
 void
-sigint (void)
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal SIGINT");
-  exit (0);
+  zlog_info ("SIGINT received");
+  terminate (0);
 }
 
 /* SIGTERM handler. */
 void
-sigterm (void)
+sigterm (int sig)
 {
-  zlog_notice ("Terminating on signal SIGTERM");
-  exit (0);
+  zlog_info ("SIGTERM received");
+  terminate (0);
 }
 
 /* SIGUSR1 handler. */
 void
-sigusr1 (void)
+sigusr1 (int sig)
 {
   zlog_info ("SIGUSR1 received");
   zlog_rotate (NULL);
 }
 
-struct quagga_signal_t ospf6_signals[] =
+/* Signale wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
 {
-  {
-    .signal = SIGHUP,
-    .handler = &sighup,
-  },
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigterm,
-  },
-  {
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },
-};
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
 
-/* Main routine of ospf6d. Treatment of argument and starting ospf finite
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
+/* Initialization of signal handles. */
+void
+signal_init ()
+{
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigterm);
+  signal_set (SIGPIPE, SIG_IGN);
+#ifdef SIGTSTP
+  signal_set (SIGTSTP, SIG_IGN);
+#endif
+#ifdef SIGTTIN
+  signal_set (SIGTTIN, SIG_IGN);
+#endif
+#ifdef SIGTTOU
+  signal_set (SIGTTOU, SIG_IGN);
+#endif
+  signal_set (SIGUSR1, sigusr1);
+}
+
+/* Main routine of ospf6d. Treatment of argument and start ospf finite
    state machine is handled here. */
 int
 main (int argc, char *argv[], char *envp[])
@@ -185,8 +208,9 @@ main (int argc, char *argv[], char *envp[])
   char *vty_addr = NULL;
   int vty_port = 0;
   char *config_file = NULL;
+  char *progname;
   struct thread thread;
-  int dryrun = 0;
+  int flag;
 
   /* Set umask before anything for security */
   umask (0027);
@@ -194,10 +218,20 @@ main (int argc, char *argv[], char *envp[])
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
+  /* for reload */
+  _argc = argc;
+  _argv = argv;
+  _envp = envp;
+  getcwd (_cwd, sizeof (_cwd));
+  if (*argv[0] == '.')
+    snprintf (_progpath, sizeof (_progpath), "%s/%s", _cwd, _argv[0]);
+  else
+    snprintf (_progpath, sizeof (_progpath), "%s", argv[0]);
+
   /* Command line argument treatment. */
   while (1) 
     {
-      opt = getopt_long (argc, argv, "df:i:hp:A:P:u:g:vC", longopts, 0);
+      opt = getopt_long (argc, argv, "df:hp:A:P:v", longopts, 0);
     
       if (opt == EOF)
         break;
@@ -219,29 +253,12 @@ main (int argc, char *argv[], char *envp[])
           pid_file = optarg;
           break;
         case 'P':
-         /* Deal with atoi() returning 0 on failure, and ospf6d not
-             listening on ospf6d port... */
-          if (strcmp(optarg, "0") == 0)
-            {
-              vty_port = 0;
-              break;
-            }
           vty_port = atoi (optarg);
-          vty_port = (vty_port ? vty_port : OSPF6_VTY_PORT);
           break;
-        case 'u':
-          ospf6d_privs.user = optarg;
-          break;
-	case 'g':
-	  ospf6d_privs.group = optarg;
-	  break;
         case 'v':
           print_version (progname);
           exit (0);
           break;
-	case 'C':
-	  dryrun = 1;
-	  break;
         case 'h':
           usage (progname, 0);
           break;
@@ -255,46 +272,45 @@ main (int argc, char *argv[], char *envp[])
   master = thread_master_create ();
 
   /* Initializations. */
-  zlog_default = openzlog (progname, ZLOG_OSPF6,
-                           LOG_CONS|LOG_NDELAY|LOG_PID,
-                           LOG_DAEMON);
-  zprivs_init (&ospf6d_privs);
-  /* initialize zebra libraries */
-  signal_init (master, Q_SIGC(ospf6_signals), ospf6_signals);
+  if (! daemon_mode)
+    flag = ZLOG_STDOUT;
+  else
+    flag = 0;
+
+  zlog_default = openzlog (progname, flag, ZLOG_OSPF6,
+			   LOG_CONS|LOG_NDELAY|LOG_PERROR|LOG_PID,
+			   LOG_DAEMON);
+  signal_init ();
   cmd_init (1);
-  vty_init (master);
-  memory_init ();
-  if_init ();
-  access_list_init ();
-  prefix_list_init ();
-
-  /* initialize ospf6 */
+  vty_init ();
   ospf6_init ();
-
-  /* sort command vector */
+  memory_init ();
   sort_node ();
 
   /* parse config file */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Start execution only if not in dry-run mode */
-  if (dryrun)
-    return(0);
-  
   if (daemon_mode)
     daemon (0, 0);
 
   /* pid file create */
+#if 0
+  pid_output_lock (pid_file);
+#else
   pid_output (pid_file);
+#endif
 
-  /* Make ospf6 vty socket. */
-  if (!vty_port)
-    vty_port = OSPF6_VTY_PORT;
-  vty_serv_sock (vty_addr, vty_port, OSPF6_VTYSH_PATH);
+  /* Make ospf protocol socket. */
+  ospf6_serv_sock ();
+  thread_add_read (master, ospf6_receive, NULL, ospf6_sock);
+
+  /* Make ospf vty socket. */
+  vty_serv_sock (vty_addr,
+		 vty_port ? vty_port : OSPF6_VTY_PORT, OSPF6_VTYSH_PATH);
 
   /* Print start message */
-  zlog_notice ("OSPF6d (Quagga-%s ospf6d-%s) starts: vty@%d",
-               QUAGGA_VERSION, OSPF6_DAEMON_VERSION,vty_port);
+  zlog_notice ("OSPF6d (Zebra-%s ospf6d-%s) starts",
+               ZEBRA_VERSION, OSPF6_DAEMON_VERSION);
 
   /* Start finite state machine, here we go! */
   while (thread_fetch (master, &thread))
@@ -302,9 +318,9 @@ main (int argc, char *argv[], char *envp[])
 
   /* Log in case thread failed */
   zlog_warn ("Thread failed");
+  terminate (0);
 
   /* Not reached. */
   exit (0);
 }
-
 

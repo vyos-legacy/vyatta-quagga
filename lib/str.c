@@ -1,23 +1,14 @@
 /*
  * zebra string function
  *
- * XXX This version of snprintf does not check bounds!
+ * these functions are just very basic wrappers around exiting ones and
+ * do not offer the protection that might be expected against buffer
+ * overruns etc
  */
 
-/*
- The implementations of strlcpy and strlcat are copied from rsync (GPL):
-    Copyright (C) Andrew Tridgell 1998
-    Copyright (C) 2002 by Martin Pool
-
- Note that these are not terribly efficient, since they make more than one
- pass over the argument strings.  At some point, they should be optimized.
- 
- The implementation of strndup is copied from glibc-2.3.5:
-    Copyright (C) 1996, 1997, 1998, 2001, 2002 Free Software Foundation, Inc.
-*/
-
-
 #include <zebra.h>
+
+#include "str.h"
 
 #ifndef HAVE_SNPRINTF
 /*
@@ -36,74 +27,36 @@ snprintf(char *str, size_t size, const char *format, ...)
 #endif
 
 #ifndef HAVE_STRLCPY
-/**
- * Like strncpy but does not 0 fill the buffer and always null 
- * terminates.
- *
- * @param bufsize is the size of the destination buffer.
- *
- * @return index of the terminating byte.
- **/
+/*
+ * strlcpy is a safer version of strncpy(), checking the total
+ * size of the buffer
+ */
 size_t
-strlcpy(char *d, const char *s, size_t bufsize)
+strlcpy(char *dst, const char *src, size_t size)
 {
-	size_t len = strlen(s);
-	size_t ret = len;
-	if (bufsize > 0) {
-		if (len >= bufsize)
-			len = bufsize-1;
-		memcpy(d, s, len);
-		d[len] = 0;
-	}
-	return ret;
+  strncpy(dst, src, size);
+
+  return (strlen(dst));
 }
 #endif
 
 #ifndef HAVE_STRLCAT
-/**
- * Like strncat() but does not 0 fill the buffer and always null 
- * terminates.
- *
- * @param bufsize length of the buffer, which should be one more than
- * the maximum resulting string length.
- **/
+/*
+ * strlcat is a safer version of strncat(), checking the total
+ * size of the buffer
+ */
 size_t
-strlcat(char *d, const char *s, size_t bufsize)
+strlcat(char *dst, const char *src, size_t size)
 {
-	size_t len1 = strlen(d);
-	size_t len2 = strlen(s);
-	size_t ret = len1 + len2;
+  /* strncpy(dst, src, size - strlen(dst)); */
 
-	if (len1 < bufsize - 1) {
-		if (len2 >= bufsize - len1)
-			len2 = bufsize - len1 - 1;
-		memcpy(d+len1, s, len2);
-		d[len1+len2] = 0;
-	}
-	return ret;
-}
-#endif
+  /* I've just added below code only for workable under Linux.  So
+     need rewrite -- Kunihiro. */
+  if (strlen (dst) + strlen (src) >= size)
+    return -1;
 
-#ifndef HAVE_STRNLEN
-size_t
-strnlen(const char *s, size_t maxlen)
-{
-  const char *p;
-  return (p = (const char *)memchr(s, '\0', maxlen)) ? (size_t)(p-s) : maxlen;
-}
-#endif
+  strcat (dst, src);
 
-#ifndef HAVE_STRNDUP
-char *
-strndup (const char *s, size_t maxlen)
-{
-    size_t len = strnlen (s, maxlen);
-    char *new = (char *) malloc (len + 1);
-
-    if (new == NULL)
-      return NULL;
-
-    new[len] = '\0';
-    return (char *) memcpy (new, s, len);
+  return (strlen(dst));
 }
 #endif

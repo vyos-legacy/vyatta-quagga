@@ -35,8 +35,8 @@ struct hash *disthash;
 void (*distribute_add_hook) (struct distribute *);
 void (*distribute_delete_hook) (struct distribute *);
 
-static struct distribute *
-distribute_new (void)
+struct distribute *
+distribute_new ()
 {
   struct distribute *new;
 
@@ -47,11 +47,11 @@ distribute_new (void)
 }
 
 /* Free distribute object. */
-static void
+void
 distribute_free (struct distribute *dist)
 {
   if (dist->ifname)
-    XFREE (MTYPE_DISTRIBUTE_IFNAME, dist->ifname);
+    free (dist->ifname);
 
   if (dist->list[DISTRIBUTE_IN])
     free (dist->list[DISTRIBUTE_IN]);
@@ -68,13 +68,12 @@ distribute_free (struct distribute *dist)
 
 /* Lookup interface's distribute list. */
 struct distribute *
-distribute_lookup (const char *ifname)
+distribute_lookup (char *ifname)
 {
   struct distribute key;
   struct distribute *dist;
 
-  /* temporary reference */
-  key.ifname = (char *)ifname;
+  key.ifname = ifname;
 
   dist = hash_lookup (disthash, &key);
   
@@ -93,35 +92,35 @@ distribute_list_delete_hook (void (*func) (struct distribute *))
   distribute_delete_hook = func;
 }
 
-static void *
+void *
 distribute_hash_alloc (struct distribute *arg)
 {
   struct distribute *dist;
 
   dist = distribute_new ();
   if (arg->ifname)
-    dist->ifname = XSTRDUP (MTYPE_DISTRIBUTE_IFNAME, arg->ifname);
+    dist->ifname = strdup (arg->ifname);
   else
     dist->ifname = NULL;
   return dist;
 }
 
 /* Make new distribute list and push into hash. */
-static struct distribute *
-distribute_get (const char *ifname)
+struct distribute *
+distribute_get (char *ifname)
 {
   struct distribute key;
 
-  /* temporary reference */
-  key.ifname = (char *)ifname;
-  
-  return hash_get (disthash, &key, (void * (*) (void *))distribute_hash_alloc);
+  key.ifname = ifname;
+
+  return hash_get (disthash, &key, distribute_hash_alloc);
 }
 
-static unsigned int
+unsigned int
 distribute_hash_make (struct distribute *dist)
 {
-  unsigned int i, key;
+  unsigned int key;
+  int i;
 
   key = 0;
   if (dist->ifname)
@@ -133,7 +132,7 @@ distribute_hash_make (struct distribute *dist)
 
 /* If two distribute-list have same value then return 1 else return
    0. This function is used by hash package. */
-static int
+int
 distribute_cmp (struct distribute *dist1, struct distribute *dist2)
 {
   if (dist1->ifname && dist2->ifname)
@@ -145,9 +144,8 @@ distribute_cmp (struct distribute *dist1, struct distribute *dist2)
 }
 
 /* Set access-list name to the distribute list. */
-static struct distribute *
-distribute_list_set (const char *ifname, enum distribute_type type, 
-                     const char *alist_name)
+struct distribute *
+distribute_list_set (char *ifname, enum distribute_type type, char *alist_name)
 {
   struct distribute *dist;
 
@@ -174,9 +172,9 @@ distribute_list_set (const char *ifname, enum distribute_type type,
 
 /* Unset distribute-list.  If matched distribute-list exist then
    return 1. */
-static int
-distribute_list_unset (const char *ifname, enum distribute_type type, 
-		       const char *alist_name)
+int
+distribute_list_unset (char *ifname, enum distribute_type type, 
+		       char *alist_name)
 {
   struct distribute *dist;
 
@@ -223,9 +221,9 @@ distribute_list_unset (const char *ifname, enum distribute_type type,
 }
 
 /* Set access-list name to the distribute list. */
-static struct distribute *
-distribute_list_prefix_set (const char *ifname, enum distribute_type type,
-			    const char *plist_name)
+struct distribute *
+distribute_list_prefix_set (char *ifname, enum distribute_type type,
+			    char *plist_name)
 {
   struct distribute *dist;
 
@@ -252,9 +250,9 @@ distribute_list_prefix_set (const char *ifname, enum distribute_type type,
 
 /* Unset distribute-list.  If matched distribute-list exist then
    return 1. */
-static int
-distribute_list_prefix_unset (const char *ifname, enum distribute_type type,
-			      const char *plist_name)
+int
+distribute_list_prefix_unset (char *ifname, enum distribute_type type,
+			      char *plist_name)
 {
   struct distribute *dist;
 
@@ -329,14 +327,6 @@ DEFUN (distribute_list_all,
   return CMD_SUCCESS;
 }
 
-ALIAS (distribute_list_all,
-       ipv6_distribute_list_all_cmd,
-       "distribute-list WORD (in|out)",
-       "Filter networks in routing updates\n"
-       "Access-list name\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n")
-
 DEFUN (no_distribute_list_all,
        no_distribute_list_all_cmd,
        "no distribute-list WORD (in|out)",
@@ -370,15 +360,6 @@ DEFUN (no_distribute_list_all,
   return CMD_SUCCESS;
 }
 
-ALIAS (no_distribute_list_all,
-       no_ipv6_distribute_list_all_cmd,
-       "no distribute-list WORD (in|out)",
-       NO_STR
-       "Filter networks in routing updates\n"
-       "Access-list name\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n")
-
 DEFUN (distribute_list,
        distribute_list_cmd,
        "distribute-list WORD (in|out) WORD",
@@ -407,15 +388,6 @@ DEFUN (distribute_list,
 
   return CMD_SUCCESS;
 }       
-
-ALIAS (distribute_list,
-       ipv6_distribute_list_cmd,
-       "distribute-list WORD (in|out) WORD",
-       "Filter networks in routing updates\n"
-       "Access-list name\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n"
-       "Interface name\n")
 
 DEFUN (no_districute_list, no_distribute_list_cmd,
        "no distribute-list WORD (in|out) WORD",
@@ -449,15 +421,6 @@ DEFUN (no_districute_list, no_distribute_list_cmd,
   return CMD_SUCCESS;
 }       
 
-ALIAS (no_districute_list, no_ipv6_distribute_list_cmd,
-       "no distribute-list WORD (in|out) WORD",
-       NO_STR
-       "Filter networks in routing updates\n"
-       "Access-list name\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n"
-       "Interface name\n")
-
 DEFUN (districute_list_prefix_all,
        distribute_list_prefix_all_cmd,
        "distribute-list prefix WORD (in|out)",
@@ -487,15 +450,6 @@ DEFUN (districute_list_prefix_all,
 
   return CMD_SUCCESS;
 }       
-
-ALIAS (districute_list_prefix_all,
-       ipv6_distribute_list_prefix_all_cmd,
-       "distribute-list prefix WORD (in|out)",
-       "Filter networks in routing updates\n"
-       "Filter prefixes in routing updates\n"
-       "Name of an IP prefix-list\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n")
 
 DEFUN (no_districute_list_prefix_all,
        no_distribute_list_prefix_all_cmd,
@@ -531,16 +485,6 @@ DEFUN (no_districute_list_prefix_all,
   return CMD_SUCCESS;
 }       
 
-ALIAS (no_districute_list_prefix_all,
-       no_ipv6_distribute_list_prefix_all_cmd,
-       "no distribute-list prefix WORD (in|out)",
-       NO_STR
-       "Filter networks in routing updates\n"
-       "Filter prefixes in routing updates\n"
-       "Name of an IP prefix-list\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n")
-
 DEFUN (districute_list_prefix, distribute_list_prefix_cmd,
        "distribute-list prefix WORD (in|out) WORD",
        "Filter networks in routing updates\n"
@@ -570,15 +514,6 @@ DEFUN (districute_list_prefix, distribute_list_prefix_cmd,
 
   return CMD_SUCCESS;
 }       
-
-ALIAS (districute_list_prefix, ipv6_distribute_list_prefix_cmd,
-       "distribute-list prefix WORD (in|out) WORD",
-       "Filter networks in routing updates\n"
-       "Filter prefixes in routing updates\n"
-       "Name of an IP prefix-list\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n"
-       "Interface name\n")
 
 DEFUN (no_districute_list_prefix, no_distribute_list_prefix_cmd,
        "no distribute-list prefix WORD (in|out) WORD",
@@ -614,20 +549,10 @@ DEFUN (no_districute_list_prefix, no_distribute_list_prefix_cmd,
   return CMD_SUCCESS;
 }       
 
-ALIAS (no_districute_list_prefix, no_ipv6_distribute_list_prefix_cmd,
-       "no distribute-list prefix WORD (in|out) WORD",
-       NO_STR
-       "Filter networks in routing updates\n"
-       "Filter prefixes in routing updates\n"
-       "Name of an IP prefix-list\n"
-       "Filter incoming routing updates\n"
-       "Filter outgoing routing updates\n"
-       "Interface name\n")
-
 int
 config_show_distribute (struct vty *vty)
 {
-  unsigned int i;
+  int i;
   struct hash_backet *mp;
   struct distribute *dist;
 
@@ -706,7 +631,7 @@ config_show_distribute (struct vty *vty)
 int
 config_write_distribute (struct vty *vty)
 {
-  unsigned int i;
+  int i;
   struct hash_backet *mp;
   int write = 0;
 
@@ -768,26 +693,17 @@ distribute_list_reset ()
 void
 distribute_list_init (int node)
 {
-  disthash = hash_create ((unsigned int (*) (void *)) distribute_hash_make,
-                          (int (*) (void *, void *)) distribute_cmp);
+  disthash = hash_create (distribute_hash_make, distribute_cmp);
 
-  if(node==RIP_NODE) {
-    install_element (RIP_NODE, &distribute_list_all_cmd);
-    install_element (RIP_NODE, &no_distribute_list_all_cmd);
-    install_element (RIP_NODE, &distribute_list_cmd);
-    install_element (RIP_NODE, &no_distribute_list_cmd);
-    install_element (RIP_NODE, &distribute_list_prefix_all_cmd);
-    install_element (RIP_NODE, &no_distribute_list_prefix_all_cmd);
-    install_element (RIP_NODE, &distribute_list_prefix_cmd);
-    install_element (RIP_NODE, &no_distribute_list_prefix_cmd);
-  } else {
-    install_element (RIPNG_NODE, &ipv6_distribute_list_all_cmd);
-    install_element (RIPNG_NODE, &no_ipv6_distribute_list_all_cmd);
-    install_element (RIPNG_NODE, &ipv6_distribute_list_cmd);
-    install_element (RIPNG_NODE, &no_ipv6_distribute_list_cmd);
-    install_element (RIPNG_NODE, &ipv6_distribute_list_prefix_all_cmd);
-    install_element (RIPNG_NODE, &no_ipv6_distribute_list_prefix_all_cmd);
-    install_element (RIPNG_NODE, &ipv6_distribute_list_prefix_cmd);
-    install_element (RIPNG_NODE, &no_ipv6_distribute_list_prefix_cmd);
-  }
+  install_element (node, &distribute_list_all_cmd);
+  install_element (node, &no_distribute_list_all_cmd);
+
+  install_element (node, &distribute_list_cmd);
+  install_element (node, &no_distribute_list_cmd);
+
+  install_element (node, &distribute_list_prefix_all_cmd);
+  install_element (node, &no_distribute_list_prefix_all_cmd);
+
+  install_element (node, &distribute_list_prefix_cmd);
+  install_element (node, &no_distribute_list_prefix_cmd);
 }

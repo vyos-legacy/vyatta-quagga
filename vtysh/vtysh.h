@@ -28,38 +28,52 @@
 #define VTYSH_OSPFD  0x08
 #define VTYSH_OSPF6D 0x10
 #define VTYSH_BGPD   0x20
-#define VTYSH_ISISD  0x40
-#define VTYSH_ALL	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD|VTYSH_ISISD
-#define VTYSH_RMAP	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD
-#define VTYSH_INTERFACE	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_ISISD
+#define VTYSH_ALL    VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD
+#define VTYSH_RMAP   VTYSH_RIPD|VTYSH_OSPFD|VTYSH_BGPD
+
+#define VTYSH_INDEX_ZEBRA 0
+#define VTYSH_INDEX_RIP   1
+#define VTYSH_INDEX_RIPNG 2
+#define VTYSH_INDEX_OSPF  3
+#define VTYSH_INDEX_OSPF6 4
+#define VTYSH_INDEX_BGP   5
+#define VTYSH_INDEX_MAX   6
+
+/* UNIX domain socket path. */
+#define ZEBRA_PATH "/tmp/.zebra"
+#define RIP_PATH "/tmp/.ripd"
+#define RIPNG_PATH "/tmp/.ripngd"
+#define OSPF_PATH "/tmp/.ospfd"
+#define OSPF6_PATH "/tmp/.ospf6d"
+#define BGP_PATH "/tmp/.bgpd"
 
 /* vtysh local configuration file. */
 #define VTYSH_DEFAULT_CONFIG "vtysh.conf"
 
-void vtysh_init_vty (void);
-void vtysh_init_cmd (void);
-extern int vtysh_connect_all (const char *optional_daemon_name);
-void vtysh_readline_init (void);
-void vtysh_user_init (void);
+void vtysh_init_vty ();
+void vtysh_init_cmd ();
+void vtysh_connect_all ();
+void vtysh_readline_init ();
+void vtysh_user_init ();
 
-void vtysh_execute (const char *);
-void vtysh_execute_no_pager (const char *);
+void vtysh_execute (char *);
+void vtysh_execute_no_pager (char *);
 
-char *vtysh_prompt (void);
+char *vtysh_prompt ();
 
-void vtysh_config_write (void);
+void vtysh_config_write ();
 
 int vtysh_config_from_file (struct vty *, FILE *);
 
-int vtysh_read_config (char *);
+void vtysh_read_config (char *, char *, char *);
 
 void vtysh_config_parse (char *);
 
 void vtysh_config_dump (FILE *);
 
-void vtysh_config_init (void);
+void vtysh_config_init ();
 
-void vtysh_pager_init (void);
+void vtysh_pager_init ();
 
 /* Child process execution flag. */
 extern int execute_flag;

@@ -1,7 +1,4 @@
-/*
-   $Id$
- 
-   Command interpreter routine for virtual terminal [aka TeletYpe]
+/* Command interpreter routine for virtual terminal [aka TeletYpe]
    Copyright (C) 1997, 98, 99 Kunihiro Ishiguro
 
 This file is part of GNU Zebra.
@@ -23,22 +20,24 @@ Boston, MA 02111-1307, USA.  */
 
 #include <zebra.h>
 
-
+#include "command.h"
 #include "memory.h"
 #include "log.h"
-#include <lib/version.h>
-#include "thread.h"
-#include "vector.h"
-#include "vty.h"
-#include "command.h"
-#include "workqueue.h"
+#include "version.h"
 
 /* Command vector which includes some level of command lists. Normally
    each daemon maintains each own cmdvec. */
-vector cmdvec = NULL;
+vector cmdvec;
 
 /* Host information structure. */
 struct host host;
+
+/* Default motd string. */
+char *default_motd = 
+"\r\n\
+Hello, this is zebra (version " ZEBRA_VERSION ").\r\n\
+Copyright 1996-2002 Kunihiro Ishiguro.\r\n\
+\r\n";
 
 /* Standard command node structures. */
 struct cmd_node auth_node =
@@ -71,111 +70,38 @@ struct cmd_node config_node =
   "%s(config)# ",
   1
 };
-
-/* Default motd string. */
-const char *default_motd =
-"\r\n\
-Hello, this is " QUAGGA_PROGNAME " (version " QUAGGA_VERSION ").\r\n\
-" QUAGGA_COPYRIGHT "\r\n\
-\r\n";
-
-
-static struct facility_map {
-  int facility;
-  const char *name;
-  size_t match;
-} syslog_facilities[] = 
-  {
-    { LOG_KERN, "kern", 1 },
-    { LOG_USER, "user", 2 },
-    { LOG_MAIL, "mail", 1 },
-    { LOG_DAEMON, "daemon", 1 },
-    { LOG_AUTH, "auth", 1 },
-    { LOG_SYSLOG, "syslog", 1 },
-    { LOG_LPR, "lpr", 2 },
-    { LOG_NEWS, "news", 1 },
-    { LOG_UUCP, "uucp", 2 },
-    { LOG_CRON, "cron", 1 },
-#ifdef LOG_FTP
-    { LOG_FTP, "ftp", 1 },
-#endif
-    { LOG_LOCAL0, "local0", 6 },
-    { LOG_LOCAL1, "local1", 6 },
-    { LOG_LOCAL2, "local2", 6 },
-    { LOG_LOCAL3, "local3", 6 },
-    { LOG_LOCAL4, "local4", 6 },
-    { LOG_LOCAL5, "local5", 6 },
-    { LOG_LOCAL6, "local6", 6 },
-    { LOG_LOCAL7, "local7", 6 },
-    { 0, NULL, 0 },
-  };
-
-static const char *
-facility_name(int facility)
-{
-  struct facility_map *fm;
-
-  for (fm = syslog_facilities; fm->name; fm++)
-    if (fm->facility == facility)
-      return fm->name;
-  return "";
-}
-
-static int
-facility_match(const char *str)
-{
-  struct facility_map *fm;
-
-  for (fm = syslog_facilities; fm->name; fm++)
-    if (!strncmp(str,fm->name,fm->match))
-      return fm->facility;
-  return -1;
-}
-
-static int
-level_match(const char *s)
-{
-  int level ;
-  
-  for ( level = 0 ; zlog_priority [level] != NULL ; level ++ )
-    if (!strncmp (s, zlog_priority[level], 2))
-      return level;
-  return ZLOG_DISABLED;
-}
-
-/* This is called from main when a daemon is invoked with -v or --version. */
-void
-print_version (const char *progname)
-{
-  printf ("%s version %s\n", progname, QUAGGA_VERSION);
-  printf ("%s\n", QUAGGA_COPYRIGHT);
-}
-
 
 /* Utility function to concatenate argv argument into a single string
    with inserting ' ' character between each argument.  */
 char *
-argv_concat (const char **argv, int argc, int shift)
+argv_concat (char **argv, int argc, int shift)
 {
   int i;
-  size_t len;
+  int len;
+  int index;
   char *str;
-  char *p;
 
-  len = 0;
-  for (i = shift; i < argc; i++)
-    len += strlen(argv[i])+1;
-  if (!len)
-    return NULL;
-  p = str = XMALLOC(MTYPE_TMP, len);
+  str = NULL;
+  index = 0;
+
   for (i = shift; i < argc; i++)
     {
-      size_t arglen;
-      memcpy(p, argv[i], (arglen = strlen(argv[i])));
-      p += arglen;
-      *p++ = ' ';
+      len = strlen (argv[i]);
+
+      if (i == shift)
+	{
+	  str = XSTRDUP (MTYPE_TMP, argv[i]);
+	  index = len;
+	}
+      else
+	{
+	  str = XREALLOC (MTYPE_TMP, str, (index + len + 2));
+	  str[index++] = ' ';
+	  memcpy (str + index, argv[i], len);
+	  index += len;
+	  str[index] = '\0';
+	}
     }
-  *(p-1) = '\0';
   return str;
 }
 
@@ -190,20 +116,20 @@ install_node (struct cmd_node *node,
 }
 
 /* Compare two command's string.  Used in sort_node (). */
-static int
+int
 cmp_node (const void *p, const void *q)
 {
-  const struct cmd_element *a = *(struct cmd_element **)p;
-  const struct cmd_element *b = *(struct cmd_element **)q;
+  struct cmd_element *a = *(struct cmd_element **)p;
+  struct cmd_element *b = *(struct cmd_element **)q;
 
   return strcmp (a->string, b->string);
 }
 
-static int
+int
 cmp_desc (const void *p, const void *q)
 {
-  const struct desc *a = *(struct desc **)p;
-  const struct desc *b = *(struct desc **)q;
+  struct desc *a = *(struct desc **)p;
+  struct desc *b = *(struct desc **)q;
 
   return strcmp (a->cmd, b->cmd);
 }
@@ -212,26 +138,23 @@ cmp_desc (const void *p, const void *q)
 void
 sort_node ()
 {
-  unsigned int i, j;
+  int i, j;
   struct cmd_node *cnode;
   vector descvec;
   struct cmd_element *cmd_element;
 
-  for (i = 0; i < vector_active (cmdvec); i++) 
+  for (i = 0; i < vector_max (cmdvec); i++) 
     if ((cnode = vector_slot (cmdvec, i)) != NULL)
       {	
 	vector cmd_vector = cnode->cmd_vector;
-	qsort (cmd_vector->index, vector_active (cmd_vector), 
-	       sizeof (void *), cmp_node);
+	qsort (cmd_vector->index, cmd_vector->max, sizeof (void *), cmp_node);
 
-	for (j = 0; j < vector_active (cmd_vector); j++)
-	  if ((cmd_element = vector_slot (cmd_vector, j)) != NULL
-	      && vector_active (cmd_element->strvec))
+	for (j = 0; j < vector_max (cmd_vector); j++)
+	  if ((cmd_element = vector_slot (cmd_vector, j)) != NULL)
 	    {
 	      descvec = vector_slot (cmd_element->strvec,
-				     vector_active (cmd_element->strvec) - 1);
-	      qsort (descvec->index, vector_active (descvec), 
-	             sizeof (void *), cmp_desc);
+				     vector_max (cmd_element->strvec) - 1);
+	      qsort (descvec->index, descvec->max, sizeof (void *), cmp_desc);
 	    }
       }
 }
@@ -240,10 +163,9 @@ sort_node ()
    character is separated by a space character. Return value is a
    vector which includes char ** data element. */
 vector
-cmd_make_strvec (const char *string)
+cmd_make_strvec (char *string)
 {
-  const char *cp, *start;
-  char *token;
+  char *cp, *start, *token;
   int strlen;
   vector strvec;
   
@@ -292,13 +214,13 @@ cmd_make_strvec (const char *string)
 void
 cmd_free_strvec (vector v)
 {
-  unsigned int i;
+  int i;
   char *cp;
 
   if (!v)
     return;
 
-  for (i = 0; i < vector_active (v); i++)
+  for (i = 0; i < vector_max (v); i++)
     if ((cp = vector_slot (v, i)) != NULL)
       XFREE (MTYPE_STRVEC, cp);
 
@@ -306,11 +228,10 @@ cmd_free_strvec (vector v)
 }
 
 /* Fetch next description.  Used in cmd_make_descvec(). */
-static char *
-cmd_desc_str (const char **string)
+char *
+cmd_desc_str (char **string)
 {
-  const char *cp, *start;
-  char *token;
+  char *cp, *start, *token;
   int strlen;
   
   cp = *string;
@@ -342,15 +263,15 @@ cmd_desc_str (const char **string)
 }
 
 /* New string vector. */
-static vector
-cmd_make_descvec (const char *string, const char *descstr)
+vector
+cmd_make_descvec (char *string, char *descstr)
 {
   int multiple = 0;
-  const char *sp;
+  char *sp;
   char *token;
   int len;
-  const char *cp;
-  const char *dp;
+  char *cp;
+  char *dp;
   vector allvec;
   vector strvec = NULL;
   struct desc *desc;
@@ -435,21 +356,25 @@ cmd_make_descvec (const char *string, const char *descstr)
 
 /* Count mandantory string vector size.  This is to determine inputed
    command has enough command length. */
-static int
+int
 cmd_cmdsize (vector strvec)
 {
-  unsigned int i;
+  int i;
+  char *str;
   int size = 0;
   vector descvec;
-  struct desc *desc;
 
-  for (i = 0; i < vector_active (strvec); i++)
-    if ((descvec = vector_slot (strvec, i)) != NULL)
+  for (i = 0; i < vector_max (strvec); i++)
     {
-      if ((vector_active (descvec)) == 1
-        && (desc = vector_slot (descvec, 0)) != NULL)
+      descvec = vector_slot (strvec, i);
+
+      if (vector_max (descvec) == 1)
 	{
-	  if (desc->cmd == NULL || CMD_OPTION (desc->cmd))
+	  struct desc *desc = vector_slot (descvec, 0);
+
+	  str = desc->cmd;
+	  
+	  if (str == NULL || CMD_OPTION (str))
 	    return size;
 	  else
 	    size++;
@@ -461,7 +386,7 @@ cmd_cmdsize (vector strvec)
 }
 
 /* Return prompt character of specified node. */
-const char *
+char *
 cmd_prompt (enum node_type node)
 {
   struct cmd_node *cnode;
@@ -475,11 +400,7 @@ void
 install_element (enum node_type ntype, struct cmd_element *cmd)
 {
   struct cmd_node *cnode;
-  
-  /* cmd_init hasn't been called */
-  if (!cmdvec)
-    return;
-  
+
   cnode = vector_slot (cmdvec, ntype);
 
   if (cnode == NULL) 
@@ -498,7 +419,7 @@ install_element (enum node_type ntype, struct cmd_element *cmd)
 static unsigned char itoa64[] =	
 "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-static void
+void
 to64(char *s, long v, int n)
 {
   while (--n >= 0) 
@@ -508,8 +429,7 @@ to64(char *s, long v, int n)
     }
 }
 
-static char *
-zencrypt (const char *passwd)
+char *zencrypt (char *passwd)
 {
   char salt[6];
   struct timeval tv;
@@ -525,7 +445,7 @@ zencrypt (const char *passwd)
 }
 
 /* This function write configuration of this host. */
-static int
+int
 config_write_host (struct vty *vty)
 {
   if (host.name)
@@ -546,57 +466,20 @@ config_write_host (struct vty *vty)
         vty_out (vty, "enable password %s%s", host.enable, VTY_NEWLINE);
     }
 
-  if (zlog_default->default_lvl != LOG_DEBUG)
-    {
-      vty_out (vty, "! N.B. The 'log trap' command is deprecated.%s",
-	       VTY_NEWLINE);
-      vty_out (vty, "log trap %s%s",
-	       zlog_priority[zlog_default->default_lvl], VTY_NEWLINE);
-    }
+  if (host.logfile)
+    vty_out (vty, "log file %s%s", host.logfile, VTY_NEWLINE);
 
-  if (host.logfile && (zlog_default->maxlvl[ZLOG_DEST_FILE] != ZLOG_DISABLED))
-    {
-      vty_out (vty, "log file %s", host.logfile);
-      if (zlog_default->maxlvl[ZLOG_DEST_FILE] != zlog_default->default_lvl)
-	vty_out (vty, " %s",
-		 zlog_priority[zlog_default->maxlvl[ZLOG_DEST_FILE]]);
-      vty_out (vty, "%s", VTY_NEWLINE);
-    }
+  if (host.log_stdout)
+    vty_out (vty, "log stdout%s", VTY_NEWLINE);
 
-  if (zlog_default->maxlvl[ZLOG_DEST_STDOUT] != ZLOG_DISABLED)
-    {
-      vty_out (vty, "log stdout");
-      if (zlog_default->maxlvl[ZLOG_DEST_STDOUT] != zlog_default->default_lvl)
-	vty_out (vty, " %s",
-		 zlog_priority[zlog_default->maxlvl[ZLOG_DEST_STDOUT]]);
-      vty_out (vty, "%s", VTY_NEWLINE);
-    }
+  if (host.log_syslog)
+    vty_out (vty, "log syslog%s", VTY_NEWLINE);
 
-  if (zlog_default->maxlvl[ZLOG_DEST_MONITOR] == ZLOG_DISABLED)
-    vty_out(vty,"no log monitor%s",VTY_NEWLINE);
-  else if (zlog_default->maxlvl[ZLOG_DEST_MONITOR] != zlog_default->default_lvl)
-    vty_out(vty,"log monitor %s%s",
-	    zlog_priority[zlog_default->maxlvl[ZLOG_DEST_MONITOR]],VTY_NEWLINE);
-
-  if (zlog_default->maxlvl[ZLOG_DEST_SYSLOG] != ZLOG_DISABLED)
-    {
-      vty_out (vty, "log syslog");
-      if (zlog_default->maxlvl[ZLOG_DEST_SYSLOG] != zlog_default->default_lvl)
-	vty_out (vty, " %s",
-		 zlog_priority[zlog_default->maxlvl[ZLOG_DEST_SYSLOG]]);
-      vty_out (vty, "%s", VTY_NEWLINE);
-    }
-
-  if (zlog_default->facility != LOG_DAEMON)
-    vty_out (vty, "log facility %s%s",
-	     facility_name(zlog_default->facility), VTY_NEWLINE);
+  if (zlog_default->maskpri != LOG_DEBUG)
+    vty_out (vty, "log trap %s%s", zlog_priority[zlog_default->maskpri], VTY_NEWLINE);
 
   if (zlog_default->record_priority == 1)
     vty_out (vty, "log record-priority%s", VTY_NEWLINE);
-
-  if (zlog_default->timestamp_precision > 0)
-    vty_out (vty, "log timestamp precision %d%s",
-	     zlog_default->timestamp_precision, VTY_NEWLINE);
 
   if (host.advanced)
     vty_out (vty, "service advanced-vty%s", VTY_NEWLINE);
@@ -608,26 +491,22 @@ config_write_host (struct vty *vty)
     vty_out (vty, "service terminal-length %d%s", host.lines,
 	     VTY_NEWLINE);
 
-  if (host.motdfile)
-    vty_out (vty, "banner motd file %s%s", host.motdfile, VTY_NEWLINE);
-  else if (! host.motd)
+  if (! host.motd)
     vty_out (vty, "no banner motd%s", VTY_NEWLINE);
 
   return 1;
 }
 
 /* Utility function for getting command vector. */
-static vector
+vector
 cmd_node_vector (vector v, enum node_type ntype)
 {
   struct cmd_node *cnode = vector_slot (v, ntype);
   return cnode->cmd_vector;
 }
 
-#if 0
-/* Filter command vector by symbol.  This function is not actually used;
- * should it be deleted? */
-static int
+/* Filter command vector by symbol */
+int
 cmd_filter_by_symbol (char *command, char *symbol)
 {
   int i, lim;
@@ -670,7 +549,6 @@ cmd_filter_by_symbol (char *command, char *symbol)
     }
   return 0;
 }
-#endif
 
 /* Completion match types. */
 enum match_type 
@@ -687,10 +565,10 @@ enum match_type
   exact_match 
 };
 
-static enum match_type
-cmd_ipv4_match (const char *str)
+enum match_type
+cmd_ipv4_match (char *str)
 {
-  const char *sp;
+  char *sp;
   int dots = 0, nums = 0;
   char buf[4];
 
@@ -744,10 +622,10 @@ cmd_ipv4_match (const char *str)
   return exact_match;
 }
 
-static enum match_type
-cmd_ipv4_prefix_match (const char *str)
+enum match_type
+cmd_ipv4_prefix_match (char *str)
 {
-  const char *sp;
+  char *sp;
   int dots = 0;
   char buf[4];
 
@@ -833,31 +711,18 @@ cmd_ipv4_prefix_match (const char *str)
 #define STATE_SLASH		6
 #define STATE_MASK		7
 
-#ifdef HAVE_IPV6
-
-static enum match_type
-cmd_ipv6_match (const char *str)
+enum match_type
+cmd_ipv6_match (char *str)
 {
   int state = STATE_START;
   int colons = 0, nums = 0, double_colon = 0;
-  const char *sp = NULL;
-  struct sockaddr_in6 sin6_dummy;
-  int ret;
+  char *sp = NULL;
 
   if (str == NULL)
     return partly_match;
 
   if (strspn (str, IPV6_ADDR_STR) != strlen (str))
     return no_match;
-
-  /* use inet_pton that has a better support,
-   * for example inet_pton can support the automatic addresses:
-   *  ::1.2.3.4
-   */
-  ret = inet_pton(AF_INET6, str, &sin6_dummy.sin6_addr);
-   
-  if (ret == 1)
-    return exact_match;
 
   while (*str != '\0')
     {
@@ -941,13 +806,13 @@ cmd_ipv6_match (const char *str)
   return exact_match;
 }
 
-static enum match_type
-cmd_ipv6_prefix_match (const char *str)
+enum match_type
+cmd_ipv6_prefix_match (char *str)
 {
   int state = STATE_START;
   int colons = 0, nums = 0, double_colon = 0;
   int mask;
-  const char *sp = NULL;
+  char *sp = NULL;
   char *endptr = NULL;
 
   if (str == NULL)
@@ -1072,12 +937,10 @@ cmd_ipv6_prefix_match (const char *str)
   return exact_match;
 }
 
-#endif /* HAVE_IPV6  */
-
 #define DECIMAL_STRLEN_MAX 10
 
-static int
-cmd_range_match (const char *range, const char *str)
+int
+cmd_range_match (char *range, char *str)
 {
   char *p;
   char buf[DECIMAL_STRLEN_MAX + 1];
@@ -1122,114 +985,112 @@ cmd_range_match (const char *range, const char *str)
 }
 
 /* Make completion match and return match type flag. */
-static enum match_type
-cmd_filter_by_completion (char *command, vector v, unsigned int index)
+enum match_type
+cmd_filter_by_completion (char *command, vector v, int index)
 {
-  unsigned int i;
-  const char *str;
+  int i;
+  char *str;
   struct cmd_element *cmd_element;
   enum match_type match_type;
   vector descvec;
   struct desc *desc;
-
+  
   match_type = no_match;
 
   /* If command and cmd_element string does not match set NULL to vector */
-  for (i = 0; i < vector_active (v); i++)
+  for (i = 0; i < vector_max (v); i++) 
     if ((cmd_element = vector_slot (v, i)) != NULL)
       {
-	if (index >= vector_active (cmd_element->strvec))
+	if (index >= vector_max (cmd_element->strvec))
 	  vector_slot (v, i) = NULL;
 	else
 	  {
-	    unsigned int j;
+	    int j;
 	    int matched = 0;
 
 	    descvec = vector_slot (cmd_element->strvec, index);
+	    
+	    for (j = 0; j < vector_max (descvec); j++)
+	      {
+		desc = vector_slot (descvec, j);
+		str = desc->cmd;
 
-	    for (j = 0; j < vector_active (descvec); j++)
-	      if ((desc = vector_slot (descvec, j)))
-		{
-		  str = desc->cmd;
-		  
-		  if (CMD_VARARG (str))
-		    {
-		      if (match_type < vararg_match)
-			match_type = vararg_match;
-		      matched++;
-		    }
-		  else if (CMD_RANGE (str))
-		    {
-		      if (cmd_range_match (str, command))
-			{
-			  if (match_type < range_match)
-			    match_type = range_match;
+		if (CMD_VARARG (str))
+		  {
+		    if (match_type < vararg_match)
+		      match_type = vararg_match;
+		    matched++;
+		  }
+		else if (CMD_RANGE (str))
+		  {
+		    if (cmd_range_match (str, command))
+		      {
+			if (match_type < range_match)
+			  match_type = range_match;
 
-			  matched++;
-			}
-		    }
-#ifdef HAVE_IPV6
-		  else if (CMD_IPV6 (str))
-		    {
-		      if (cmd_ipv6_match (command))
-			{
-			  if (match_type < ipv6_match)
-			    match_type = ipv6_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV6 (str))
+		  {
+		    if (cmd_ipv6_match (command))
+		      {
+			if (match_type < ipv6_match)
+			  match_type = ipv6_match;
 
-			  matched++;
-			}
-		    }
-		  else if (CMD_IPV6_PREFIX (str))
-		    {
-		      if (cmd_ipv6_prefix_match (command))
-			{
-			  if (match_type < ipv6_prefix_match)
-			    match_type = ipv6_prefix_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV6_PREFIX (str))
+		  {
+		    if (cmd_ipv6_prefix_match (command))
+		      {
+			if (match_type < ipv6_prefix_match)
+			  match_type = ipv6_prefix_match;
 
-			  matched++;
-			}
-		    }
-#endif /* HAVE_IPV6  */
-		  else if (CMD_IPV4 (str))
-		    {
-		      if (cmd_ipv4_match (command))
-			{
-			  if (match_type < ipv4_match)
-			    match_type = ipv4_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV4 (str))
+		  {
+		    if (cmd_ipv4_match (command))
+		      {
+			if (match_type < ipv4_match)
+			  match_type = ipv4_match;
 
-			  matched++;
-			}
-		    }
-		  else if (CMD_IPV4_PREFIX (str))
-		    {
-		      if (cmd_ipv4_prefix_match (command))
-			{
-			  if (match_type < ipv4_prefix_match)
-			    match_type = ipv4_prefix_match;
-			  matched++;
-			}
-		    }
-		  else
-		    /* Check is this point's argument optional ? */
-		  if (CMD_OPTION (str) || CMD_VARIABLE (str))
-		    {
-		      if (match_type < extend_match)
-			match_type = extend_match;
-		      matched++;
-		    }
-		  else if (strncmp (command, str, strlen (command)) == 0)
-		    {
-		      if (strcmp (command, str) == 0)
-			match_type = exact_match;
-		      else
-			{
-			  if (match_type < partly_match)
-			    match_type = partly_match;
-			}
-		      matched++;
-		    }
-		}
-	    if (!matched)
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV4_PREFIX (str))
+		  {
+		    if (cmd_ipv4_prefix_match (command))
+		      {
+			if (match_type < ipv4_prefix_match)
+			  match_type = ipv4_prefix_match;
+			matched++;
+		      }
+		  }
+		else
+		/* Check is this point's argument optional ? */
+		if (CMD_OPTION (str) || CMD_VARIABLE (str))
+		  {
+		    if (match_type < extend_match)
+		      match_type = extend_match;
+		    matched++;
+		  }
+		else if (strncmp (command, str, strlen (command)) == 0)
+		  {
+		    if (strcmp (command, str) == 0) 
+		      match_type = exact_match;
+		    else
+		      {
+			if (match_type < partly_match)
+			  match_type = partly_match;
+		      }
+		    matched++;
+		  }
+	      }
+	    if (! matched)
 	      vector_slot (v, i) = NULL;
 	  }
       }
@@ -1237,107 +1098,105 @@ cmd_filter_by_completion (char *command, vector v, unsigned int index)
 }
 
 /* Filter vector by command character with index. */
-static enum match_type
-cmd_filter_by_string (char *command, vector v, unsigned int index)
+enum match_type
+cmd_filter_by_string (char *command, vector v, int index)
 {
-  unsigned int i;
-  const char *str;
+  int i;
+  char *str;
   struct cmd_element *cmd_element;
   enum match_type match_type;
   vector descvec;
   struct desc *desc;
-
+  
   match_type = no_match;
 
   /* If command and cmd_element string does not match set NULL to vector */
-  for (i = 0; i < vector_active (v); i++)
+  for (i = 0; i < vector_max (v); i++) 
     if ((cmd_element = vector_slot (v, i)) != NULL)
       {
 	/* If given index is bigger than max string vector of command,
-	   set NULL */
-	if (index >= vector_active (cmd_element->strvec))
+           set NULL*/
+	if (index >= vector_max (cmd_element->strvec))
 	  vector_slot (v, i) = NULL;
-	else
+	else 
 	  {
-	    unsigned int j;
+	    int j;
 	    int matched = 0;
 
 	    descvec = vector_slot (cmd_element->strvec, index);
 
-	    for (j = 0; j < vector_active (descvec); j++)
-	      if ((desc = vector_slot (descvec, j)))
-		{
-		  str = desc->cmd;
+	    for (j = 0; j < vector_max (descvec); j++)
+	      {
+		desc = vector_slot (descvec, j);
+		str = desc->cmd;
 
-		  if (CMD_VARARG (str))
-		    {
-		      if (match_type < vararg_match)
-			match_type = vararg_match;
-		      matched++;
-		    }
-		  else if (CMD_RANGE (str))
-		    {
-		      if (cmd_range_match (str, command))
-			{
-			  if (match_type < range_match)
-			    match_type = range_match;
-			  matched++;
-			}
-		    }
-#ifdef HAVE_IPV6
-		  else if (CMD_IPV6 (str))
-		    {
-		      if (cmd_ipv6_match (command) == exact_match)
-			{
-			  if (match_type < ipv6_match)
-			    match_type = ipv6_match;
-			  matched++;
-			}
-		    }
-		  else if (CMD_IPV6_PREFIX (str))
-		    {
-		      if (cmd_ipv6_prefix_match (command) == exact_match)
-			{
-			  if (match_type < ipv6_prefix_match)
-			    match_type = ipv6_prefix_match;
-			  matched++;
-			}
-		    }
-#endif /* HAVE_IPV6  */
-		  else if (CMD_IPV4 (str))
-		    {
-		      if (cmd_ipv4_match (command) == exact_match)
-			{
-			  if (match_type < ipv4_match)
-			    match_type = ipv4_match;
-			  matched++;
-			}
-		    }
-		  else if (CMD_IPV4_PREFIX (str))
-		    {
-		      if (cmd_ipv4_prefix_match (command) == exact_match)
-			{
-			  if (match_type < ipv4_prefix_match)
-			    match_type = ipv4_prefix_match;
-			  matched++;
-			}
-		    }
-		  else if (CMD_OPTION (str) || CMD_VARIABLE (str))
-		    {
-		      if (match_type < extend_match)
-			match_type = extend_match;
-		      matched++;
-		    }
-		  else
-		    {
-		      if (strcmp (command, str) == 0)
-			{
-			  match_type = exact_match;
-			  matched++;
-			}
-		    }
-		}
-	    if (!matched)
+		if (CMD_VARARG (str))
+		  {
+		    if (match_type < vararg_match)
+		      match_type = vararg_match;
+		    matched++;
+		  }
+		else if (CMD_RANGE (str))
+		  {
+		    if (cmd_range_match (str, command))
+		      {
+			if (match_type < range_match)
+			  match_type = range_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV6 (str))
+		  {
+		    if (cmd_ipv6_match (command) == exact_match)
+		      {
+			if (match_type < ipv6_match)
+			  match_type = ipv6_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV6_PREFIX (str))
+		  {
+		    if (cmd_ipv6_prefix_match (command) == exact_match)
+		      {
+			if (match_type < ipv6_prefix_match)
+			  match_type = ipv6_prefix_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV4 (str))
+		  {
+		    if (cmd_ipv4_match (command) == exact_match)
+		      {
+			if (match_type < ipv4_match)
+			  match_type = ipv4_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_IPV4_PREFIX (str))
+		  {
+		    if (cmd_ipv4_prefix_match (command) == exact_match)
+		      {
+			if (match_type < ipv4_prefix_match)
+			  match_type = ipv4_prefix_match;
+			matched++;
+		      }
+		  }
+		else if (CMD_OPTION (str) || CMD_VARIABLE (str))
+		  {
+		    if (match_type < extend_match)
+		      match_type = extend_match;
+		    matched++;
+		  }
+		else
+		  {		  
+		    if (strcmp (command, str) == 0)
+		      {
+			match_type = exact_match;
+			matched++;
+		      }
+		  }
+	      }
+	    if (! matched)
 	      vector_slot (v, i) = NULL;
 	  }
       }
@@ -1345,105 +1204,103 @@ cmd_filter_by_string (char *command, vector v, unsigned int index)
 }
 
 /* Check ambiguous match */
-static int
+int
 is_cmd_ambiguous (char *command, vector v, int index, enum match_type type)
 {
-  unsigned int i;
-  unsigned int j;
-  const char *str = NULL;
+  int i;
+  int j;
+  char *str = NULL;
   struct cmd_element *cmd_element;
-  const char *matched = NULL;
+  char *matched = NULL;
   vector descvec;
   struct desc *desc;
-
-  for (i = 0; i < vector_active (v); i++)
+  
+  for (i = 0; i < vector_max (v); i++) 
     if ((cmd_element = vector_slot (v, i)) != NULL)
       {
 	int match = 0;
 
 	descvec = vector_slot (cmd_element->strvec, index);
 
-	for (j = 0; j < vector_active (descvec); j++)
-	  if ((desc = vector_slot (descvec, j)))
-	    {
-	      enum match_type ret;
-	      
-	      str = desc->cmd;
+	for (j = 0; j < vector_max (descvec); j++)
+	  {
+	    enum match_type ret;
 
-	      switch (type)
-		{
-		case exact_match:
-		  if (!(CMD_OPTION (str) || CMD_VARIABLE (str))
-		      && strcmp (command, str) == 0)
-		    match++;
-		  break;
-		case partly_match:
-		  if (!(CMD_OPTION (str) || CMD_VARIABLE (str))
-		      && strncmp (command, str, strlen (command)) == 0)
-		    {
-		      if (matched && strcmp (matched, str) != 0)
-			return 1;	/* There is ambiguous match. */
-		      else
-			matched = str;
-		      match++;
-		    }
-		  break;
-		case range_match:
-		  if (cmd_range_match (str, command))
-		    {
-		      if (matched && strcmp (matched, str) != 0)
-			return 1;
-		      else
-			matched = str;
-		      match++;
-		    }
-		  break;
-#ifdef HAVE_IPV6
-		case ipv6_match:
-		  if (CMD_IPV6 (str))
-		    match++;
-		  break;
-		case ipv6_prefix_match:
-		  if ((ret = cmd_ipv6_prefix_match (command)) != no_match)
-		    {
-		      if (ret == partly_match)
-			return 2;	/* There is incomplete match. */
+	    desc = vector_slot (descvec, j);
+	    str = desc->cmd;
 
-		      match++;
-		    }
-		  break;
-#endif /* HAVE_IPV6 */
-		case ipv4_match:
-		  if (CMD_IPV4 (str))
+	    switch (type)
+	      {
+	      case exact_match:
+		if (! (CMD_OPTION (str) || CMD_VARIABLE (str))
+		    && strcmp (command, str) == 0)
+		  match++;
+		break;
+	      case partly_match:
+		if (! (CMD_OPTION (str) || CMD_VARIABLE (str))
+		    && strncmp (command, str, strlen (command)) == 0)
+		  {
+		    if (matched && strcmp (matched, str) != 0)
+		      return 1;	/* There is ambiguous match. */
+		    else
+		      matched = str;
 		    match++;
-		  break;
-		case ipv4_prefix_match:
-		  if ((ret = cmd_ipv4_prefix_match (command)) != no_match)
-		    {
-		      if (ret == partly_match)
-			return 2;	/* There is incomplete match. */
+		  }
+		break;
+	      case range_match:
+		if (cmd_range_match (str, command))
+		  {
+		    if (matched && strcmp (matched, str) != 0)
+		      return 1;
+		    else
+		      matched = str;
+		    match++;
+		  }
+		break;
+ 	      case ipv6_match:
+		if (CMD_IPV6 (str))
+		  match++;
+		break;
+	      case ipv6_prefix_match:
+		if ((ret = cmd_ipv6_prefix_match (command)) != no_match)
+		  {
+		    if (ret == partly_match)
+		      return 2; /* There is incomplete match. */
 
-		      match++;
-		    }
-		  break;
-		case extend_match:
-		  if (CMD_OPTION (str) || CMD_VARIABLE (str))
 		    match++;
-		  break;
-		case no_match:
-		default:
-		  break;
-		}
-	    }
-	if (!match)
+		  }
+		break;
+	      case ipv4_match:
+		if (CMD_IPV4 (str))
+		  match++;
+		break;
+	      case ipv4_prefix_match:
+		if ((ret = cmd_ipv4_prefix_match (command)) != no_match)
+		  {
+		    if (ret == partly_match)
+		      return 2; /* There is incomplete match. */
+
+		    match++;
+		  }
+		break;
+	      case extend_match:
+		if (CMD_OPTION (str) || CMD_VARIABLE (str))
+		  match++;
+		break;
+	      case no_match:
+	      default:
+		break;
+	      }
+	  }
+	if (! match)
 	  vector_slot (v, i) = NULL;
       }
   return 0;
 }
 
 /* If src matches dst return dst string, otherwise return NULL */
-static const char *
-cmd_entry_function (const char *src, const char *dst)
+char *
+cmd_entry_function (char *src, char *dst)
 {
   /* Skip variable arguments. */
   if (CMD_OPTION (dst) || CMD_VARIABLE (dst) || CMD_VARARG (dst) ||
@@ -1464,8 +1321,8 @@ cmd_entry_function (const char *src, const char *dst)
 /* If src matches dst return dst string, otherwise return NULL */
 /* This version will return the dst string always if it is
    CMD_VARIABLE for '?' key processing */
-static const char *
-cmd_entry_function_desc (const char *src, const char *dst)
+char *
+cmd_entry_function_desc (char *src, char *dst)
 {
   if (CMD_VARARG (dst))
     return dst;
@@ -1478,7 +1335,6 @@ cmd_entry_function_desc (const char *src, const char *dst)
 	return NULL;
     }
 
-#ifdef HAVE_IPV6
   if (CMD_IPV6 (dst))
     {
       if (cmd_ipv6_match (src))
@@ -1494,7 +1350,6 @@ cmd_entry_function_desc (const char *src, const char *dst)
       else
 	return NULL;
     }
-#endif /* HAVE_IPV6 */
 
   if (CMD_IPV4 (dst))
     {
@@ -1528,13 +1383,13 @@ cmd_entry_function_desc (const char *src, const char *dst)
 
 /* Check same string element existence.  If it isn't there return
     1. */
-static int
-cmd_unique_string (vector v, const char *str)
+int
+cmd_unique_string (vector v, char *str)
 {
-  unsigned int i;
+  int i;
   char *match;
 
-  for (i = 0; i < vector_active (v); i++)
+  for (i = 0; i < vector_max (v); i++)
     if ((match = vector_slot (v, i)) != NULL)
       if (strcmp (match, str) == 0)
 	return 0;
@@ -1543,55 +1398,34 @@ cmd_unique_string (vector v, const char *str)
 
 /* Compare string to description vector.  If there is same string
    return 1 else return 0. */
-static int
-desc_unique_string (vector v, const char *str)
+int
+desc_unique_string (vector v, char *str)
 {
-  unsigned int i;
+  int i;
   struct desc *desc;
 
-  for (i = 0; i < vector_active (v); i++)
+  for (i = 0; i < vector_max (v); i++)
     if ((desc = vector_slot (v, i)) != NULL)
       if (strcmp (desc->cmd, str) == 0)
 	return 1;
   return 0;
 }
 
-static int 
-cmd_try_do_shortcut (enum node_type node, char* first_word) {
-  if ( first_word != NULL &&
-       node != AUTH_NODE &&
-       node != VIEW_NODE &&
-       node != AUTH_ENABLE_NODE &&
-       node != ENABLE_NODE &&
-       0 == strcmp( "do", first_word ) )
-    return 1;
-  return 0;
-}
-
 /* '?' describe command support. */
-static vector
-cmd_describe_command_real (vector vline, struct vty *vty, int *status)
+vector
+cmd_describe_command (vector vline, struct vty *vty, int *status)
 {
-  unsigned int i;
+  int i;
   vector cmd_vector;
 #define INIT_MATCHVEC_SIZE 10
   vector matchvec;
   struct cmd_element *cmd_element;
-  unsigned int index;
-  int ret;
-  enum match_type match;
-  char *command;
+  int index;
   static struct desc desc_cr = { "<cr>", "" };
 
   /* Set index. */
-  if (vector_active (vline) == 0)
-    {
-      *status = CMD_ERR_NO_MATCH;
-      return NULL;
-    }
-  else
-    index = vector_active (vline) - 1;
-  
+  index = vector_max (vline) - 1;
+
   /* Make copy vector of current node's command vector. */
   cmd_vector = vector_copy (cmd_node_vector (cmdvec, vty->node));
 
@@ -1599,97 +1433,93 @@ cmd_describe_command_real (vector vline, struct vty *vty, int *status)
   matchvec = vector_init (INIT_MATCHVEC_SIZE);
 
   /* Filter commands. */
-  /* Only words precedes current word will be checked in this loop. */
   for (i = 0; i < index; i++)
-    if ((command = vector_slot (vline, i)))
-      {
-	match = cmd_filter_by_completion (command, cmd_vector, i);
-	
-	if (match == vararg_match)
-	  {
-	    struct cmd_element *cmd_element;
-	    vector descvec;
-	    unsigned int j, k;
+    {
+      enum match_type match;
+      char *command;
+      int ret;
 
-	    for (j = 0; j < vector_active (cmd_vector); j++)
-	      if ((cmd_element = vector_slot (cmd_vector, j)) != NULL
-		  && (vector_active (cmd_element->strvec)))
-		{
-		  descvec = vector_slot (cmd_element->strvec,
-					 vector_active (cmd_element->strvec) - 1);
-		  for (k = 0; k < vector_active (descvec); k++)
-		    {
-		      struct desc *desc = vector_slot (descvec, k);
-		      vector_set (matchvec, desc);
-		    }
-		}
-            
-	    vector_set (matchvec, &desc_cr);
-	    vector_free (cmd_vector);
+      command = vector_slot (vline, i);
 
-	    return matchvec;
-	  }
+      match = cmd_filter_by_completion (command, cmd_vector, i);
 
-	if ((ret = is_cmd_ambiguous (command, cmd_vector, i, match)) == 1)
-	  {
-	    vector_free (cmd_vector);
-	    vector_free (matchvec);
-	    *status = CMD_ERR_AMBIGUOUS;
-	    return NULL;
-	  }
-	else if (ret == 2)
-	  {
-	    vector_free (cmd_vector);
-	    vector_free (matchvec);
-	    *status = CMD_ERR_NO_MATCH;
-	    return NULL;
-	  }
-      }
+      if (match == vararg_match)
+	{
+	  struct cmd_element *cmd_element;
+	  vector descvec;
+	  int j, k;
+
+	  for (j = 0; j < vector_max (cmd_vector); j++)
+	    if ((cmd_element = vector_slot (cmd_vector, j)) != NULL)
+	      {
+		descvec = vector_slot (cmd_element->strvec,
+				       vector_max (cmd_element->strvec) - 1);
+		for (k = 0; k < vector_max (descvec); k++)
+		  {
+		    struct desc *desc = vector_slot (descvec, k);
+		    vector_set (matchvec, desc);
+		  }
+	      }
+
+	  vector_set (matchvec, &desc_cr);
+
+	  vector_free (cmd_vector);
+
+	  return matchvec;
+	}
+
+      if ((ret = is_cmd_ambiguous (command, cmd_vector, i, match)) == 1)
+	{
+	  vector_free (cmd_vector);
+	  *status = CMD_ERR_AMBIGUOUS;
+	  return NULL;
+	}
+      else if (ret == 2)
+	{
+	  vector_free (cmd_vector);
+	  *status = CMD_ERR_NO_MATCH;
+	  return NULL;
+	}
+    }
 
   /* Prepare match vector */
   /*  matchvec = vector_init (INIT_MATCHVEC_SIZE); */
 
-  /* Make sure that cmd_vector is filtered based on current word */
-  command = vector_slot (vline, index);
-  if (command)
-    match = cmd_filter_by_completion (command, cmd_vector, index);
-
   /* Make description vector. */
-  for (i = 0; i < vector_active (cmd_vector); i++)
+  for (i = 0; i < vector_max (cmd_vector); i++)
     if ((cmd_element = vector_slot (cmd_vector, i)) != NULL)
       {
-	const char *string = NULL;
+	char *string = NULL;
 	vector strvec = cmd_element->strvec;
 
-	/* if command is NULL, index may be equal to vector_active */
-	if (command && index >= vector_active (strvec))
+	if (index > vector_max (strvec))
 	  vector_slot (cmd_vector, i) = NULL;
 	else
 	  {
-	    /* Check if command is completed. */
-	    if (command == NULL && index == vector_active (strvec))
+	    /* Check is command is completed. */
+	    if (index == vector_max (strvec))
 	      {
 		string = "<cr>";
-		if (!desc_unique_string (matchvec, string))
+		if (! desc_unique_string (matchvec, string))
 		  vector_set (matchvec, &desc_cr);
 	      }
 	    else
 	      {
-		unsigned int j;
+		int j;
 		vector descvec = vector_slot (strvec, index);
 		struct desc *desc;
 
-		for (j = 0; j < vector_active (descvec); j++)
-		  if ((desc = vector_slot (descvec, j)))
-		    {
-		      string = cmd_entry_function_desc (command, desc->cmd);
-		      if (string)
-			{
-			  /* Uniqueness check */
-			  if (!desc_unique_string (matchvec, string))
-			    vector_set (matchvec, desc);
-			}
-		    }
+		for (j = 0; j < vector_max (descvec); j++)
+		  {
+		    desc = vector_slot (descvec, j);
+		    string = cmd_entry_function_desc (vector_slot (vline, index), desc->cmd);
+		    if (string)
+		      {
+			/* Uniqueness check */
+			if (! desc_unique_string (matchvec, string))
+			  vector_set (matchvec, desc);
+		      }
+		  }
 	      }
 	  }
       }
@@ -1698,50 +1528,16 @@ cmd_describe_command_real (vector vline, struct vty *vty, int *status)
   if (vector_slot (matchvec, 0) == NULL)
     {
       vector_free (matchvec);
-      *status = CMD_ERR_NO_MATCH;
-      return NULL;
+      *status= CMD_ERR_NO_MATCH;
     }
+  else
+    *status = CMD_SUCCESS;
 
-  *status = CMD_SUCCESS;
   return matchvec;
 }
 
-vector
-cmd_describe_command (vector vline, struct vty *vty, int *status)
-{
-  vector ret;
-
-  if ( cmd_try_do_shortcut(vty->node, vector_slot(vline, 0) ) )
-    {
-      enum node_type onode;
-      vector shifted_vline;
-      unsigned int index;
-
-      onode = vty->node;
-      vty->node = ENABLE_NODE;
-      /* We can try it on enable node, cos' the vty is authenticated */
-
-      shifted_vline = vector_init (vector_count(vline));
-      /* use memcpy? */
-      for (index = 1; index < vector_active (vline); index++) 
-	{
-	  vector_set_index (shifted_vline, index-1, vector_lookup(vline, index));
-	}
-
-      ret = cmd_describe_command_real (shifted_vline, vty, status);
-
-      vector_free(shifted_vline);
-      vty->node = onode;
-      return ret;
-  }
-
-
-  return cmd_describe_command_real (vline, vty, status);
-}
-
-
 /* Check LCD of matched command. */
-static int
+int
 cmd_lcd (char **matched)
 {
   int i;
@@ -1774,85 +1570,77 @@ cmd_lcd (char **matched)
 }
 
 /* Command line completion support. */
-static char **
-cmd_complete_command_real (vector vline, struct vty *vty, int *status)
+char **
+cmd_complete_command (vector vline, struct vty *vty, int *status)
 {
-  unsigned int i;
+  int i;
   vector cmd_vector = vector_copy (cmd_node_vector (cmdvec, vty->node));
 #define INIT_MATCHVEC_SIZE 10
   vector matchvec;
   struct cmd_element *cmd_element;
-  unsigned int index;
+  int index = vector_max (vline) - 1;
   char **match_str;
   struct desc *desc;
   vector descvec;
   char *command;
   int lcd;
 
-  if (vector_active (vline) == 0)
-    {
-      vector_free (cmd_vector);
-      *status = CMD_ERR_NO_MATCH;
-      return NULL;
-    }
-  else
-    index = vector_active (vline) - 1;
-
   /* First, filter by preceeding command string */
   for (i = 0; i < index; i++)
-    if ((command = vector_slot (vline, i)))
-      {
-	enum match_type match;
-	int ret;
+    {
+      enum match_type match;
+      int ret;
 
-	/* First try completion match, if there is exactly match return 1 */
-	match = cmd_filter_by_completion (command, cmd_vector, i);
+      command = vector_slot (vline, i);
 
-	/* If there is exact match then filter ambiguous match else check
-	   ambiguousness. */
-	if ((ret = is_cmd_ambiguous (command, cmd_vector, i, match)) == 1)
-	  {
-	    vector_free (cmd_vector);
-	    *status = CMD_ERR_AMBIGUOUS;
-	    return NULL;
-	  }
-	/*
-	   else if (ret == 2)
-	   {
-	   vector_free (cmd_vector);
-	   *status = CMD_ERR_NO_MATCH;
-	   return NULL;
-	   }
-	 */
-      }
-  
+      /* First try completion match, if there is exactly match return 1 */
+      match = cmd_filter_by_completion (command, cmd_vector, i);
+
+      /* If there is exact match then filter ambiguous match else check
+	 ambiguousness. */
+      if ((ret = is_cmd_ambiguous (command, cmd_vector, i, match)) == 1)
+	{
+	  vector_free (cmd_vector);
+	  *status = CMD_ERR_AMBIGUOUS;
+	  return NULL;
+	}
+      /*
+	else if (ret == 2)
+	{
+	  vector_free (cmd_vector);
+	  *status = CMD_ERR_NO_MATCH;
+	  return NULL;
+	}
+      */
+    }
+
   /* Prepare match vector. */
   matchvec = vector_init (INIT_MATCHVEC_SIZE);
 
   /* Now we got into completion */
-  for (i = 0; i < vector_active (cmd_vector); i++)
-    if ((cmd_element = vector_slot (cmd_vector, i)))
+  for (i = 0; i < vector_max (cmd_vector); i++)
+    if ((cmd_element = vector_slot (cmd_vector, i)) != NULL)
       {
-	const char *string;
+	char *string;
 	vector strvec = cmd_element->strvec;
-
+	
 	/* Check field length */
-	if (index >= vector_active (strvec))
+	if (index >= vector_max (strvec))
 	  vector_slot (cmd_vector, i) = NULL;
-	else
+	else 
 	  {
-	    unsigned int j;
+	    int j;
 
 	    descvec = vector_slot (strvec, index);
-	    for (j = 0; j < vector_active (descvec); j++)
-	      if ((desc = vector_slot (descvec, j)))
-		{
-		  if ((string = 
-		       cmd_entry_function (vector_slot (vline, index),
-					   desc->cmd)))
-		    if (cmd_unique_string (matchvec, string))
-		      vector_set (matchvec, XSTRDUP (MTYPE_TMP, string));
-		}
+	    for (j = 0; j < vector_max (descvec); j++)
+	      {
+		desc = vector_slot (descvec, j);
+
+		if ((string = cmd_entry_function (vector_slot (vline, index),
+						  desc->cmd)))
+		  if (cmd_unique_string (matchvec, string))
+		    vector_set (matchvec, XSTRDUP (MTYPE_TMP, string));
+	      }
 	  }
       }
 
@@ -1892,26 +1680,26 @@ cmd_complete_command_real (vector vline, struct vty *vty, int *status)
       if (lcd)
 	{
 	  int len = strlen (vector_slot (vline, index));
-
+	  
 	  if (len < lcd)
 	    {
 	      char *lcdstr;
-
-	      lcdstr = XMALLOC (MTYPE_STRVEC, lcd + 1);
+	      
+	      lcdstr = XMALLOC (MTYPE_TMP, lcd + 1);
 	      memcpy (lcdstr, matchvec->index[0], lcd);
 	      lcdstr[lcd] = '\0';
 
 	      /* match_str = (char **) &lcdstr; */
 
 	      /* Free matchvec. */
-	      for (i = 0; i < vector_active (matchvec); i++)
+	      for (i = 0; i < vector_max (matchvec); i++)
 		{
 		  if (vector_slot (matchvec, i))
-		    XFREE (MTYPE_STRVEC, vector_slot (matchvec, i));
+		    XFREE (MTYPE_TMP, vector_slot (matchvec, i));
 		}
 	      vector_free (matchvec);
 
-	      /* Make new matchvec. */
+      	      /* Make new matchvec. */
 	      matchvec = vector_init (INIT_MATCHVEC_SIZE);
 	      vector_set (matchvec, lcdstr);
 	      match_str = (char **) matchvec->index;
@@ -1929,80 +1717,18 @@ cmd_complete_command_real (vector vline, struct vty *vty, int *status)
   return match_str;
 }
 
-char **
-cmd_complete_command (vector vline, struct vty *vty, int *status)
-{
-  char **ret;
-
-  if ( cmd_try_do_shortcut(vty->node, vector_slot(vline, 0) ) )
-    {
-      enum node_type onode;
-      vector shifted_vline;
-      unsigned int index;
-
-      onode = vty->node;
-      vty->node = ENABLE_NODE;
-      /* We can try it on enable node, cos' the vty is authenticated */
-
-      shifted_vline = vector_init (vector_count(vline));
-      /* use memcpy? */
-      for (index = 1; index < vector_active (vline); index++) 
-	{
-	  vector_set_index (shifted_vline, index-1, vector_lookup(vline, index));
-	}
-
-      ret = cmd_complete_command_real (shifted_vline, vty, status);
-
-      vector_free(shifted_vline);
-      vty->node = onode;
-      return ret;
-  }
-
-
-  return cmd_complete_command_real (vline, vty, status);
-}
-
-/* return parent node */
-/* MUST eventually converge on CONFIG_NODE */
-enum node_type
-node_parent ( enum node_type node )
-{
-  enum node_type ret;
-
-  assert (node > CONFIG_NODE);
-
-  switch (node)
-    {
-    case BGP_VPNV4_NODE:
-    case BGP_IPV4_NODE:
-    case BGP_IPV4M_NODE:
-    case BGP_IPV6_NODE:
-    case BGP_IPV6M_NODE:
-      ret = BGP_NODE;
-      break;
-    case KEYCHAIN_KEY_NODE:
-      ret = KEYCHAIN_NODE;
-      break;
-    default:
-      ret = CONFIG_NODE;
-    }
-
-  return ret;
-}
-
 /* Execute command by argument vline vector. */
-static int
-cmd_execute_command_real (vector vline, struct vty *vty,
-			  struct cmd_element **cmd)
+int
+cmd_execute_command (vector vline, struct vty *vty, struct cmd_element **cmd)
 {
-  unsigned int i;
-  unsigned int index;
+  int i;
+  int index;
   vector cmd_vector;
   struct cmd_element *cmd_element;
   struct cmd_element *matched_element;
   unsigned int matched_count, incomplete_count;
   int argc;
-  const char *argv[CMD_ARGC_MAX];
+  char *argv[CMD_ARGC_MAX];
   enum match_type match = 0;
   int varflag;
   char *command;
@@ -2010,38 +1736,41 @@ cmd_execute_command_real (vector vline, struct vty *vty,
   /* Make copy of command elements. */
   cmd_vector = vector_copy (cmd_node_vector (cmdvec, vty->node));
 
-  for (index = 0; index < vector_active (vline); index++)
-    if ((command = vector_slot (vline, index)))
-      {
-	int ret;
+  for (index = 0; index < vector_max (vline); index++) 
+    {
+      int ret;
 
-	match = cmd_filter_by_completion (command, cmd_vector, index);
+      command = vector_slot (vline, index);
 
-	if (match == vararg_match)
-	  break;
-        
-	ret = is_cmd_ambiguous (command, cmd_vector, index, match);
+      match = cmd_filter_by_completion (command, cmd_vector, index);
 
-	if (ret == 1)
-	  {
-	    vector_free (cmd_vector);
-	    return CMD_ERR_AMBIGUOUS;
-	  }
-	else if (ret == 2)
-	  {
-	    vector_free (cmd_vector);
-	    return CMD_ERR_NO_MATCH;
-	  }
-      }
+      if (match == vararg_match)
+	break;
+
+      ret = is_cmd_ambiguous (command, cmd_vector, index, match);
+
+      if (ret == 1)
+	{
+	  vector_free (cmd_vector);
+	  return CMD_ERR_AMBIGUOUS;
+	}
+      else if (ret == 2)
+	{
+	  vector_free (cmd_vector);
+	  return CMD_ERR_NO_MATCH;
+	}
+    }
 
   /* Check matched count. */
   matched_element = NULL;
   matched_count = 0;
   incomplete_count = 0;
 
-  for (i = 0; i < vector_active (cmd_vector); i++)
-    if ((cmd_element = vector_slot (cmd_vector, i)))
+  for (i = 0; i < vector_max (cmd_vector); i++) 
+    if (vector_slot (cmd_vector,i) != NULL)
       {
+	cmd_element = vector_slot (cmd_vector,i);
+
 	if (match == vararg_match || index >= cmd_element->cmdsize)
 	  {
 	    matched_element = cmd_element;
@@ -2055,12 +1784,12 @@ cmd_execute_command_real (vector vline, struct vty *vty,
 	    incomplete_count++;
 	  }
       }
-
+  
   /* Finish of using cmd_vector. */
   vector_free (cmd_vector);
 
-  /* To execute command, matched_count must be 1. */
-  if (matched_count == 0)
+  /* To execute command, matched_count must be 1.*/
+  if (matched_count == 0) 
     {
       if (incomplete_count)
 	return CMD_ERR_INCOMPLETE;
@@ -2068,29 +1797,30 @@ cmd_execute_command_real (vector vline, struct vty *vty,
 	return CMD_ERR_NO_MATCH;
     }
 
-  if (matched_count > 1)
+  if (matched_count > 1) 
     return CMD_ERR_AMBIGUOUS;
 
   /* Argument treatment */
   varflag = 0;
   argc = 0;
 
-  for (i = 0; i < vector_active (vline); i++)
+  for (i = 0; i < vector_max (vline); i++)
     {
       if (varflag)
 	argv[argc++] = vector_slot (vline, i);
       else
-	{
+	{	  
 	  vector descvec = vector_slot (matched_element->strvec, i);
 
-	  if (vector_active (descvec) == 1)
+	  if (vector_max (descvec) == 1)
 	    {
 	      struct desc *desc = vector_slot (descvec, 0);
+	      char *str = desc->cmd;
 
-	      if (CMD_VARARG (desc->cmd))
+	      if (CMD_VARARG (str))
 		varflag = 1;
 
-	      if (varflag || CMD_VARIABLE (desc->cmd) || CMD_OPTION (desc->cmd))
+	      if (varflag || CMD_VARIABLE (str) || CMD_OPTION (str))
 		argv[argc++] = vector_slot (vline, i);
 	    }
 	  else
@@ -2112,76 +1842,19 @@ cmd_execute_command_real (vector vline, struct vty *vty,
   return (*matched_element->func) (matched_element, vty, argc, argv);
 }
 
-int
-cmd_execute_command (vector vline, struct vty *vty, struct cmd_element **cmd,
-		     int vtysh) {
-  int ret, saved_ret, tried = 0;
-  enum node_type onode, try_node;
-
-  onode = try_node = vty->node;
-
-  if ( cmd_try_do_shortcut(vty->node, vector_slot(vline, 0) ) )
-    {
-      vector shifted_vline;
-      unsigned int index;
-
-      vty->node = ENABLE_NODE;
-      /* We can try it on enable node, cos' the vty is authenticated */
-
-      shifted_vline = vector_init (vector_count(vline));
-      /* use memcpy? */
-      for (index = 1; index < vector_active (vline); index++) 
-	{
-	  vector_set_index (shifted_vline, index-1, vector_lookup(vline, index));
-	}
-
-      ret = cmd_execute_command_real (shifted_vline, vty, cmd);
-
-      vector_free(shifted_vline);
-      vty->node = onode;
-      return ret;
-  }
-
-
-  saved_ret = ret = cmd_execute_command_real (vline, vty, cmd);
-
-  if (vtysh)
-    return saved_ret;
-
-  /* This assumes all nodes above CONFIG_NODE are childs of CONFIG_NODE */
-  while ( ret != CMD_SUCCESS && ret != CMD_WARNING 
-	  && vty->node > CONFIG_NODE )
-    {
-      try_node = node_parent(try_node);
-      vty->node = try_node;
-      ret = cmd_execute_command_real (vline, vty, cmd);
-      tried = 1;
-      if (ret == CMD_SUCCESS || ret == CMD_WARNING)
-	{
-	  /* succesfull command, leave the node as is */
-	  return ret;
-	}
-    }
-  /* no command succeeded, reset the vty to the original node and
-     return the error for this node */
-  if ( tried )
-    vty->node = onode;
-  return saved_ret;
-}
-
 /* Execute command by argument readline. */
 int
-cmd_execute_command_strict (vector vline, struct vty *vty,
+cmd_execute_command_strict (vector vline, struct vty *vty, 
 			    struct cmd_element **cmd)
 {
-  unsigned int i;
-  unsigned int index;
+  int i;
+  int index;
   vector cmd_vector;
   struct cmd_element *cmd_element;
   struct cmd_element *matched_element;
   unsigned int matched_count, incomplete_count;
   int argc;
-  const char *argv[CMD_ARGC_MAX];
+  char *argv[CMD_ARGC_MAX];
   int varflag;
   enum match_type match = 0;
   char *command;
@@ -2189,39 +1862,40 @@ cmd_execute_command_strict (vector vline, struct vty *vty,
   /* Make copy of command element */
   cmd_vector = vector_copy (cmd_node_vector (cmdvec, vty->node));
 
-  for (index = 0; index < vector_active (vline); index++)
-    if ((command = vector_slot (vline, index)))
-      {
-	int ret;
-	
-	match = cmd_filter_by_string (vector_slot (vline, index),
-				      cmd_vector, index);
+  for (index = 0; index < vector_max (vline); index++) 
+    {
+      int ret;
 
-	/* If command meets '.VARARG' then finish matching. */
-	if (match == vararg_match)
-	  break;
-        
-	ret = is_cmd_ambiguous (command, cmd_vector, index, match);
-	if (ret == 1)
-	  {
-	    vector_free (cmd_vector);
-	    return CMD_ERR_AMBIGUOUS;
-	  }
-	if (ret == 2)
-	  {
-	    vector_free (cmd_vector);
-	    return CMD_ERR_NO_MATCH;
-	  }
-      }
+      command = vector_slot (vline, index);
+
+      match = cmd_filter_by_string (vector_slot (vline, index), 
+				    cmd_vector, index);
+
+      /* If command meets '.VARARG' then finish matching. */
+      if (match == vararg_match)
+	break;
+
+      ret = is_cmd_ambiguous (command, cmd_vector, index, match);
+      if (ret == 1)
+	{
+	  vector_free (cmd_vector);
+	  return CMD_ERR_AMBIGUOUS;
+	}
+      if (ret == 2)
+	{
+	  vector_free (cmd_vector);
+	  return CMD_ERR_NO_MATCH;
+	}
+    }
 
   /* Check matched count. */
   matched_element = NULL;
   matched_count = 0;
   incomplete_count = 0;
-  for (i = 0; i < vector_active (cmd_vector); i++)
-    if (vector_slot (cmd_vector, i) != NULL)
+  for (i = 0; i < vector_max (cmd_vector); i++) 
+    if (vector_slot (cmd_vector,i) != NULL)
       {
-	cmd_element = vector_slot (cmd_vector, i);
+	cmd_element = vector_slot (cmd_vector,i);
 
 	if (match == vararg_match || index >= cmd_element->cmdsize)
 	  {
@@ -2231,12 +1905,12 @@ cmd_execute_command_strict (vector vline, struct vty *vty,
 	else
 	  incomplete_count++;
       }
-
+  
   /* Finish of using cmd_vector. */
   vector_free (cmd_vector);
 
-  /* To execute command, matched_count must be 1. */
-  if (matched_count == 0)
+  /* To execute command, matched_count must be 1.*/
+  if (matched_count == 0) 
     {
       if (incomplete_count)
 	return CMD_ERR_INCOMPLETE;
@@ -2244,29 +1918,30 @@ cmd_execute_command_strict (vector vline, struct vty *vty,
 	return CMD_ERR_NO_MATCH;
     }
 
-  if (matched_count > 1)
+  if (matched_count > 1) 
     return CMD_ERR_AMBIGUOUS;
 
   /* Argument treatment */
   varflag = 0;
   argc = 0;
 
-  for (i = 0; i < vector_active (vline); i++)
+  for (i = 0; i < vector_max (vline); i++)
     {
       if (varflag)
 	argv[argc++] = vector_slot (vline, i);
       else
-	{
+	{	  
 	  vector descvec = vector_slot (matched_element->strvec, i);
 
-	  if (vector_active (descvec) == 1)
+	  if (vector_max (descvec) == 1)
 	    {
 	      struct desc *desc = vector_slot (descvec, 0);
+	      char *str = desc->cmd;
 
-	      if (CMD_VARARG (desc->cmd))
+	      if (CMD_VARARG (str))
 		varflag = 1;
-
-	      if (varflag || CMD_VARIABLE (desc->cmd) || CMD_OPTION (desc->cmd))
+	  
+	      if (varflag || CMD_VARIABLE (str) || CMD_OPTION (str))
 		argv[argc++] = vector_slot (vline, i);
 	    }
 	  else
@@ -2306,17 +1981,30 @@ config_from_file (struct vty *vty, FILE *fp)
       ret = cmd_execute_command_strict (vline, vty, NULL);
 
       /* Try again with setting node to CONFIG_NODE */
-      while (ret != CMD_SUCCESS && ret != CMD_WARNING
-	     && ret != CMD_ERR_NOTHING_TODO && vty->node != CONFIG_NODE)
+      if (ret != CMD_SUCCESS && ret != CMD_WARNING)
 	{
-	  vty->node = node_parent(vty->node);
-	  ret = cmd_execute_command_strict (vline, vty, NULL);
-	}
+	  if (vty->node == KEYCHAIN_KEY_NODE)
+	    {
+	      vty->node = KEYCHAIN_NODE;
+
+	      ret = cmd_execute_command_strict (vline, vty, NULL);
+
+	      if (ret != CMD_SUCCESS && ret != CMD_WARNING)
+		{
+		  vty->node = CONFIG_NODE;
+		  ret = cmd_execute_command_strict (vline, vty, NULL);
+		}
+	    }
+	  else
+	    {
+	      vty->node = CONFIG_NODE;
+	      ret = cmd_execute_command_strict (vline, vty, NULL);
+	    }
+	}	  
 
       cmd_free_strvec (vline);
 
-      if (ret != CMD_SUCCESS && ret != CMD_WARNING
-	  && ret != CMD_ERR_NOTHING_TODO)
+      if (ret != CMD_SUCCESS && ret != CMD_WARNING)
 	return ret;
     }
   return CMD_SUCCESS;
@@ -2392,7 +2080,6 @@ DEFUN (config_exit,
     case RIPNG_NODE:
     case OSPF_NODE:
     case OSPF6_NODE:
-    case ISIS_NODE:
     case KEYCHAIN_NODE:
     case MASC_NODE:
     case RMAP_NODE:
@@ -2403,7 +2090,6 @@ DEFUN (config_exit,
     case BGP_IPV4_NODE:
     case BGP_IPV4M_NODE:
     case BGP_IPV6_NODE:
-    case BGP_IPV6M_NODE:
       vty->node = BGP_NODE;
       break;
     case KEYCHAIN_KEY_NODE:
@@ -2443,11 +2129,9 @@ DEFUN (config_end,
     case BGP_IPV4_NODE:
     case BGP_IPV4M_NODE:
     case BGP_IPV6_NODE:
-    case BGP_IPV6M_NODE:
     case RMAP_NODE:
     case OSPF_NODE:
     case OSPF6_NODE:
-    case ISIS_NODE:
     case KEYCHAIN_NODE:
     case KEYCHAIN_KEY_NODE:
     case MASC_NODE:
@@ -2468,9 +2152,10 @@ DEFUN (show_version,
        SHOW_STR
        "Displays zebra version\n")
 {
-  vty_out (vty, "Quagga %s (%s).%s", QUAGGA_VERSION, host.name?host.name:"",
+  vty_out (vty, "Zebra %s (%s).%s", ZEBRA_VERSION,
+	   host_name,
 	   VTY_NEWLINE);
-  vty_out (vty, "%s%s", QUAGGA_COPYRIGHT, VTY_NEWLINE);
+  vty_out (vty, "Copyright 1996-2002, Kunihiro Ishiguro.%s", VTY_NEWLINE);
 
   return CMD_SUCCESS;
 }
@@ -2482,7 +2167,7 @@ DEFUN (config_help,
        "Description of the interactive help system\n")
 {
   vty_out (vty, 
-	   "Quagga VTY provides advanced help feature.  When you need help,%s\
+	   "Zebra VTY provides advanced help feature.  When you need help,%s\
 anytime at the command line please press '?'.%s\
 %s\
 If nothing matches, the help list will be empty and you must backup%s\
@@ -2505,14 +2190,12 @@ DEFUN (config_list,
        "list",
        "Print command list\n")
 {
-  unsigned int i;
+  int i;
   struct cmd_node *cnode = vector_slot (cmdvec, vty->node);
   struct cmd_element *cmd;
 
-  for (i = 0; i < vector_active (cnode->cmd_vector); i++)
-    if ((cmd = vector_slot (cnode->cmd_vector, i)) != NULL
-        && !(cmd->attr == CMD_ATTR_DEPRECATED
-             || cmd->attr == CMD_ATTR_HIDDEN))
+  for (i = 0; i < vector_max (cnode->cmd_vector); i++)
+    if ((cmd = vector_slot (cnode->cmd_vector, i)) != NULL)
       vty_out (vty, "  %s%s", cmd->string,
 	       VTY_NEWLINE);
   return CMD_SUCCESS;
@@ -2525,13 +2208,12 @@ DEFUN (config_write_file,
        "Write running configuration to memory, network, or terminal\n"
        "Write to configuration file\n")
 {
-  unsigned int i;
+  int i;
   int fd;
   struct cmd_node *node;
   char *config_file;
   char *config_file_tmp = NULL;
   char *config_file_sav = NULL;
-  int ret = CMD_WARNING;
   struct vty *file_vty;
 
   /* Check and see if we are operating under vtysh configuration */
@@ -2545,13 +2227,12 @@ DEFUN (config_write_file,
   /* Get filename. */
   config_file = host.config;
   
-  config_file_sav =
-    XMALLOC (MTYPE_TMP, strlen (config_file) + strlen (CONF_BACKUP_EXT) + 1);
+  config_file_sav = malloc (strlen (config_file) + strlen (CONF_BACKUP_EXT) + 1);
   strcpy (config_file_sav, config_file);
   strcat (config_file_sav, CONF_BACKUP_EXT);
 
 
-  config_file_tmp = XMALLOC (MTYPE_TMP, strlen (config_file) + 8);
+  config_file_tmp = malloc (strlen (config_file) + 8);
   sprintf (config_file_tmp, "%s.XXXXXX", config_file);
   
   /* Open file to configuration write. */
@@ -2560,7 +2241,9 @@ DEFUN (config_write_file,
     {
       vty_out (vty, "Can't open configuration file %s.%s", config_file_tmp,
 	       VTY_NEWLINE);
-      goto finished;
+      free (config_file_tmp);
+      free (config_file_sav);
+      return CMD_WARNING;
     }
   
   /* Make vty for configuration file. */
@@ -2573,7 +2256,7 @@ DEFUN (config_write_file,
   vty_time_print (file_vty, 1);
   vty_out (file_vty, "!\n");
 
-  for (i = 0; i < vector_active (cmdvec); i++)
+  for (i = 0; i < vector_max (cmdvec); i++)
     if ((node = vector_slot (cmdvec, i)) && node->func)
       {
 	if ((*node->func) (file_vty))
@@ -2586,45 +2269,47 @@ DEFUN (config_write_file,
       {
 	vty_out (vty, "Can't unlink backup configuration file %s.%s", config_file_sav,
 		 VTY_NEWLINE);
-        goto finished;
+	free (config_file_sav);
+	free (config_file_tmp);
+	unlink (config_file_tmp);	
+	return CMD_WARNING;
       }
   if (link (config_file, config_file_sav) != 0)
     {
       vty_out (vty, "Can't backup old configuration file %s.%s", config_file_sav,
 	        VTY_NEWLINE);
-      goto finished;
+      free (config_file_sav);
+      free (config_file_tmp);
+      unlink (config_file_tmp);
+      return CMD_WARNING;
     }
   sync ();
   if (unlink (config_file) != 0)
     {
       vty_out (vty, "Can't unlink configuration file %s.%s", config_file,
 	        VTY_NEWLINE);
-      goto finished;
+      free (config_file_sav);
+      free (config_file_tmp);
+      unlink (config_file_tmp);
+      return CMD_WARNING;      
     }
   if (link (config_file_tmp, config_file) != 0)
     {
       vty_out (vty, "Can't save configuration file %s.%s", config_file,
 	       VTY_NEWLINE);
-      goto finished;
+      free (config_file_sav);
+      free (config_file_tmp);
+      unlink (config_file_tmp);
+      return CMD_WARNING;      
     }
+  unlink (config_file_tmp);
   sync ();
   
-  if (chmod (config_file, CONFIGFILE_MASK) != 0)
-    {
-      vty_out (vty, "Can't chmod configuration file %s: %s (%d).%s", 
-	config_file, safe_strerror(errno), errno, VTY_NEWLINE);
-      goto finished;
-    }
-
+  free (config_file_sav);
+  free (config_file_tmp);
   vty_out (vty, "Configuration saved to %s%s", config_file,
 	   VTY_NEWLINE);
-  ret = CMD_SUCCESS;
-
-finished:
-  unlink (config_file_tmp);
-  XFREE (MTYPE_TMP, config_file_tmp);
-  XFREE (MTYPE_TMP, config_file_sav);
-  return ret;
+  return CMD_SUCCESS;
 }
 
 ALIAS (config_write_file, 
@@ -2652,12 +2337,12 @@ DEFUN (config_write_terminal,
        "Write running configuration to memory, network, or terminal\n"
        "Write to terminal\n")
 {
-  unsigned int i;
+  int i;
   struct cmd_node *node;
 
   if (vty->type == VTY_SHELL_SERV)
     {
-      for (i = 0; i < vector_active (cmdvec); i++)
+      for (i = 0; i < vector_max (cmdvec); i++)
 	if ((node = vector_slot (cmdvec, i)) && node->func && node->vtysh)
 	  {
 	    if ((*node->func) (vty))
@@ -2670,7 +2355,7 @@ DEFUN (config_write_terminal,
 	       VTY_NEWLINE);
       vty_out (vty, "!%s", VTY_NEWLINE);
 
-      for (i = 0; i < vector_active (cmdvec); i++)
+      for (i = 0; i < vector_max (cmdvec); i++)
 	if ((node = vector_slot (cmdvec, i)) && node->func)
 	  {
 	    if ((*node->func) (vty))
@@ -2736,9 +2421,9 @@ DEFUN (config_hostname,
     }
 
   if (host.name)
-    XFREE (MTYPE_HOST, host.name);
+    XFREE (0, host.name);
     
-  host.name = XSTRDUP (MTYPE_HOST, argv[0]);
+  host.name = strdup (argv[0]);
   return CMD_SUCCESS;
 }
 
@@ -2750,7 +2435,7 @@ DEFUN (config_no_hostname,
        "Host name of this router\n")
 {
   if (host.name)
-    XFREE (MTYPE_HOST, host.name);
+    XFREE (0, host.name);
   host.name = NULL;
   return CMD_SUCCESS;
 }
@@ -2775,11 +2460,11 @@ DEFUN (config_password, password_cmd,
       if (*argv[0] == '8')
 	{
 	  if (host.password)
-	    XFREE (MTYPE_HOST, host.password);
+	    XFREE (0, host.password);
 	  host.password = NULL;
 	  if (host.password_encrypt)
-	    XFREE (MTYPE_HOST, host.password_encrypt);
-	  host.password_encrypt = XSTRDUP (MTYPE_HOST, argv[1]);
+	    XFREE (0, host.password_encrypt);
+	  host.password_encrypt = XSTRDUP (0, strdup (argv[1]));
 	  return CMD_SUCCESS;
 	}
       else
@@ -2797,17 +2482,17 @@ DEFUN (config_password, password_cmd,
     }
 
   if (host.password)
-    XFREE (MTYPE_HOST, host.password);
+    XFREE (0, host.password);
   host.password = NULL;
 
   if (host.encrypt)
     {
       if (host.password_encrypt)
-	XFREE (MTYPE_HOST, host.password_encrypt);
-      host.password_encrypt = XSTRDUP (MTYPE_HOST, zencrypt (argv[0]));
+	XFREE (0, host.password_encrypt);
+      host.password_encrypt = XSTRDUP (0, zencrypt (argv[0]));
     }
   else
-    host.password = XSTRDUP (MTYPE_HOST, argv[0]);
+    host.password = XSTRDUP (0, argv[0]);
 
   return CMD_SUCCESS;
 }
@@ -2839,12 +2524,12 @@ DEFUN (config_enable_password, enable_password_cmd,
       if (*argv[0] == '8')
 	{
 	  if (host.enable)
-	    XFREE (MTYPE_HOST, host.enable);
+	    XFREE (0, host.enable);
 	  host.enable = NULL;
 
 	  if (host.enable_encrypt)
-	    XFREE (MTYPE_HOST, host.enable_encrypt);
-	  host.enable_encrypt = XSTRDUP (MTYPE_HOST, argv[1]);
+	    XFREE (0, host.enable_encrypt);
+	  host.enable_encrypt = XSTRDUP (0, argv[1]);
 
 	  return CMD_SUCCESS;
 	}
@@ -2863,18 +2548,18 @@ DEFUN (config_enable_password, enable_password_cmd,
     }
 
   if (host.enable)
-    XFREE (MTYPE_HOST, host.enable);
+    XFREE (0, host.enable);
   host.enable = NULL;
 
   /* Plain password input. */
   if (host.encrypt)
     {
       if (host.enable_encrypt)
-	XFREE (MTYPE_HOST, host.enable_encrypt);
-      host.enable_encrypt = XSTRDUP (MTYPE_HOST, zencrypt (argv[0]));
+	XFREE (0, host.enable_encrypt);
+      host.enable_encrypt = XSTRDUP (0, zencrypt (argv[0]));
     }
   else
-    host.enable = XSTRDUP (MTYPE_HOST, argv[0]);
+    host.enable = XSTRDUP (0, argv[0]);
 
   return CMD_SUCCESS;
 }
@@ -2894,11 +2579,11 @@ DEFUN (no_config_enable_password, no_enable_password_cmd,
        "Assign the privileged level password\n")
 {
   if (host.enable)
-    XFREE (MTYPE_HOST, host.enable);
+    XFREE (0, host.enable);
   host.enable = NULL;
 
   if (host.enable_encrypt)
-    XFREE (MTYPE_HOST, host.enable_encrypt);
+    XFREE (0, host.enable_encrypt);
   host.enable_encrypt = NULL;
 
   return CMD_SUCCESS;
@@ -2918,14 +2603,14 @@ DEFUN (service_password_encrypt,
   if (host.password)
     {
       if (host.password_encrypt)
-	XFREE (MTYPE_HOST, host.password_encrypt);
-      host.password_encrypt = XSTRDUP (MTYPE_HOST, zencrypt (host.password));
+	XFREE (0, host.password_encrypt);
+      host.password_encrypt = XSTRDUP (0, zencrypt (host.password));
     }
   if (host.enable)
     {
       if (host.enable_encrypt)
-	XFREE (MTYPE_HOST, host.enable_encrypt);
-      host.enable_encrypt = XSTRDUP (MTYPE_HOST, zencrypt (host.enable));
+	XFREE (0, host.enable_encrypt);
+      host.enable_encrypt = XSTRDUP (0, zencrypt (host.enable));
     }
 
   return CMD_SUCCESS;
@@ -2944,11 +2629,11 @@ DEFUN (no_service_password_encrypt,
   host.encrypt = 0;
 
   if (host.password_encrypt)
-    XFREE (MTYPE_HOST, host.password_encrypt);
+    XFREE (0, host.password_encrypt);
   host.password_encrypt = NULL;
 
   if (host.enable_encrypt)
-    XFREE (MTYPE_HOST, host.enable_encrypt);
+    XFREE (0, host.enable_encrypt);
   host.enable_encrypt = NULL;
 
   return CMD_SUCCESS;
@@ -3015,214 +2700,26 @@ DEFUN (no_service_terminal_length, no_service_terminal_length_cmd,
   return CMD_SUCCESS;
 }
 
-DEFUN_HIDDEN (do_echo,
-	      echo_cmd,
-	      "echo .MESSAGE",
-	      "Echo a message back to the vty\n"
-	      "The message to echo\n")
-{
-  char *message;
-
-  vty_out (vty, "%s%s", ((message = argv_concat(argv, argc, 0)) ? message : ""),
-	   VTY_NEWLINE);
-  if (message)
-    XFREE(MTYPE_TMP, message);
-  return CMD_SUCCESS;
-}
-
-DEFUN (config_logmsg,
-       config_logmsg_cmd,
-       "logmsg "LOG_LEVELS" .MESSAGE",
-       "Send a message to enabled logging destinations\n"
-       LOG_LEVEL_DESC
-       "The message to send\n")
-{
-  int level;
-  char *message;
-
-  if ((level = level_match(argv[0])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-
-  zlog(NULL, level, ((message = argv_concat(argv, argc, 1)) ? message : ""));
-  if (message)
-    XFREE(MTYPE_TMP, message);
-  return CMD_SUCCESS;
-}
-
-DEFUN (show_logging,
-       show_logging_cmd,
-       "show logging",
-       SHOW_STR
-       "Show current logging configuration\n")
-{
-  struct zlog *zl = zlog_default;
-
-  vty_out (vty, "Syslog logging: ");
-  if (zl->maxlvl[ZLOG_DEST_SYSLOG] == ZLOG_DISABLED)
-    vty_out (vty, "disabled");
-  else
-    vty_out (vty, "level %s, facility %s, ident %s",
-	     zlog_priority[zl->maxlvl[ZLOG_DEST_SYSLOG]],
-	     facility_name(zl->facility), zl->ident);
-  vty_out (vty, "%s", VTY_NEWLINE);
-
-  vty_out (vty, "Stdout logging: ");
-  if (zl->maxlvl[ZLOG_DEST_STDOUT] == ZLOG_DISABLED)
-    vty_out (vty, "disabled");
-  else
-    vty_out (vty, "level %s",
-	     zlog_priority[zl->maxlvl[ZLOG_DEST_STDOUT]]);
-  vty_out (vty, "%s", VTY_NEWLINE);
-
-  vty_out (vty, "Monitor logging: ");
-  if (zl->maxlvl[ZLOG_DEST_MONITOR] == ZLOG_DISABLED)
-    vty_out (vty, "disabled");
-  else
-    vty_out (vty, "level %s",
-	     zlog_priority[zl->maxlvl[ZLOG_DEST_MONITOR]]);
-  vty_out (vty, "%s", VTY_NEWLINE);
-
-  vty_out (vty, "File logging: ");
-  if ((zl->maxlvl[ZLOG_DEST_FILE] == ZLOG_DISABLED) ||
-      !zl->fp)
-    vty_out (vty, "disabled");
-  else
-    vty_out (vty, "level %s, filename %s",
-	     zlog_priority[zl->maxlvl[ZLOG_DEST_FILE]],
-	     zl->filename);
-  vty_out (vty, "%s", VTY_NEWLINE);
-
-  vty_out (vty, "Protocol name: %s%s",
-  	   zlog_proto_names[zl->protocol], VTY_NEWLINE);
-  vty_out (vty, "Record priority: %s%s",
-  	   (zl->record_priority ? "enabled" : "disabled"), VTY_NEWLINE);
-  vty_out (vty, "Timestamp precision: %d%s",
-	   zl->timestamp_precision, VTY_NEWLINE);
-
-  return CMD_SUCCESS;
-}
-
 DEFUN (config_log_stdout,
        config_log_stdout_cmd,
        "log stdout",
        "Logging control\n"
-       "Set stdout logging level\n")
+       "Logging goes to stdout\n")
 {
-  zlog_set_level (NULL, ZLOG_DEST_STDOUT, zlog_default->default_lvl);
-  return CMD_SUCCESS;
-}
-
-DEFUN (config_log_stdout_level,
-       config_log_stdout_level_cmd,
-       "log stdout "LOG_LEVELS,
-       "Logging control\n"
-       "Set stdout logging level\n"
-       LOG_LEVEL_DESC)
-{
-  int level;
-
-  if ((level = level_match(argv[0])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-  zlog_set_level (NULL, ZLOG_DEST_STDOUT, level);
+  zlog_set_flag (NULL, ZLOG_STDOUT);
+  host.log_stdout = 1;
   return CMD_SUCCESS;
 }
 
 DEFUN (no_config_log_stdout,
        no_config_log_stdout_cmd,
-       "no log stdout [LEVEL]",
+       "no log stdout",
        NO_STR
        "Logging control\n"
-       "Cancel logging to stdout\n"
-       "Logging level\n")
+       "Cancel logging to stdout\n")
 {
-  zlog_set_level (NULL, ZLOG_DEST_STDOUT, ZLOG_DISABLED);
-  return CMD_SUCCESS;
-}
-
-DEFUN (config_log_monitor,
-       config_log_monitor_cmd,
-       "log monitor",
-       "Logging control\n"
-       "Set terminal line (monitor) logging level\n")
-{
-  zlog_set_level (NULL, ZLOG_DEST_MONITOR, zlog_default->default_lvl);
-  return CMD_SUCCESS;
-}
-
-DEFUN (config_log_monitor_level,
-       config_log_monitor_level_cmd,
-       "log monitor "LOG_LEVELS,
-       "Logging control\n"
-       "Set terminal line (monitor) logging level\n"
-       LOG_LEVEL_DESC)
-{
-  int level;
-
-  if ((level = level_match(argv[0])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-  zlog_set_level (NULL, ZLOG_DEST_MONITOR, level);
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_config_log_monitor,
-       no_config_log_monitor_cmd,
-       "no log monitor [LEVEL]",
-       NO_STR
-       "Logging control\n"
-       "Disable terminal line (monitor) logging\n"
-       "Logging level\n")
-{
-  zlog_set_level (NULL, ZLOG_DEST_MONITOR, ZLOG_DISABLED);
-  return CMD_SUCCESS;
-}
-
-static int
-set_log_file(struct vty *vty, const char *fname, int loglevel)
-{
-  int ret;
-  char *p = NULL;
-  const char *fullpath;
-  
-  /* Path detection. */
-  if (! IS_DIRECTORY_SEP (*fname))
-    {
-      char cwd[MAXPATHLEN+1];
-      cwd[MAXPATHLEN] = '\0';
-      
-      if (getcwd (cwd, MAXPATHLEN) == NULL)
-        {
-          zlog_err ("config_log_file: Unable to alloc mem!");
-          return CMD_WARNING;
-        }
-      
-      if ( (p = XMALLOC (MTYPE_TMP, strlen (cwd) + strlen (fname) + 2))
-          == NULL)
-        {
-          zlog_err ("config_log_file: Unable to alloc mem!");
-          return CMD_WARNING;
-        }
-      sprintf (p, "%s/%s", cwd, fname);
-      fullpath = p;
-    }
-  else
-    fullpath = fname;
-
-  ret = zlog_set_file (NULL, fullpath, loglevel);
-
-  if (p)
-    XFREE (MTYPE_TMP, p);
-
-  if (!ret)
-    {
-      vty_out (vty, "can't open logfile %s\n", fname);
-      return CMD_WARNING;
-    }
-
-  if (host.logfile)
-    XFREE (MTYPE_HOST, host.logfile);
-
-  host.logfile = XSTRDUP (MTYPE_HOST, fname);
-
+  zlog_reset_flag (NULL, ZLOG_STDOUT);
+  host.log_stdout = 0;
   return CMD_SUCCESS;
 }
 
@@ -3233,22 +2730,35 @@ DEFUN (config_log_file,
        "Logging to file\n"
        "Logging filename\n")
 {
-  return set_log_file(vty, argv[0], zlog_default->default_lvl);
-}
+  int ret;
+  char *cwd;
+  char *fullpath;
 
-DEFUN (config_log_file_level,
-       config_log_file_level_cmd,
-       "log file FILENAME "LOG_LEVELS,
-       "Logging control\n"
-       "Logging to file\n"
-       "Logging filename\n"
-       LOG_LEVEL_DESC)
-{
-  int level;
+  /* Path detection. */
+  if (! IS_DIRECTORY_SEP (*argv[0]))
+    {
+      cwd = getcwd (NULL, MAXPATHLEN);
+      fullpath = XMALLOC (MTYPE_TMP,
+			  strlen (cwd) + strlen (argv[0]) + 2);
+      sprintf (fullpath, "%s/%s", cwd, argv[0]);
+    }
+  else
+    fullpath = argv[0];
 
-  if ((level = level_match(argv[1])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-  return set_log_file(vty, argv[0], level);
+  ret = zlog_set_file (NULL, ZLOG_FILE, fullpath);
+
+  if (!ret)
+    {
+      vty_out (vty, "can't open logfile %s\n", argv[0]);
+      return CMD_WARNING;
+    }
+
+  if (host.logfile)
+    XFREE (MTYPE_TMP, host.logfile);
+
+  host.logfile = strdup (argv[0]);
+
+  return CMD_SUCCESS;
 }
 
 DEFUN (no_config_log_file,
@@ -3262,142 +2772,64 @@ DEFUN (no_config_log_file,
   zlog_reset_file (NULL);
 
   if (host.logfile)
-    XFREE (MTYPE_HOST, host.logfile);
+    XFREE (MTYPE_TMP, host.logfile);
 
   host.logfile = NULL;
 
   return CMD_SUCCESS;
 }
 
-ALIAS (no_config_log_file,
-       no_config_log_file_level_cmd,
-       "no log file FILENAME LEVEL",
-       NO_STR
-       "Logging control\n"
-       "Cancel logging to file\n"
-       "Logging file name\n"
-       "Logging level\n")
-
 DEFUN (config_log_syslog,
        config_log_syslog_cmd,
        "log syslog",
        "Logging control\n"
-       "Set syslog logging level\n")
+       "Logging goes to syslog\n")
 {
-  zlog_set_level (NULL, ZLOG_DEST_SYSLOG, zlog_default->default_lvl);
-  return CMD_SUCCESS;
-}
-
-DEFUN (config_log_syslog_level,
-       config_log_syslog_level_cmd,
-       "log syslog "LOG_LEVELS,
-       "Logging control\n"
-       "Set syslog logging level\n"
-       LOG_LEVEL_DESC)
-{
-  int level;
-
-  if ((level = level_match(argv[0])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-  zlog_set_level (NULL, ZLOG_DEST_SYSLOG, level);
-  return CMD_SUCCESS;
-}
-
-DEFUN_DEPRECATED (config_log_syslog_facility,
-		  config_log_syslog_facility_cmd,
-		  "log syslog facility "LOG_FACILITIES,
-		  "Logging control\n"
-		  "Logging goes to syslog\n"
-		  "(Deprecated) Facility parameter for syslog messages\n"
-		  LOG_FACILITY_DESC)
-{
-  int facility;
-
-  if ((facility = facility_match(argv[0])) < 0)
-    return CMD_ERR_NO_MATCH;
-
-  zlog_set_level (NULL, ZLOG_DEST_SYSLOG, zlog_default->default_lvl);
-  zlog_default->facility = facility;
+  zlog_set_flag (NULL, ZLOG_SYSLOG);
+  host.log_syslog = 1;
   return CMD_SUCCESS;
 }
 
 DEFUN (no_config_log_syslog,
        no_config_log_syslog_cmd,
-       "no log syslog [LEVEL]",
+       "no log syslog",
        NO_STR
        "Logging control\n"
-       "Cancel logging to syslog\n"
-       "Logging level\n")
+       "Cancel logging to syslog\n")
 {
-  zlog_set_level (NULL, ZLOG_DEST_SYSLOG, ZLOG_DISABLED);
+  zlog_reset_flag (NULL, ZLOG_SYSLOG);
+  host.log_syslog = 0;
   return CMD_SUCCESS;
 }
 
-ALIAS (no_config_log_syslog,
-       no_config_log_syslog_facility_cmd,
-       "no log syslog facility "LOG_FACILITIES,
-       NO_STR
+DEFUN (config_log_trap,
+       config_log_trap_cmd,
+       "log trap (emergencies|alerts|critical|errors|warnings|notifications|informational|debugging)",
        "Logging control\n"
-       "Logging goes to syslog\n"
-       "Facility parameter for syslog messages\n"
-       LOG_FACILITY_DESC)
-
-DEFUN (config_log_facility,
-       config_log_facility_cmd,
-       "log facility "LOG_FACILITIES,
-       "Logging control\n"
-       "Facility parameter for syslog messages\n"
-       LOG_FACILITY_DESC)
-{
-  int facility;
-
-  if ((facility = facility_match(argv[0])) < 0)
-    return CMD_ERR_NO_MATCH;
-  zlog_default->facility = facility;
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_config_log_facility,
-       no_config_log_facility_cmd,
-       "no log facility [FACILITY]",
-       NO_STR
-       "Logging control\n"
-       "Reset syslog facility to default (daemon)\n"
-       "Syslog facility\n")
-{
-  zlog_default->facility = LOG_DAEMON;
-  return CMD_SUCCESS;
-}
-
-DEFUN_DEPRECATED (config_log_trap,
-		  config_log_trap_cmd,
-		  "log trap "LOG_LEVELS,
-		  "Logging control\n"
-		  "(Deprecated) Set logging level and default for all destinations\n"
-		  LOG_LEVEL_DESC)
+       "Limit logging to specifed level\n")
 {
   int new_level ;
-  int i;
   
-  if ((new_level = level_match(argv[0])) == ZLOG_DISABLED)
-    return CMD_ERR_NO_MATCH;
-
-  zlog_default->default_lvl = new_level;
-  for (i = 0; i < ZLOG_NUM_DESTS; i++)
-    if (zlog_default->maxlvl[i] != ZLOG_DISABLED)
-      zlog_default->maxlvl[i] = new_level;
-  return CMD_SUCCESS;
+  for ( new_level = 0 ; zlog_priority [new_level] != NULL ; new_level ++ )
+    {
+    if ( strcmp ( argv[0], zlog_priority [new_level] ) == 0 )
+      /* found new logging level */
+      {
+      zlog_default->maskpri = new_level;
+      return CMD_SUCCESS;
+      }
+    }
+  return CMD_ERR_NO_MATCH;
 }
 
-DEFUN_DEPRECATED (no_config_log_trap,
-		  no_config_log_trap_cmd,
-		  "no log trap [LEVEL]",
-		  NO_STR
-		  "Logging control\n"
-		  "Permit all logging information\n"
-		  "Logging level\n")
+DEFUN (no_config_log_trap,
+       no_config_log_trap_cmd,
+       "no log trap",
+       NO_STR
+       "Logging control\n"
+       "Permit all logging information\n")
 {
-  zlog_default->default_lvl = LOG_DEBUG;
+  zlog_default->maskpri = LOG_DEBUG;
   return CMD_SUCCESS;
 }
 
@@ -3422,51 +2854,6 @@ DEFUN (no_config_log_record_priority,
   return CMD_SUCCESS;
 }
 
-DEFUN (config_log_timestamp_precision,
-       config_log_timestamp_precision_cmd,
-       "log timestamp precision <0-6>",
-       "Logging control\n"
-       "Timestamp configuration\n"
-       "Set the timestamp precision\n"
-       "Number of subsecond digits\n")
-{
-  if (argc != 1)
-    {
-      vty_out (vty, "Insufficient arguments%s", VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-
-  VTY_GET_INTEGER_RANGE("Timestamp Precision",
-  			zlog_default->timestamp_precision, argv[0], 0, 6);
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_config_log_timestamp_precision,
-       no_config_log_timestamp_precision_cmd,
-       "no log timestamp precision",
-       NO_STR
-       "Logging control\n"
-       "Timestamp configuration\n"
-       "Reset the timestamp precision to the default value of 0\n")
-{
-  zlog_default->timestamp_precision = 0 ;
-  return CMD_SUCCESS;
-}
-
-DEFUN (banner_motd_file,
-       banner_motd_file_cmd,
-       "banner motd file [FILE]",
-       "Set banner\n"
-       "Banner for motd\n"
-       "Banner from a file\n"
-       "Filename\n")
-{
-  if (host.motdfile)
-    XFREE (MTYPE_HOST, host.motdfile);
-  host.motdfile = XSTRDUP (MTYPE_HOST, argv[0]);
-
-  return CMD_SUCCESS;
-}
 
 DEFUN (banner_motd_default,
        banner_motd_default_cmd,
@@ -3487,9 +2874,6 @@ DEFUN (no_banner_motd,
        "Strings for motd\n")
 {
   host.motd = NULL;
-  if (host.motdfile) 
-    XFREE (MTYPE_HOST, host.motdfile);
-  host.motdfile = NULL;
   return CMD_SUCCESS;
 }
 
@@ -3497,7 +2881,7 @@ DEFUN (no_banner_motd,
 void
 host_config_set (char *filename)
 {
-  host.config = XSTRDUP (MTYPE_HOST, filename);
+  host.config = strdup (filename);
 }
 
 void
@@ -3531,7 +2915,6 @@ cmd_init (int terminal)
   host.config = NULL;
   host.lines = -1;
   host.motd = default_motd;
-  host.motdfile = NULL;
 
   /* Install top nodes. */
   install_node (&view_node, NULL);
@@ -3551,8 +2934,6 @@ cmd_init (int terminal)
       install_element (VIEW_NODE, &config_enable_cmd);
       install_element (VIEW_NODE, &config_terminal_length_cmd);
       install_element (VIEW_NODE, &config_terminal_no_length_cmd);
-      install_element (VIEW_NODE, &show_logging_cmd);
-      install_element (VIEW_NODE, &echo_cmd);
     }
 
   if (terminal)
@@ -3564,64 +2945,37 @@ cmd_init (int terminal)
     }
   install_element (ENABLE_NODE, &show_startup_config_cmd);
   install_element (ENABLE_NODE, &show_version_cmd);
+  install_element (ENABLE_NODE, &config_terminal_length_cmd);
+  install_element (ENABLE_NODE, &config_terminal_no_length_cmd);
 
   if (terminal)
-    {
-      install_element (ENABLE_NODE, &config_terminal_length_cmd);
-      install_element (ENABLE_NODE, &config_terminal_no_length_cmd);
-      install_element (ENABLE_NODE, &show_logging_cmd);
-      install_element (ENABLE_NODE, &echo_cmd);
-      install_element (ENABLE_NODE, &config_logmsg_cmd);
-
-      install_default (CONFIG_NODE);
-    }
-  
+    install_default (CONFIG_NODE);
   install_element (CONFIG_NODE, &hostname_cmd);
   install_element (CONFIG_NODE, &no_hostname_cmd);
-
+  install_element (CONFIG_NODE, &password_cmd);
+  install_element (CONFIG_NODE, &password_text_cmd);
+  install_element (CONFIG_NODE, &enable_password_cmd);
+  install_element (CONFIG_NODE, &enable_password_text_cmd);
+  install_element (CONFIG_NODE, &no_enable_password_cmd);
   if (terminal)
     {
-      install_element (CONFIG_NODE, &password_cmd);
-      install_element (CONFIG_NODE, &password_text_cmd);
-      install_element (CONFIG_NODE, &enable_password_cmd);
-      install_element (CONFIG_NODE, &enable_password_text_cmd);
-      install_element (CONFIG_NODE, &no_enable_password_cmd);
-
       install_element (CONFIG_NODE, &config_log_stdout_cmd);
-      install_element (CONFIG_NODE, &config_log_stdout_level_cmd);
       install_element (CONFIG_NODE, &no_config_log_stdout_cmd);
-      install_element (CONFIG_NODE, &config_log_monitor_cmd);
-      install_element (CONFIG_NODE, &config_log_monitor_level_cmd);
-      install_element (CONFIG_NODE, &no_config_log_monitor_cmd);
       install_element (CONFIG_NODE, &config_log_file_cmd);
-      install_element (CONFIG_NODE, &config_log_file_level_cmd);
       install_element (CONFIG_NODE, &no_config_log_file_cmd);
-      install_element (CONFIG_NODE, &no_config_log_file_level_cmd);
       install_element (CONFIG_NODE, &config_log_syslog_cmd);
-      install_element (CONFIG_NODE, &config_log_syslog_level_cmd);
-      install_element (CONFIG_NODE, &config_log_syslog_facility_cmd);
       install_element (CONFIG_NODE, &no_config_log_syslog_cmd);
-      install_element (CONFIG_NODE, &no_config_log_syslog_facility_cmd);
-      install_element (CONFIG_NODE, &config_log_facility_cmd);
-      install_element (CONFIG_NODE, &no_config_log_facility_cmd);
       install_element (CONFIG_NODE, &config_log_trap_cmd);
       install_element (CONFIG_NODE, &no_config_log_trap_cmd);
       install_element (CONFIG_NODE, &config_log_record_priority_cmd);
       install_element (CONFIG_NODE, &no_config_log_record_priority_cmd);
-      install_element (CONFIG_NODE, &config_log_timestamp_precision_cmd);
-      install_element (CONFIG_NODE, &no_config_log_timestamp_precision_cmd);
       install_element (CONFIG_NODE, &service_password_encrypt_cmd);
       install_element (CONFIG_NODE, &no_service_password_encrypt_cmd);
       install_element (CONFIG_NODE, &banner_motd_default_cmd);
-      install_element (CONFIG_NODE, &banner_motd_file_cmd);
       install_element (CONFIG_NODE, &no_banner_motd_cmd);
       install_element (CONFIG_NODE, &service_terminal_length_cmd);
       install_element (CONFIG_NODE, &no_service_terminal_length_cmd);
-
-      install_element (VIEW_NODE, &show_thread_cpu_cmd);
-      install_element (ENABLE_NODE, &show_thread_cpu_cmd);
-      install_element (VIEW_NODE, &show_work_queues_cmd);
-      install_element (ENABLE_NODE, &show_work_queues_cmd);
     }
+
   srand(time(NULL));
 }

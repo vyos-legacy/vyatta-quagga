@@ -35,10 +35,6 @@
 #define ISM_DR                            7
 #define OSPF_ISM_STATE_MAX   	          8
 
-/* Because DR/DROther values are exhanged wrt RFC */
-#define ISM_SNMP(x) (((x) == ISM_DROther) ? ISM_DR : \
-                     ((x) == ISM_DR) ? ISM_DROther : (x))
-
 /* OSPF Interface State Machine Event. */
 #define ISM_NoEvent                       0
 #define ISM_InterfaceUp                   1
@@ -50,53 +46,31 @@
 #define ISM_InterfaceDown                 7
 #define OSPF_ISM_EVENT_MAX                8
 
-#define OSPF_ISM_WRITE_ON(O)                                                  \
+#define OSPF_ISM_WRITE_ON()                                                   \
       do                                                                      \
         {                                                                     \
           if (oi->on_write_q == 0)                                            \
 	    {                                                                 \
-              listnode_add ((O)->oi_write_q, oi);                             \
+              listnode_add (ospf_top->oi_write_q, oi);                        \
 	      oi->on_write_q = 1;                                             \
 	    }                                                                 \
-	  if ((O)->t_write == NULL)                                           \
-	    (O)->t_write =                                                    \
-	      thread_add_write (master, ospf_write, (O), (O)->fd);            \
+	  if (ospf_top->t_write == NULL)                                      \
+	    ospf_top->t_write =                                               \
+	      thread_add_write (master, ospf_write, ospf_top, ospf_top->fd);  \
         } while (0)
      
 /* Macro for OSPF ISM timer turn on. */
 #define OSPF_ISM_TIMER_ON(T,F,V) \
-  do { \
-    if (!(T)) \
-      (T) = thread_add_timer (master, (F), oi, (V)); \
-  } while (0)
-#define OSPF_ISM_TIMER_MSEC_ON(T,F,V) \
-  do { \
-    if (!(T)) \
-      (T) = thread_add_timer_msec (master, (F), oi, (V)); \
-  } while (0)
-
-/* convenience macro to set hello timer correctly, according to
- * whether fast-hello is set or not
- */
-#define OSPF_HELLO_TIMER_ON(O) \
-  do { \
-    if (OSPF_IF_PARAM ((O), fast_hello)) \
-        OSPF_ISM_TIMER_MSEC_ON ((O)->t_hello, ospf_hello_timer, \
-                                1000 / OSPF_IF_PARAM ((O), fast_hello)); \
-    else \
-        OSPF_ISM_TIMER_ON ((O)->t_hello, ospf_hello_timer, \
-                                OSPF_IF_PARAM ((O), v_hello)); \
-  } while (0)
+      if (!(T)) \
+        (T) = thread_add_timer (master, (F), oi, (V))
 
 /* Macro for OSPF ISM timer turn off. */
 #define OSPF_ISM_TIMER_OFF(X) \
-  do { \
-    if (X) \
-      { \
-	thread_cancel (X); \
-	(X) = NULL; \
-      } \
-  } while (0)
+      if (X) \
+        { \
+          thread_cancel (X); \
+          (X) = NULL; \
+        }
 
 /* Macro for OSPF schedule event. */
 #define OSPF_ISM_EVENT_SCHEDULE(I,E) \
@@ -107,8 +81,8 @@
       thread_execute (master, ospf_ism_event, (I), (E))
 
 /* Prototypes. */
-extern int ospf_ism_event (struct thread *);
-extern void ism_change_status (struct ospf_interface *, int);
-extern int ospf_hello_timer (struct thread *thread);
+int ospf_ism_event (struct thread *);
+void ism_change_status (struct ospf_interface *, int);
+int ospf_hello_timer (struct thread *thread);
 
 #endif /* _ZEBRA_OSPF_ISM_H */

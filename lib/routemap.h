@@ -45,8 +45,7 @@ typedef enum
   RMAP_RIPNG,
   RMAP_OSPF,
   RMAP_OSPF6,
-  RMAP_BGP,
-  RMAP_ZEBRA
+  RMAP_BGP
 } route_map_object_t;
 
 typedef enum
@@ -68,21 +67,18 @@ typedef enum
   RMAP_EVENT_INDEX_DELETED
 } route_map_event_t;
 
-/* Depth limit in RMAP recursion using RMAP_CALL. */
-#define RMAP_RECURSION_LIMIT      10
-
 /* Route map rule structure for matching and setting. */
 struct route_map_rule_cmd
 {
   /* Route map rule name (e.g. as-path, metric) */
-  const char *str;
+  char *str;
 
   /* Function for value set or match. */
   route_map_result_t (*func_apply)(void *, struct prefix *, 
 				   route_map_object_t, void *);
 
   /* Compile argument and return result as void *. */
-  void *(*func_compile)(const char *);
+  void *(*func_compile)(char *);
 
   /* Free allocated value by func_compile (). */
   void (*func_free)(void *);
@@ -109,7 +105,6 @@ struct route_map_rule_list
 struct route_map_index
 {
   struct route_map *map;
-  char *description;
 
   /* Preference of this route map rule. */
   int pref;
@@ -122,9 +117,6 @@ struct route_map_index
 
   /* If we're using "GOTO", to where do we go? */
   int nextpref;
-
-  /* If we're using "CALL", to which route-map do ew go? */
-  char *nextrm;
 
   /* Matching rule list. */
   struct route_map_rule_list match_list;
@@ -151,46 +143,52 @@ struct route_map
 };
 
 /* Prototypes. */
-extern void route_map_init (void);
-extern void route_map_init_vty (void);
+void route_map_init ();
+void route_map_init_vty ();
 
 /* Add match statement to route map. */
-extern int route_map_add_match (struct route_map_index *index,
-		                const char *match_name,
-		                const char *match_arg);
+int
+route_map_add_match (struct route_map_index *index,
+		     char *match_name,
+		     char *match_arg);
 
 /* Delete specified route match rule. */
-extern int route_map_delete_match (struct route_map_index *index,
-			           const char *match_name,
-			           const char *match_arg);
+int
+route_map_delete_match (struct route_map_index *index,
+			char *match_name,
+			char *match_arg);
 
 /* Add route-map set statement to the route map. */
-extern int route_map_add_set (struct route_map_index *index, 
-		              const char *set_name,
-		              const char *set_arg);
+int
+route_map_add_set (struct route_map_index *index, 
+		   char *set_name,
+		   char *set_arg);
 
 /* Delete route map set rule. */
-extern int route_map_delete_set (struct route_map_index *index,
-                                 const char *set_name,
-                                 const char *set_arg);
+int
+route_map_delete_set (struct route_map_index *index, char *set_name,
+                      char *set_arg);
 
 /* Install rule command to the match list. */
-extern void route_map_install_match (struct route_map_rule_cmd *cmd);
+void
+route_map_install_match (struct route_map_rule_cmd *cmd);
 
 /* Install rule command to the set list. */
-extern void route_map_install_set (struct route_map_rule_cmd *cmd);
+void
+route_map_install_set (struct route_map_rule_cmd *cmd);
 
 /* Lookup route map by name. */
-extern struct route_map * route_map_lookup_by_name (const char *name);
+struct route_map *
+route_map_lookup_by_name (char *name);
 
 /* Apply route map to the object. */
-extern route_map_result_t route_map_apply (struct route_map *map,
-                                           struct prefix *,
-                                           route_map_object_t object_type,
-                                           void *object);
+route_map_result_t
+route_map_apply (struct route_map *map, struct prefix *, 
+		 route_map_object_t object_type, void *object);
 
-extern void route_map_add_hook (void (*func) (const char *));
-extern void route_map_delete_hook (void (*func) (const char *));
-extern void route_map_event_hook (void (*func) (route_map_event_t, const char *));
+void route_map_add_hook (void (*func) (char *));
+void route_map_delete_hook (void (*func) (char *));
+void route_map_event_hook (void (*func) (route_map_event_t, char *));
+
 
 #endif /* _ZEBRA_ROUTEMAP_H */

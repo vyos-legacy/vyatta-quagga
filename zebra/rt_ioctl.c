@@ -26,21 +26,19 @@
 #include "log.h"
 #include "if.h"
 
-#include "zebra/zserv.h"
 #include "zebra/rib.h"
 #include "zebra/debug.h"
-#include "zebra/rt.h"
 
 /* Initialize of kernel interface.  There is no kernel communication
    support under ioctl().  So this is dummy stub function. */
 void
-kernel_init (void)
+kernel_init ()
 {
   return;
 }
 
 /* Dummy function of routing socket. */
-static void
+void
 kernel_read (int sock)
 {
   return;
@@ -50,9 +48,9 @@ kernel_read (int sock)
 /* Initialization prototype of struct sockaddr_in. */
 static struct sockaddr_in sin_proto =
 {
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   sizeof (struct sockaddr_in), 
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
   AF_INET, 0, {0}, {0}
 };
 #endif /* 0 */
@@ -77,9 +75,9 @@ kernel_add_route (struct prefix_ipv4 *dest, struct in_addr *gate,
   /* Make destination. */
   memset (&sin_dest, 0, sizeof (struct sockaddr_in));
   sin_dest.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   sin_dest.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
   sin_dest.sin_addr = dest->prefix;
 
   /* Make gateway. */
@@ -87,17 +85,17 @@ kernel_add_route (struct prefix_ipv4 *dest, struct in_addr *gate,
     {
       memset (&sin_gate, 0, sizeof (struct sockaddr_in));
       sin_gate.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
       sin_gate.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
       sin_gate.sin_addr = *gate;
     }
 
   memset (&sin_mask, 0, sizeof (struct sockaddr_in));
   sin_mask.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
       sin_gate.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
   masklen2ip (dest->prefixlen, &sin_mask.sin_addr);
 
   /* Set destination address, mask and gateway.*/
@@ -153,7 +151,7 @@ kernel_add_route (struct prefix_ipv4 *dest, struct in_addr *gate,
 	}
 
       close (sock);
-      zlog_warn ("write : %s (%d)", safe_strerror (errno), errno);
+      zlog_warn ("write : %s (%d)", strerror (errno), errno);
       return 1;
     }
   close (sock);
@@ -162,7 +160,7 @@ kernel_add_route (struct prefix_ipv4 *dest, struct in_addr *gate,
 }
 
 /* Interface to ioctl route message. */
-static int
+int
 kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
 {
   int ret;
@@ -178,9 +176,9 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
   /* Make destination. */
   memset (&sin_dest, 0, sizeof (struct sockaddr_in));
   sin_dest.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   sin_dest.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
   sin_dest.sin_addr = p->u.prefix4;
 
   if (CHECK_FLAG (rib->flags, ZEBRA_FLAG_BLACKHOLE))
@@ -210,9 +208,9 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
 		  nexthop->rtype == NEXTHOP_TYPE_IPV4_IFINDEX)
 		{
 		  sin_gate.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
 		  sin_gate.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
 		  sin_gate.sin_addr = nexthop->rgate.ipv4;
 		  rtentry.rt_flags |= RTF_GATEWAY;
 		}
@@ -232,9 +230,9 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
 		  nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX)
 		{
 		  sin_gate.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
 		  sin_gate.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
 		  sin_gate.sin_addr = nexthop->gate.ipv4;
 		  rtentry.rt_flags |= RTF_GATEWAY;
 		}
@@ -261,7 +259,7 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
   if (nexthop_num == 0)
     {
       if (IS_ZEBRA_DEBUG_KERNEL)
-	zlog_debug ("netlink_route_multipath(): No useful nexthop.");
+	zlog_info ("netlink_route_multipath(): No useful nexthop.");
       return 0;
     }
 
@@ -269,9 +267,9 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
 
   memset (&sin_mask, 0, sizeof (struct sockaddr_in));
   sin_mask.sin_family = AF_INET;
-#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+#ifdef HAVE_SIN_LEN
   sin_mask.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
+#endif /* HAVE_SIN_LEN */
   masklen2ip (p->prefixlen, &sin_mask.sin_addr);
 
   /* Set destination address, mask and gateway.*/
@@ -328,7 +326,7 @@ kernel_ioctl_ipv4 (u_long cmd, struct prefix *p, struct rib *rib, int family)
 	}
 
       close (sock);
-      zlog_warn ("write : %s (%d)", safe_strerror (errno), errno);
+      zlog_warn ("write : %s (%d)", strerror (errno), errno);
       return ret;
     }
   close (sock);
@@ -362,7 +360,7 @@ kernel_delete_ipv4 (struct prefix *p, struct rib *rib)
 #include <linux/ipv6_route.h>
 #endif
 
-static int
+int
 kernel_ioctl_ipv6 (u_long type, struct prefix_ipv6 *dest, struct in6_addr *gate,
 		   int index, int flags)
 {
@@ -413,7 +411,7 @@ kernel_ioctl_ipv6 (u_long type, struct prefix_ipv6 *dest, struct in6_addr *gate,
   if (ret < 0)
     {
       zlog_warn ("can't %s ipv6 route: %s\n", type == SIOCADDRT ? "add" : "delete", 
-	   safe_strerror(errno));
+	   strerror(errno));
       ret = errno;
       close (sock);
       return ret;
@@ -423,7 +421,7 @@ kernel_ioctl_ipv6 (u_long type, struct prefix_ipv6 *dest, struct in6_addr *gate,
   return ret;
 }
 
-static int
+int
 kernel_ioctl_ipv6_multipath (u_long cmd, struct prefix *p, struct rib *rib,
 			     int family)
 {
@@ -511,7 +509,7 @@ kernel_ioctl_ipv6_multipath (u_long cmd, struct prefix *p, struct rib *rib,
   if (nexthop_num == 0)
     {
       if (IS_ZEBRA_DEBUG_KERNEL)
-	zlog_debug ("netlink_route_multipath(): No useful nexthop.");
+	zlog_info ("netlink_route_multipath(): No useful nexthop.");
       return 0;
     }
 
@@ -528,7 +526,7 @@ kernel_ioctl_ipv6_multipath (u_long cmd, struct prefix *p, struct rib *rib,
     {
       zlog_warn ("can't %s ipv6 route: %s\n",
 		 cmd == SIOCADDRT ? "add" : "delete", 
-	   safe_strerror(errno));
+	   strerror(errno));
       ret = errno;
       close (sock);
       return ret;
@@ -553,7 +551,7 @@ kernel_delete_ipv6 (struct prefix *p, struct rib *rib)
 /* Delete IPv6 route from the kernel. */
 int
 kernel_delete_ipv6_old (struct prefix_ipv6 *dest, struct in6_addr *gate,
-		    unsigned int index, int flags, int table)
+		    int index, int flags, int table)
 {
   return kernel_ioctl_ipv6 (SIOCDELRT, dest, gate, index, flags);
 }

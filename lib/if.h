@@ -36,6 +36,10 @@ Boston, MA 02111-1307, USA.  */
 #define INTERFACE_NAMSIZ      20
 #define INTERFACE_HWADDR_MAX  20
 
+/* Internal If indexes start at 0xFFFFFFFF and go down to 1 greater
+   than this */
+#define IFINDEX_INTERNBASE 0x80000000
+
 #ifdef HAVE_PROC_NET_DEV
 struct if_stats
 {
@@ -71,44 +75,34 @@ struct if_stats
 /* Interface structure */
 struct interface 
 {
-  /* Interface name.  This should probably never be changed after the
-     interface is created, because the configuration info for this interface
-     is associated with this structure.  For that reason, the interface
-     should also never be deleted (to avoid losing configuration info).
-     To delete, just set ifindex to IFINDEX_INTERNAL to indicate that the
-     interface does not exist in the kernel.
-   */
+  /* Interface name. */
   char name[INTERFACE_NAMSIZ + 1];
 
-  /* Interface index (should be IFINDEX_INTERNAL for non-kernel or
-     deleted interfaces). */
+  /* Interface index. */
   unsigned int ifindex;
-#define IFINDEX_INTERNAL	0
 
   /* Zebra internal interface status */
   u_char status;
 #define ZEBRA_INTERFACE_ACTIVE     (1 << 0)
 #define ZEBRA_INTERFACE_SUB        (1 << 1)
-#define ZEBRA_INTERFACE_LINKDETECTION (1 << 2)
   
   /* Interface flags. */
-  uint64_t flags;
+  unsigned long flags;
 
   /* Interface metric */
   int metric;
 
   /* Interface MTU. */
-  unsigned int mtu;    /* IPv4 MTU */
-  unsigned int mtu6;   /* IPv6 MTU - probably, but not neccessarily same as mtu */
+  int mtu;
 
   /* Hardware address. */
-#ifdef HAVE_STRUCT_SOCKADDR_DL
+#ifdef HAVE_SOCKADDR_DL
   struct sockaddr_dl sdl;
 #else
   unsigned short hw_type;
   u_char hw_addr[INTERFACE_HWADDR_MAX];
   int hw_addr_len;
-#endif /* HAVE_STRUCT_SOCKADDR_DL */
+#endif /* HAVE_SOCKADDR_DL */
 
   /* interface bandwidth, kbits */
   unsigned int bandwidth;
@@ -121,7 +115,7 @@ struct interface
   void *distribute_out;
 
   /* Connected address list. */
-  struct list *connected;
+  list connected;
 
   /* Daemon specific interface data pointer. */
   void *info;
@@ -145,47 +139,18 @@ struct connected
   u_char conf;
 #define ZEBRA_IFC_REAL         (1 << 0)
 #define ZEBRA_IFC_CONFIGURED   (1 << 1)
-  /*
-     The ZEBRA_IFC_REAL flag should be set if and only if this address
-     exists in the kernel.
-     The ZEBRA_IFC_CONFIGURED flag should be set if and only if this address
-     was configured by the user from inside quagga.
-   */
 
   /* Flags for connected address. */
   u_char flags;
-#define ZEBRA_IFA_SECONDARY    (1 << 0)
-#define ZEBRA_IFA_PEER         (1 << 1)
-  /* N.B. the ZEBRA_IFA_PEER flag should be set if and only if
-     a peer address has been configured.  If this flag is set,
-     the destination field must contain the peer address.  
-     Otherwise, if this flag is not set, the destination address
-     will either contain a broadcast address or be NULL.
-   */
+#define ZEBRA_IFA_SECONDARY   (1 << 0)
 
   /* Address of connected network. */
   struct prefix *address;
-
-  /* Peer or Broadcast address, depending on whether ZEBRA_IFA_PEER is set.
-     Note: destination may be NULL if ZEBRA_IFA_PEER is not set. */
   struct prefix *destination;
 
   /* Label for Linux 2.2.X and upper. */
   char *label;
 };
-
-/* Does the destination field contain a peer address? */
-#define CONNECTED_PEER(C) CHECK_FLAG((C)->flags, ZEBRA_IFA_PEER)
-
-/* Prefix to insert into the RIB */
-#define CONNECTED_PREFIX(C) \
-	(CONNECTED_PEER(C) ? (C)->destination : (C)->address)
-
-/* Identifying address.  We guess that if there's a peer address, but the
-   local address is in the same prefix, then the local address may be unique. */
-#define CONNECTED_ID(C)	\
-	((CONNECTED_PEER(C) && !prefix_match((C)->destination, (C)->address)) ?\
-	 (C)->destination : (C)->address)
 
 /* Interface hook sort. */
 #define IF_NEW_HOOK   0
@@ -212,100 +177,46 @@ struct connected
 #ifndef IFF_LINK2
 #define IFF_LINK2 0x0
 #endif /* IFF_LINK2 */
-#ifndef IFF_NOXMIT
-#define IFF_NOXMIT 0x0
-#endif /* IFF_NOXMIT */
-#ifndef IFF_NORTEXCH
-#define IFF_NORTEXCH 0x0
-#endif /* IFF_NORTEXCH */
-#ifndef IFF_IPV4
-#define IFF_IPV4 0x0
-#endif /* IFF_IPV4 */
-#ifndef IFF_IPV6
-#define IFF_IPV6 0x0
-#endif /* IFF_IPV6 */
-#ifndef IFF_VIRTUAL
-#define IFF_VIRTUAL 0x0
-#endif /* IFF_VIRTUAL */
 
 /* Prototypes. */
-extern int if_cmp_func (struct interface *, struct interface *);
-extern struct interface *if_create (const char *name, int namelen);
-extern struct interface *if_lookup_by_index (unsigned int);
-extern struct interface *if_lookup_exact_address (struct in_addr);
-extern struct interface *if_lookup_address (struct in_addr);
-
-/* These 2 functions are to be used when the ifname argument is terminated
-   by a '\0' character: */
-extern struct interface *if_lookup_by_name (const char *ifname);
-extern struct interface *if_get_by_name (const char *ifname);
-
-/* For these 2 functions, the namelen argument should be the precise length
-   of the ifname string (not counting any optional trailing '\0' character).
-   In most cases, strnlen should be used to calculate the namelen value. */
-extern struct interface *if_lookup_by_name_len(const char *ifname,
-					       size_t namelen);
-extern struct interface *if_get_by_name_len(const char *ifname, size_t namelen);
-
-
-/* Delete the interface, but do not free the structure, and leave it in the
-   interface list.  It is often advisable to leave the pseudo interface 
-   structure because there may be configuration information attached. */
-extern void if_delete_retain (struct interface *);
-
-/* Delete and free the interface structure: calls if_delete_retain and then
-   deletes it from the interface list and frees the structure. */
-extern void if_delete (struct interface *);
-
-extern int if_is_up (struct interface *);
-extern int if_is_running (struct interface *);
-extern int if_is_operative (struct interface *);
-extern int if_is_loopback (struct interface *);
-extern int if_is_broadcast (struct interface *);
-extern int if_is_pointopoint (struct interface *);
-extern int if_is_multicast (struct interface *);
-extern void if_add_hook (int, int (*)(struct interface *));
-extern void if_init (void);
-extern void if_dump_all (void);
-extern const char *if_flag_dump(unsigned long);
-
-/* Please use ifindex2ifname instead of if_indextoname where possible;
-   ifindex2ifname uses internal interface info, whereas if_indextoname must
-   make a system call. */
-extern const char *ifindex2ifname (unsigned int);
-
-/* Please use ifname2ifindex instead of if_nametoindex where possible;
-   ifname2ifindex uses internal interface info, whereas if_nametoindex must
-   make a system call. */
-extern unsigned int ifname2ifindex(const char *ifname);
+struct interface *if_new (void);
+struct interface *if_create (void);
+struct interface *if_lookup_by_index (unsigned int);
+struct interface *if_lookup_by_name (char *);
+struct interface *if_lookup_exact_address (struct in_addr);
+struct interface *if_lookup_address (struct in_addr);
+struct interface *if_get_by_name (char *);
+void if_delete (struct interface *);
+int if_is_up (struct interface *);
+int if_is_loopback (struct interface *);
+int if_is_broadcast (struct interface *);
+int if_is_pointopoint (struct interface *);
+int if_is_multicast (struct interface *);
+void if_add_hook (int, int (*)(struct interface *));
+void if_init ();
+void if_dump_all ();
+char *ifindex2ifname (unsigned int);
 
 /* Connected address functions. */
-extern struct connected *connected_new (void);
-extern void connected_free (struct connected *);
-extern void connected_add (struct interface *, struct connected *);
-extern struct connected  *connected_add_by_prefix (struct interface *,
-                                            struct prefix *,
-                                            struct prefix *);
-extern struct connected  *connected_delete_by_prefix (struct interface *, 
-                                               struct prefix *);
-extern struct connected  *connected_lookup_address (struct interface *, 
-                                             struct in_addr);
+struct connected *connected_new ();
+void connected_free (struct connected *);
+void connected_add (struct interface *, struct connected *);
+struct connected  *connected_delete_by_prefix (struct interface *, struct prefix *);
+int ifc_pointopoint (struct connected *);
 
 #ifndef HAVE_IF_NAMETOINDEX
-extern unsigned int if_nametoindex (const char *);
+unsigned int if_nametoindex (const char *);
 #endif
 #ifndef HAVE_IF_INDEXTONAME
-extern char *if_indextoname (unsigned int, char *);
+char *if_indextoname (unsigned int, char *);
 #endif
 
 /* Exported variables. */
-extern struct list *iflist;
+extern list iflist;
 extern struct cmd_element interface_desc_cmd;
 extern struct cmd_element no_interface_desc_cmd;
 extern struct cmd_element interface_cmd;
-extern struct cmd_element no_interface_cmd;
 extern struct cmd_element interface_pseudo_cmd;
 extern struct cmd_element no_interface_pseudo_cmd;
-extern struct cmd_element show_address_cmd;
 
 #endif /* _ZEBRA_IF_H */

@@ -18,11 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_NEXTHOP_H
-#define _QUAGGA_BGP_NEXTHOP_H
-
-#include "if.h"
-
 #define BGP_SCAN_INTERVAL_DEFAULT   60
 #define BGP_IMPORT_INTERVAL_DEFAULT 15
 
@@ -46,14 +41,12 @@ struct bgp_nexthop_cache
   struct nexthop *nexthop;
 };
 
-extern void bgp_scan_init (void);
-extern int bgp_nexthop_lookup (afi_t, struct peer *peer, struct bgp_info *,
+void bgp_scan_init ();
+int bgp_nexthop_lookup (afi_t, struct peer *peer, struct bgp_info *,
 			int *, int *);
-extern void bgp_connected_add (struct connected *c);
-extern void bgp_connected_delete (struct connected *c);
-extern int bgp_multiaccess_check_v4 (struct in_addr, char *);
-extern int bgp_config_write_scan_time (struct vty *);
-extern int bgp_nexthop_check_ebgp (afi_t, struct attr *);
-extern int bgp_nexthop_self (afi_t, struct attr *);
-
-#endif /* _QUAGGA_BGP_NEXTHOP_H */
+void bgp_connected_add (struct connected *c);
+void bgp_connected_delete (struct connected *c);
+int bgp_multiaccess_check_v4 (struct in_addr, char *);
+int bgp_config_write_scan_time (struct vty *);
+int bgp_nexthop_check_ebgp (afi_t, struct attr *);
+int bgp_nexthop_self (afi_t, struct attr *);

@@ -29,8 +29,8 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 struct hash *comhash;
 
 /* Allocate a new communities value.  */
-static struct community *
-community_new (void)
+struct community *
+community_new ()
 {
   return (struct community *) XCALLOC (MTYPE_COMMUNITY,
 				       sizeof (struct community));
@@ -48,7 +48,7 @@ community_free (struct community *com)
 }
 
 /* Add one community value to the community. */
-static void
+void
 community_add_val (struct community *com, u_int32_t val)
 {
   com->size++;
@@ -112,7 +112,7 @@ community_delete (struct community *com1, struct community *com2)
 }
 
 /* Callback function from qsort(). */
-static int
+int
 community_compare (const void *a1, const void *a2)
 {
   u_int32_t v1;
@@ -144,7 +144,7 @@ community_include (struct community *com, u_int32_t val)
   return 0;
 }
 
-static u_int32_t
+u_int32_t
 community_val_get (struct community *com, int i)
 {
   u_char *p;
@@ -338,7 +338,7 @@ community_unintern (struct community *com)
 
 /* Create new community attribute. */
 struct community *
-community_parse (u_int32_t *pnt, u_short length)
+community_parse (char *pnt, u_short length)
 {
   struct community tmp;
   struct community *new;
@@ -349,7 +349,7 @@ community_parse (u_int32_t *pnt, u_short length)
 
   /* Make temporary community for hash look up. */
   tmp.size = length / 4;
-  tmp.val = pnt;
+  tmp.val = (u_int32_t *) pnt;
 
   new = community_uniq_sort (&tmp);
 
@@ -401,7 +401,7 @@ community_hash_make (struct community *com)
 }
 
 int
-community_match (const struct community *com1, const struct community *com2)
+community_match (struct community *com1, struct community *com2)
 {
   int i = 0;
   int j = 0;
@@ -432,7 +432,7 @@ community_match (const struct community *com1, const struct community *com2)
 /* If two aspath have same value then return 1 else return 0. This
    function is used by hash package. */
 int
-community_cmp (const struct community *com1, const struct community *com2)
+community_cmp (struct community *com1, struct community *com2)
 {
   if (com1 == NULL && com2 == NULL)
     return 1;
@@ -472,11 +472,10 @@ enum community_token
 };
 
 /* Get next community token from string. */
-static const char *
-community_gettoken (const char *buf, enum community_token *token, 
-                    u_int32_t *val)
+char *
+community_gettoken (char *buf, enum community_token *token, u_int32_t *val)
 {
-  const char *p = buf;
+  char *p = buf;
 
   /* Skip white space. */
   while (isspace ((int) *p))
@@ -520,7 +519,7 @@ community_gettoken (const char *buf, enum community_token *token,
 
       /* Unknown string. */
       *token = community_token_unknown;
-      return NULL;
+      return p;
     }
 
   /* Community value. */
@@ -538,7 +537,7 @@ community_gettoken (const char *buf, enum community_token *token,
 	      if (separator)
 		{
 		  *token = community_token_unknown;
-		  return NULL;
+		  return p;
 		}
 	      else
 		{
@@ -559,29 +558,27 @@ community_gettoken (const char *buf, enum community_token *token,
       if (! digit)
 	{
 	  *token = community_token_unknown;
-	  return NULL;
+	  return p;
 	}
       *val = community_high + community_low;
       *token = community_token_val;
       return p;
     }
   *token = community_token_unknown;
-  return NULL;
+  return p;
 }
 
 /* convert string to community structure */
 struct community *
-community_str2com (const char *str)
+community_str2com (char *str)
 {
   struct community *com = NULL;
   struct community *com_sort = NULL;
   u_int32_t val;
   enum community_token token;
 
-  do 
+  while ((str = community_gettoken (str, &token, &val))) 
     {
-      str = community_gettoken (str, &token, &val);
-      
       switch (token)
 	{
 	case community_token_val:
@@ -597,8 +594,9 @@ community_str2com (const char *str)
 	  if (com)
 	    community_free (com);
 	  return NULL;
+	  break;
 	}
-    } while (str);
+    }
   
   if (! com)
     return NULL;
@@ -618,14 +616,14 @@ community_count ()
 
 /* Return communities hash.  */
 struct hash *
-community_hash (void)
+community_hash ()
 {
   return comhash;
 }
 
 /* Initialize comminity related hash. */
 void
-community_init (void)
+community_init ()
 {
   comhash = hash_create (community_hash_make, community_cmp);
 }

@@ -18,29 +18,9 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_TABLE_H
-#define _QUAGGA_BGP_TABLE_H
-
-typedef enum
-{
-  BGP_TABLE_MAIN,
-  BGP_TABLE_RSCLIENT,
-} bgp_table_t;
-
 struct bgp_table
 {
-  bgp_table_t type;
-  
-  /* afi/safi of this table */
-  afi_t afi;
-  safi_t safi;
-  
-  /* The owner of this 'bgp_table' structure. */
-  void *owner;
-
   struct bgp_node *top;
-  
-  unsigned long count;
 };
 
 struct bgp_node
@@ -53,36 +33,33 @@ struct bgp_node
 #define l_left   link[0]
 #define l_right  link[1]
 
+  unsigned int lock;
+
   void *info;
 
   struct bgp_adj_out *adj_out;
 
   struct bgp_adj_in *adj_in;
 
+  void *aggregate;
+
   struct bgp_node *prn;
-
-  unsigned int lock;
-
-  u_char flags;
-#define BGP_NODE_PROCESS_SCHEDULED	(1 << 0)
 };
 
-extern struct bgp_table *bgp_table_init (afi_t, safi_t);
-extern void bgp_table_finish (struct bgp_table *);
-extern void bgp_unlock_node (struct bgp_node *node);
-extern void bgp_node_delete (struct bgp_node *node);
-extern struct bgp_node *bgp_table_top (struct bgp_table *);
-extern struct bgp_node *bgp_route_next (struct bgp_node *);
-extern struct bgp_node *bgp_route_next_until (struct bgp_node *, struct bgp_node *);
-extern struct bgp_node *bgp_node_get (struct bgp_table *, struct prefix *);
-extern struct bgp_node *bgp_node_lookup (struct bgp_table *, struct prefix *);
-extern struct bgp_node *bgp_lock_node (struct bgp_node *node);
-extern struct bgp_node *bgp_node_match (struct bgp_table *, struct prefix *);
-extern struct bgp_node *bgp_node_match_ipv4 (struct bgp_table *,
+struct bgp_table *bgp_table_init (void);
+void bgp_table_finish (struct bgp_table *);
+void bgp_unlock_node (struct bgp_node *node);
+void bgp_node_delete (struct bgp_node *node);
+struct bgp_node *bgp_table_top (struct bgp_table *);
+struct bgp_node *bgp_route_next (struct bgp_node *);
+struct bgp_node *bgp_route_next_until (struct bgp_node *, struct bgp_node *);
+struct bgp_node *bgp_node_get (struct bgp_table *, struct prefix *);
+struct bgp_node *bgp_node_lookup (struct bgp_table *, struct prefix *);
+struct bgp_node *bgp_lock_node (struct bgp_node *node);
+struct bgp_node *bgp_node_match (struct bgp_table *, struct prefix *);
+struct bgp_node *bgp_node_match_ipv4 (struct bgp_table *,
 					  struct in_addr *);
 #ifdef HAVE_IPV6
-extern struct bgp_node *bgp_node_match_ipv6 (struct bgp_table *,
+struct bgp_node *bgp_node_match_ipv6 (struct bgp_table *,
 					  struct in6_addr *);
 #endif /* HAVE_IPV6 */
-extern unsigned long bgp_table_count (struct bgp_table *);
-#endif /* _QUAGGA_BGP_TABLE_H */

@@ -26,7 +26,7 @@
 /* struct for vector */
 struct _vector 
 {
-  unsigned int active;		/* number of active slots */
+  unsigned int max;		/* max number of used slot */
   unsigned int alloced;		/* number of allocated slot */
   void **index;			/* index to data */
 };
@@ -36,28 +36,23 @@ typedef struct _vector *vector;
 
 /* (Sometimes) usefull macros.  This macro convert index expression to
  array expression. */
-/* Reference slot at given index, caller must ensure slot is active */
 #define vector_slot(V,I)  ((V)->index[(I)])
-/* Number of active slots. 
- * Note that this differs from vector_count() as it the count returned
- * will include any empty slots
- */
-#define vector_active(V) ((V)->active)
+#define vector_max(V) ((V)->max)
 
 /* Prototypes. */
-extern vector vector_init (unsigned int size);
-extern void vector_ensure (vector v, unsigned int num);
-extern int vector_empty_slot (vector v);
-extern int vector_set (vector v, void *val);
-extern int vector_set_index (vector v, unsigned int i, void *val);
-extern void vector_unset (vector v, unsigned int i);
-extern unsigned int vector_count (vector v);
-extern void vector_only_wrapper_free (vector v);
-extern void vector_only_index_free (void *index);
-extern void vector_free (vector v);
-extern vector vector_copy (vector v);
+vector vector_init (unsigned int size);
+void vector_ensure (vector v, unsigned int num);
+int vector_empty_slot (vector v);
+int vector_set (vector v, void *val);
+int vector_set_index (vector v, unsigned int i, void *val);
+void vector_unset (vector v, unsigned int i);
+unsigned int vector_count (vector v);
+void vector_only_wrapper_free (vector v);
+void vector_only_index_free (void *index);
+void vector_free (vector v);
+vector vector_copy (vector v);
 
-extern void *vector_lookup (vector, unsigned int);
-extern void *vector_lookup_ensure (vector, unsigned int);
+void *vector_lookup (vector, unsigned int);
+void *vector_lookup_ensure (vector, unsigned int);
 
 #endif /* _ZEBRA_VECTOR_H */

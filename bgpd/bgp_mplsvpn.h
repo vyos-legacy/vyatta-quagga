@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_MPLSVPN_H
-#define _QUAGGA_BGP_MPLSVPN_H
-
 #define RD_TYPE_AS      0
 #define RD_TYPE_IP      1
 
@@ -40,11 +37,9 @@ struct rd_ip
   u_int16_t val;
 };
 
-extern void bgp_mplsvpn_init (void);
-extern int bgp_nlri_parse_vpnv4 (struct peer *, struct attr *, struct bgp_nlri *);
-extern u_int32_t decode_label (u_char *);
-extern int str2prefix_rd (const char *, struct prefix_rd *);
-extern int str2tag (const char *, u_char *);
-extern char *prefix_rd2str (struct prefix_rd *, char *, size_t);
-
-#endif /* _QUAGGA_BGP_MPLSVPN_H */
+void bgp_mplsvpn_init ();
+int bgp_nlri_parse_vpnv4 (struct peer *, struct attr *, struct bgp_nlri *);
+u_int32_t decode_label (u_char *);
+int str2prefix_rd (u_char *, struct prefix_rd *);
+int str2tag (u_char *, u_char *);
+char *prefix_rd2str (struct prefix_rd *, char *, size_t);

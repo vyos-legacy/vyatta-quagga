@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003 Yasuhiro Ohara
+ * Copyright (C) 2002 Yasuhiro Ohara
  *
  * This file is part of GNU Zebra.
  *
@@ -24,17 +24,26 @@
 #include "memory.h"
 #include "log.h"
 #include "command.h"
-#include "prefix.h"
-#include "table.h"
-#include "vty.h"
+#include "if.h"
 
-#include "ospf6_proto.h"
-#include "ospf6_lsa.h"
+#include "ospf6_dump.h"
 #include "ospf6_lsdb.h"
-#include "ospf6d.h"
+
+#include "ospf6_interface.h"
+#include "ospf6_area.h"
+#include "ospf6_top.h"
+
+#define OSPF6_LSDB_MATCH_TYPE        0x01
+#define OSPF6_LSDB_MATCH_ID          0x02
+#define OSPF6_LSDB_MATCH_ADV_ROUTER  0x04
+#define OSPF6_LSDB_SHOW_DUMP         0x08
+#define OSPF6_LSDB_SHOW_DETAIL       0x10
+
+struct ospf6_lsdb_hook_t hooks[0x2000];
+struct ospf6_lsdb_hook_t *ospf6_lsdb_hook = hooks;
 
 struct ospf6_lsdb *
-ospf6_lsdb_create (void *data)
+ospf6_lsdb_create ()
 {
   struct ospf6_lsdb *lsdb;
 
@@ -46,7 +55,6 @@ ospf6_lsdb_create (void *data)
     }
   memset (lsdb, 0, sizeof (struct ospf6_lsdb));
 
-  lsdb->data = data;
   lsdb->table = route_table_init ();
   return lsdb;
 }
@@ -60,523 +68,656 @@ ospf6_lsdb_delete (struct ospf6_lsdb *lsdb)
 }
 
 static void
-ospf6_lsdb_set_key (struct prefix_ipv6 *key, void *value, int len)
+ospf6_lsdb_set_key (struct prefix_ipv6 *key, int flag,
+                    u_int16_t type, u_int32_t id, u_int32_t adv_router)
 {
-  assert (key->prefixlen % 8 == 0);
+  int len = 0;
+  memset (key, 0, sizeof (struct prefix_ipv6));
 
-  memcpy ((caddr_t) &key->prefix + key->prefixlen / 8,
-          (caddr_t) value, len);
+  if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_TYPE))
+    {
+      len += 2;
+      if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_ADV_ROUTER))
+        {
+          len += 4;
+          if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_ID))
+            len += 4;
+        }
+    }
+
+  if (len > 0)
+    memcpy ((char *)&key->prefix, &type, 2);
+  if (len > 2)
+    memcpy ((char *)&key->prefix + 2, &adv_router, 4);
+  if (len > 6)
+    memcpy ((char *)&key->prefix + 6, &id, 4);
+
   key->family = AF_INET6;
-  key->prefixlen += len * 8;
+  key->prefixlen = len * 8;
 }
-
-#ifndef NDEBUG
-static void
-_lsdb_count_assert (struct ospf6_lsdb *lsdb)
-{
-  struct ospf6_lsa *debug;
-  unsigned int num = 0;
-  for (debug = ospf6_lsdb_head (lsdb); debug;
-       debug = ospf6_lsdb_next (debug))
-    num++;
-
-  if (num == lsdb->count)
-    return;
-
-  zlog_debug ("PANIC !! lsdb[%p]->count = %d, real = %d",
-             lsdb, lsdb->count, num);
-  for (debug = ospf6_lsdb_head (lsdb); debug;
-       debug = ospf6_lsdb_next (debug))
-    zlog_debug ("%p %p %s lsdb[%p]", debug->prev, debug->next, debug->name,
-               debug->lsdb);
-  zlog_debug ("DUMP END");
-
-  assert (num == lsdb->count);
-}
-#define ospf6_lsdb_count_assert(t) (_lsdb_count_assert (t))
-#else /*NDEBUG*/
-#define ospf6_lsdb_count_assert(t) ((void) 0)
-#endif /*NDEBUG*/
 
 void
 ospf6_lsdb_add (struct ospf6_lsa *lsa, struct ospf6_lsdb *lsdb)
 {
+  int flag;
   struct prefix_ipv6 key;
-  struct route_node *current, *nextnode, *prevnode;
-  struct ospf6_lsa *next, *prev, *old = NULL;
+  struct route_node *rn;
+  struct ospf6_lsa *old = NULL;
 
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &lsa->header->type, sizeof (lsa->header->type));
-  ospf6_lsdb_set_key (&key, &lsa->header->adv_router,
-                      sizeof (lsa->header->adv_router));
-  ospf6_lsdb_set_key (&key, &lsa->header->id, sizeof (lsa->header->id));
+  flag = OSPF6_LSDB_MATCH_TYPE | OSPF6_LSDB_MATCH_ID |
+         OSPF6_LSDB_MATCH_ADV_ROUTER;
+  ospf6_lsdb_set_key (&key, flag, lsa->header->type, lsa->header->id,
+                      lsa->header->adv_router);
 
-  current = route_node_get (lsdb->table, (struct prefix *) &key);
-  old = current->info;
-  current->info = lsa;
+  rn = route_node_get (lsdb->table, (struct prefix *) &key);
+  if (rn->info)
+    old = rn->info;
+  rn->info = lsa;
   ospf6_lsa_lock (lsa);
 
   if (old)
-    {
-      if (old->prev)
-        old->prev->next = lsa;
-      if (old->next)
-        old->next->prev = lsa;
-      lsa->next = old->next;
-      lsa->prev = old->prev;
-    }
-  else
-    {
-      /* next link */
-      nextnode = current;
-      route_lock_node (nextnode);
-      do {
-        nextnode = route_next (nextnode);
-      } while (nextnode && nextnode->info == NULL);
-      if (nextnode == NULL)
-        lsa->next = NULL;
-      else
-        {
-          next = nextnode->info;
-          lsa->next = next;
-          next->prev = lsa;
-          route_unlock_node (nextnode);
-        }
-
-      /* prev link */
-      prevnode = current;
-      route_lock_node (prevnode);
-      do {
-        prevnode = route_prev (prevnode);
-      } while (prevnode && prevnode->info == NULL);
-      if (prevnode == NULL)
-        lsa->prev = NULL;
-      else
-        {
-          prev = prevnode->info;
-          lsa->prev = prev;
-          prev->next = lsa;
-          route_unlock_node (prevnode);
-        }
-
-      lsdb->count++;
-    }
-
-  if (old)
-    {
-      if (OSPF6_LSA_IS_CHANGED (old, lsa))
-        {
-          if (OSPF6_LSA_IS_MAXAGE (lsa))
-            {
-              if (lsdb->hook_remove)
-                {
-                  (*lsdb->hook_remove) (old);
-                  (*lsdb->hook_remove) (lsa);
-                }
-            }
-          else if (OSPF6_LSA_IS_MAXAGE (old))
-            {
-              if (lsdb->hook_add)
-                (*lsdb->hook_add) (lsa);
-            }
-          else
-            {
-              if (lsdb->hook_remove)
-                (*lsdb->hook_remove) (old);
-              if (lsdb->hook_add)
-                (*lsdb->hook_add) (lsa);
-            }
-        }
-    }
-  else if (OSPF6_LSA_IS_MAXAGE (lsa))
-    {
-      if (lsdb->hook_remove)
-        (*lsdb->hook_remove) (lsa);
-    }
-  else
-    {
-      if (lsdb->hook_add)
-        (*lsdb->hook_add) (lsa);
-    }
-
-  if (old)
     ospf6_lsa_unlock (old);
-
-  ospf6_lsdb_count_assert (lsdb);
+  else
+    lsdb->count++;
 }
 
 void
 ospf6_lsdb_remove (struct ospf6_lsa *lsa, struct ospf6_lsdb *lsdb)
 {
-  struct route_node *node;
+  int flag;
   struct prefix_ipv6 key;
+  struct route_node *rn;
+  struct ospf6_lsa *old;
 
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &lsa->header->type, sizeof (lsa->header->type));
-  ospf6_lsdb_set_key (&key, &lsa->header->adv_router,
-                      sizeof (lsa->header->adv_router));
-  ospf6_lsdb_set_key (&key, &lsa->header->id, sizeof (lsa->header->id));
+  flag = OSPF6_LSDB_MATCH_TYPE | OSPF6_LSDB_MATCH_ID |
+         OSPF6_LSDB_MATCH_ADV_ROUTER;
+  ospf6_lsdb_set_key (&key, flag, lsa->header->type, lsa->header->id,
+                      lsa->header->adv_router);
 
-  node = route_node_lookup (lsdb->table, (struct prefix *) &key);
-  assert (node && node->info == lsa);
+  rn = route_node_lookup (lsdb->table, (struct prefix *) &key);
+  if (! rn || ! rn->info)
+    {
+      zlog_warn ("LSDB: Can't remove: no such LSA: %s", lsa->str);
+      return;
+    }
 
-  if (lsa->prev)
-    lsa->prev->next = lsa->next;
-  if (lsa->next)
-    lsa->next->prev = lsa->prev;
+  old = rn->info;
+  if (old != lsa)
+    {
+      zlog_warn ("LSDB: Can't remove: different instance: %s (%p <-> %p) %s",
+                 lsa->str, lsa, old, old->str);
+      return;
+    }
 
-  node->info = NULL;
+  rn->info = NULL;
+  ospf6_lsa_unlock (old);
   lsdb->count--;
+}
 
-  if (lsdb->hook_remove)
-    (*lsdb->hook_remove) (lsa);
+static void
+ospf6_lsdb_lookup_node (struct ospf6_lsdb_node *node,
+                        u_int16_t type, u_int32_t id, u_int32_t adv_router,
+                        struct ospf6_lsdb *lsdb)
+{
+  int flag;
+  struct route_node *rn;
 
-  ospf6_lsa_unlock (lsa);
-  route_unlock_node (node);
+  memset (node, 0, sizeof (struct ospf6_lsdb_node));
 
-  ospf6_lsdb_count_assert (lsdb);
+  flag = OSPF6_LSDB_MATCH_TYPE | OSPF6_LSDB_MATCH_ID |
+         OSPF6_LSDB_MATCH_ADV_ROUTER;
+  ospf6_lsdb_set_key (&node->key, flag, type, id, adv_router);
+
+  rn = route_node_lookup (lsdb->table, (struct prefix *) &node->key);
+  if (! rn || ! rn->info)
+    return;
+
+  node->node = rn;
+  node->next = route_next (rn);
+  node->lsa = rn->info;
+  if (node->next != NULL)
+    route_unlock_node (node->next);
+}
+
+struct ospf6_lsa *
+ospf6_lsdb_lookup_lsdb (u_int16_t type, u_int32_t id, u_int32_t adv_router,
+                        struct ospf6_lsdb *lsdb)
+{
+  struct ospf6_lsdb_node node;
+  ospf6_lsdb_lookup_node (&node, type, id, adv_router, lsdb);
+  return node.lsa;
+}
+
+/* Iteration function */
+void
+ospf6_lsdb_head (struct ospf6_lsdb_node *node, struct ospf6_lsdb *lsdb)
+{
+  struct route_node *rn;
+
+  memset (node, 0, sizeof (struct ospf6_lsdb_node));
+
+  rn = route_top (lsdb->table);
+  if (rn == NULL)
+    return;
+
+  while (rn && rn->info == NULL)
+    rn = route_next (rn);
+
+  if (rn && rn->info)
+    {
+      node->node = rn;
+      node->next = route_next (rn);
+      node->lsa = rn->info;
+      if (node->next != NULL)
+        route_unlock_node (node->next);
+    }
+}
+
+void
+ospf6_lsdb_type (struct ospf6_lsdb_node *node, u_int16_t type,
+                 struct ospf6_lsdb *lsdb)
+{
+  int flag;
+  struct route_node *rn;
+
+  memset (node, 0, sizeof (struct ospf6_lsdb_node));
+
+  flag = OSPF6_LSDB_MATCH_TYPE;
+  ospf6_lsdb_set_key (&node->key, flag, type, 0, 0);
+
+  /* get the closest radix node */
+  rn = route_node_get (lsdb->table, (struct prefix *) &node->key);
+
+  /* skip to the real existing lsdb entry */
+  while (rn && rn->info == NULL && rn->p.prefixlen >= node->key.prefixlen &&
+         prefix_match ((struct prefix *) &node->key, &rn->p))
+    rn = route_next (rn);
+
+  if (rn && rn->info)
+    {
+      node->node = rn;
+      node->next = route_next (rn);
+      node->lsa = rn->info;
+      if (node->next != NULL)
+        route_unlock_node (node->next);
+    }
+}
+
+void
+ospf6_lsdb_type_router (struct ospf6_lsdb_node *node,
+                        u_int16_t type, u_int32_t adv_router,
+                        struct ospf6_lsdb *lsdb)
+{
+  int flag;
+  struct route_node *rn;
+
+  memset (node, 0, sizeof (struct ospf6_lsdb_node));
+
+  flag = OSPF6_LSDB_MATCH_TYPE | OSPF6_LSDB_MATCH_ADV_ROUTER;
+  ospf6_lsdb_set_key (&node->key, flag, type, 0, adv_router);
+
+  /* get the closest radix node */
+  rn = route_node_get (lsdb->table, (struct prefix *) &node->key);
+
+  /* skip to the real existing lsdb entry */
+  while (rn && rn->info == NULL && rn->p.prefixlen >= node->key.prefixlen &&
+         prefix_match ((struct prefix *) &node->key, &rn->p))
+    rn = route_next (rn);
+
+  if (rn && rn->info)
+    {
+      node->node = rn;
+      node->next = route_next (rn);
+      node->lsa = rn->info;
+      if (node->next != NULL)
+        route_unlock_node (node->next);
+    }
+}
+
+void
+ospf6_lsdb_next (struct ospf6_lsdb_node *node)
+{
+  struct route_node *rn;
+
+  route_lock_node (node->node);
+  rn = route_next (node->node);
+
+  /* skip to the real existing lsdb entry */
+  while (rn && rn->info == NULL && rn->p.prefixlen >= node->key.prefixlen &&
+         prefix_match ((struct prefix *) &node->key, &rn->p))
+    rn = route_next (rn);
+
+  if (rn && rn->info && rn->p.prefixlen >= node->key.prefixlen &&
+      prefix_match ((struct prefix *) &node->key, &rn->p))
+    {
+      node->node = rn;
+      node->next = route_next (rn);
+      node->lsa = rn->info;
+      if (node->next != NULL)
+        route_unlock_node (node->next);
+    }
+  else
+    {
+      node->node = NULL;
+      node->next = NULL;
+      node->lsa = NULL;
+    }
 }
 
 struct ospf6_lsa *
 ospf6_lsdb_lookup (u_int16_t type, u_int32_t id, u_int32_t adv_router,
-                   struct ospf6_lsdb *lsdb)
+                   void *scope)
 {
-  struct route_node *node;
-  struct prefix_ipv6 key;
+  struct ospf6_interface *o6i;
+  struct ospf6_area *o6a;
+  listnode i, j;
 
-  if (lsdb == NULL)
-    return NULL;
+  if (scope == (void *) ospf6)
+    return ospf6_lsdb_lookup_lsdb (type, id, adv_router, ospf6->lsdb);
 
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &type, sizeof (type));
-  ospf6_lsdb_set_key (&key, &adv_router, sizeof (adv_router));
-  ospf6_lsdb_set_key (&key, &id, sizeof (id));
-
-  node = route_node_lookup (lsdb->table, (struct prefix *) &key);
-  if (node == NULL || node->info == NULL)
-    return NULL;
-  return (struct ospf6_lsa *) node->info;
-}
-
-/* Macro version of check_bit (). */
-#define CHECK_BIT(X,P) ((((u_char *)(X))[(P) / 8]) >> (7 - ((P) % 8)) & 1)
-
-struct ospf6_lsa *
-ospf6_lsdb_lookup_next (u_int16_t type, u_int32_t id, u_int32_t adv_router,
-                        struct ospf6_lsdb *lsdb)
-{
-  struct route_node *node;
-  struct route_node *matched = NULL;
-  struct prefix_ipv6 key;
-  struct prefix *p;
-
-  if (lsdb == NULL)
-    return NULL;
-
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &type, sizeof (type));
-  ospf6_lsdb_set_key (&key, &adv_router, sizeof (adv_router));
-  ospf6_lsdb_set_key (&key, &id, sizeof (id));
-  p = (struct prefix *) &key;
-
-  {
-    char buf[64];
-    prefix2str (p, buf, sizeof (buf));
-    zlog_debug ("lsdb_lookup_next: key: %s", buf);
-  }
-
-  node = lsdb->table->top;
-  /* walk down tree. */
-  while (node && node->p.prefixlen <= p->prefixlen &&
-         prefix_match (&node->p, p))
+  for (i = listhead (ospf6->area_list); i; nextnode (i))
     {
-      matched = node;
-      node = node->link[CHECK_BIT(&p->u.prefix, node->p.prefixlen)];
+      o6a = getdata (i);
+
+      if (scope == (void *) o6a)
+        return ospf6_lsdb_lookup_lsdb (type, id, adv_router, o6a->lsdb);
+
+      for (j = listhead (o6a->if_list); j; nextnode (j))
+        {
+          o6i = getdata (j);
+
+          if (scope == (void *) o6i)
+            return ospf6_lsdb_lookup_lsdb (type, id, adv_router, o6i->lsdb);
+        }
     }
 
-  if (matched)
-    node = matched;
-  else
-    node = lsdb->table->top;
-  route_lock_node (node);
+  zlog_warn ("LSDB: Can't lookup: unknown scope, type %#hx", ntohs (type));
+  return NULL;
+}
 
-  /* skip to real existing entry */
-  while (node && node->info == NULL)
-    node = route_next (node);
+void
+ospf6_lsdb_install (struct ospf6_lsa *new)
+{
+  struct ospf6_lsdb *lsdb;
+  struct ospf6_lsa *old;
+  int need_hook = 0;
+  void (*hook) (struct ospf6_lsa *, struct ospf6_lsa *);
 
-  if (! node)
-    return NULL;
+  struct ospf6 *as = NULL;
+  struct ospf6_area *area = NULL;
+  struct ospf6_interface *linklocal = NULL;
+  hook = NULL;
 
-  if (prefix_same (&node->p, p))
+  switch (ntohs (new->header->type) & OSPF6_LSTYPE_SCOPE_MASK)
     {
-      struct route_node *prev = node;
-      struct ospf6_lsa *lsa_prev;
-      struct ospf6_lsa *lsa_next;
-
-      node = route_next (node);
-      while (node && node->info == NULL)
-        node = route_next (node);
-
-      lsa_prev = prev->info;
-      lsa_next = (node ? node->info : NULL);
-      assert (lsa_prev);
-      assert (lsa_prev->next == lsa_next);
-      if (lsa_next)
-        assert (lsa_next->prev == lsa_prev);
-      zlog_debug ("lsdb_lookup_next: assert OK with previous LSA");
+      case OSPF6_LSA_SCOPE_LINKLOCAL:
+        linklocal = (struct ospf6_interface *) new->scope;
+        lsdb = linklocal->lsdb;
+        break;
+      case OSPF6_LSA_SCOPE_AREA:
+        area = (struct ospf6_area *) new->scope;
+        lsdb = area->lsdb;
+        break;
+      case OSPF6_LSA_SCOPE_AS:
+        as = (struct ospf6 *) new->scope;
+        lsdb = as->lsdb;
+        break;
+      default:
+        zlog_warn ("LSDB: Can't install: scope unknown: %s", new->str);
+        return;
     }
 
-  if (! node)
-    return NULL;
+  /* whether schedule calculation or not */
+  old = ospf6_lsdb_lookup_lsdb (new->header->type, new->header->id,
+                                new->header->adv_router, lsdb);
 
-  route_unlock_node (node);
-  return (struct ospf6_lsa *) node->info;
-}
+  if (! old || ospf6_lsa_differ (old, new))
+    need_hook++;
 
-/* Iteration function */
-struct ospf6_lsa *
-ospf6_lsdb_head (struct ospf6_lsdb *lsdb)
-{
-  struct route_node *node;
+  /* log */
+  if (IS_OSPF6_DUMP_LSDB)
+    zlog_info ("LSDB: Install: %s %s", new->str,
+               ((IS_LSA_MAXAGE (new)) ? "(MaxAge)" : ""));
 
-  node = route_top (lsdb->table);
-  if (node == NULL)
-    return NULL;
+  if (old)
+    ospf6_lsa_lock (old);
 
-  /* skip to the existing lsdb entry */
-  while (node && node->info == NULL)
-    node = route_next (node);
-  if (node == NULL)
-    return NULL;
+  ospf6_lsdb_add (new, lsdb);
+  gettimeofday (&new->installed, NULL);
 
-  route_unlock_node (node);
-  if (node->info)
-    ospf6_lsa_lock ((struct ospf6_lsa *) node->info);
-  return (struct ospf6_lsa *) node->info;
-}
+  hook = ospf6_lsdb_hook[ntohs (new->header->type) &
+                         OSPF6_LSTYPE_CODE_MASK].hook;
+  if (need_hook && hook)
+    (*hook) (old, new);
 
-struct ospf6_lsa *
-ospf6_lsdb_next (struct ospf6_lsa *lsa)
-{
-  struct ospf6_lsa *next = lsa->next;
-
-  ospf6_lsa_unlock (lsa);
-  if (next)
-    ospf6_lsa_lock (next);
-
-  return next;
-}
-
-struct ospf6_lsa *
-ospf6_lsdb_type_router_head (u_int16_t type, u_int32_t adv_router,
-                             struct ospf6_lsdb *lsdb)
-{
-  struct route_node *node;
-  struct prefix_ipv6 key;
-  struct ospf6_lsa *lsa;
-
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &type, sizeof (type));
-  ospf6_lsdb_set_key (&key, &adv_router, sizeof (adv_router));
-
-  node = lsdb->table->top;
-
-  /* Walk down tree. */
-  while (node && node->p.prefixlen <= key.prefixlen &&
-	 prefix_match (&node->p, (struct prefix *) &key))
-    node = node->link[CHECK_BIT(&key.prefix, node->p.prefixlen)];
-
-  if (node)
-    route_lock_node (node);
-  while (node && node->info == NULL)
-    node = route_next (node);
-
-  if (node == NULL)
-    return NULL;
-  else
-    route_unlock_node (node);
-
-  if (! prefix_match ((struct prefix *) &key, &node->p))
-    return NULL;
-
-  lsa = node->info;
-  ospf6_lsa_lock (lsa);
-
-  return lsa;
-}
-
-struct ospf6_lsa *
-ospf6_lsdb_type_router_next (u_int16_t type, u_int32_t adv_router,
-                             struct ospf6_lsa *lsa)
-{
-  struct ospf6_lsa *next = lsa->next;
-
-  if (next)
-    {
-      if (next->header->type != type ||
-          next->header->adv_router != adv_router)
-        next = NULL;
-    }
-
-  if (next)
-    ospf6_lsa_lock (next);
-  ospf6_lsa_unlock (lsa);
-  return next;
-}
-
-struct ospf6_lsa *
-ospf6_lsdb_type_head (u_int16_t type, struct ospf6_lsdb *lsdb)
-{
-  struct route_node *node;
-  struct prefix_ipv6 key;
-  struct ospf6_lsa *lsa;
-
-  memset (&key, 0, sizeof (key));
-  ospf6_lsdb_set_key (&key, &type, sizeof (type));
-
-  /* Walk down tree. */
-  node = lsdb->table->top;
-  while (node && node->p.prefixlen <= key.prefixlen &&
-	 prefix_match (&node->p, (struct prefix *) &key))
-    node = node->link[CHECK_BIT(&key.prefix, node->p.prefixlen)];
-
-  if (node)
-    route_lock_node (node);
-  while (node && node->info == NULL)
-    node = route_next (node);
-
-  if (node == NULL)
-    return NULL;
-  else
-    route_unlock_node (node);
-
-  if (! prefix_match ((struct prefix *) &key, &node->p))
-    return NULL;
-
-  lsa = node->info;
-  ospf6_lsa_lock (lsa);
-
-  return lsa;
-}
-
-struct ospf6_lsa *
-ospf6_lsdb_type_next (u_int16_t type, struct ospf6_lsa *lsa)
-{
-  struct ospf6_lsa *next = lsa->next;
-
-  if (next)
-    {
-      if (next->header->type != type)
-        next = NULL;
-    }
-
-  if (next)
-    ospf6_lsa_lock (next);
-  ospf6_lsa_unlock (lsa);
-  return next;
+  /* old LSA should be freed here */
+  if (old)
+    ospf6_lsa_unlock (old);
 }
 
 void
 ospf6_lsdb_remove_all (struct ospf6_lsdb *lsdb)
 {
-  struct ospf6_lsa *lsa;
-  for (lsa = ospf6_lsdb_head (lsdb); lsa; lsa = ospf6_lsdb_next (lsa))
-    ospf6_lsdb_remove (lsa, lsdb);
+  struct ospf6_lsdb_node node;
+  for (ospf6_lsdb_head (&node, lsdb); ! ospf6_lsdb_is_end (&node);
+       ospf6_lsdb_next (&node))
+    ospf6_lsdb_remove (node.lsa, lsdb);
 }
 
 void
-ospf6_lsdb_show (struct vty *vty, int level,
-                 u_int16_t *type, u_int32_t *id, u_int32_t *adv_router,
-                 struct ospf6_lsdb *lsdb)
+ospf6_lsdb_remove_maxage (struct ospf6_lsdb *lsdb)
 {
+  struct ospf6_lsdb_node node;
   struct ospf6_lsa *lsa;
-  void (*showfunc) (struct vty *, struct ospf6_lsa *) = NULL;
 
-  if (level == OSPF6_LSDB_SHOW_LEVEL_NORMAL)
-    showfunc = ospf6_lsa_show_summary;
-  else if (level == OSPF6_LSDB_SHOW_LEVEL_DETAIL)
-    showfunc = ospf6_lsa_show;
-  else if (level == OSPF6_LSDB_SHOW_LEVEL_INTERNAL)
-    showfunc = ospf6_lsa_show_internal;
-  else if (level == OSPF6_LSDB_SHOW_LEVEL_DUMP)
-    showfunc = ospf6_lsa_show_dump;
-
-  if (type && id && adv_router)
+  for (ospf6_lsdb_head (&node, lsdb); ! ospf6_lsdb_is_end (&node);
+       ospf6_lsdb_next (&node))
     {
-      lsa = ospf6_lsdb_lookup (*type, *id, *adv_router, lsdb);
-      if (lsa)
-        {
-          if (level == OSPF6_LSDB_SHOW_LEVEL_NORMAL)
-            ospf6_lsa_show (vty, lsa);
-          else
-            (*showfunc) (vty, lsa);
-        }
-      return;
+      lsa = node.lsa;
+
+      /* contiue if it's not MaxAge */
+      if (! IS_LSA_MAXAGE (lsa))
+        continue;
+
+      /* continue if it's referenced by some retrans-lists */
+      if (lsa->lock != 1)
+        continue;
+
+      if (IS_OSPF6_DUMP_LSDB)
+        zlog_info ("Remove MaxAge LSA: %s", lsa->str);
+
+      ospf6_lsdb_remove (lsa, lsdb);
+    }
+}
+
+
+
+/* vty functions */
+
+static int
+ospf6_lsdb_match (int flag, u_int16_t type, u_int32_t id,
+                  u_int32_t adv_router, struct ospf6_lsa *lsa)
+{
+  if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_TYPE) &&
+      lsa->header->type != type)
+    return 0;
+
+  if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_ID) &&
+      lsa->header->id != id)
+    return 0;
+
+  if (CHECK_FLAG (flag, OSPF6_LSDB_MATCH_ADV_ROUTER) &&
+      lsa->header->adv_router != adv_router)
+    return 0;
+
+  return 1;
+}
+
+int
+show_ipv6_ospf6_lsdb (struct vty *vty, int argc, char **argv,
+                      struct ospf6_lsdb *lsdb)
+{
+  u_int flag;
+  u_int16_t type = 0;
+  u_int32_t id, adv_router;
+  int ret;
+  struct ospf6_lsdb_node node;
+  char invalid[32], *invalidp;
+  int l_argc = argc;
+  char **l_argv = argv;
+
+  flag = 0;
+  memset (invalid, 0, sizeof (invalid));
+  invalidp = invalid;
+
+  /* chop tail if the words is 'dump' or 'summary' */
+  if (l_argc > 0 && ! strcmp (l_argv[l_argc - 1], "dump"))
+    {
+      SET_FLAG (flag, OSPF6_LSDB_SHOW_DUMP);
+      l_argc --;
+    }
+  else if (l_argc > 0 && ! strcmp (l_argv[l_argc - 1], "detail"))
+    {
+      SET_FLAG (flag, OSPF6_LSDB_SHOW_DETAIL);
+      l_argc --;
     }
 
-  if (level == OSPF6_LSDB_SHOW_LEVEL_NORMAL)
+  if (l_argc > 0)
+    {
+      SET_FLAG (flag, OSPF6_LSDB_MATCH_TYPE);
+      if (! strncmp (l_argv[0], "r", 1))
+        type = htons (OSPF6_LSA_TYPE_ROUTER);
+      if (! strncmp (l_argv[0], "n", 1))
+        type = htons (OSPF6_LSA_TYPE_NETWORK);
+      if (! strncmp (l_argv[0], "a", 1))
+        type = htons (OSPF6_LSA_TYPE_AS_EXTERNAL);
+      if (! strcmp (l_argv[0], "intra-prefix"))
+        type = htons (OSPF6_LSA_TYPE_INTRA_PREFIX);
+      if (! strcmp (l_argv[0], "inter-router"))
+        type = htons (OSPF6_LSA_TYPE_INTER_ROUTER);
+      if (! strcmp (l_argv[0], "inter-prefix"))
+        type = htons (OSPF6_LSA_TYPE_INTER_PREFIX);
+      if (! strncmp (l_argv[0], "l", 1))
+        type = htons (OSPF6_LSA_TYPE_LINK);
+      if (! strncmp (l_argv[0], "0x", 2) && strlen (l_argv[0]) == 6)
+        type = htons ((short) strtol (l_argv[0], (char **)NULL, 16));
+      if (! strncmp (l_argv[0], "*", 1))
+        UNSET_FLAG (flag, OSPF6_LSDB_MATCH_TYPE);
+    }
+
+  if (l_argc > 1)
+    {
+      SET_FLAG (flag, OSPF6_LSDB_MATCH_ID);
+      if (! strncmp (l_argv[1], "*", 1))
+        UNSET_FLAG (flag, OSPF6_LSDB_MATCH_ID);
+      else
+        {
+          ret = inet_pton (AF_INET, l_argv[1], &id);
+          if (ret != 1)
+            {
+              id = htonl (strtoul (l_argv[1], &invalidp, 10));
+              if (invalid[0] != '\0')
+                {
+                  vty_out (vty, "Link State ID is not parsable: %s%s",
+                           l_argv[1], VTY_NEWLINE);
+                  return CMD_SUCCESS;
+                }
+            }
+        }
+    }
+
+  if (l_argc > 2)
+    {
+      SET_FLAG (flag, OSPF6_LSDB_MATCH_ADV_ROUTER);
+      if (! strncmp (l_argv[2], "*", 1))
+        UNSET_FLAG (flag, OSPF6_LSDB_MATCH_ADV_ROUTER);
+      else
+        {
+          ret = inet_pton (AF_INET, l_argv[2], &adv_router);
+          if (ret != 1)
+            {
+              adv_router = htonl (strtoul (l_argv[2], &invalidp, 10));
+              if (invalid[0] != '\0')
+                {
+                  vty_out (vty, "Advertising Router is not parsable: %s%s",
+                           l_argv[2], VTY_NEWLINE);
+                  return CMD_SUCCESS;
+                }
+            }
+        }
+    }
+
+  if (! CHECK_FLAG (flag, OSPF6_LSDB_SHOW_DETAIL))
     ospf6_lsa_show_summary_header (vty);
 
-  if (type && adv_router)
-    lsa = ospf6_lsdb_type_router_head (*type, *adv_router, lsdb);
-  else if (type)
-    lsa = ospf6_lsdb_type_head (*type, lsdb);
-  else
-    lsa = ospf6_lsdb_head (lsdb);
-  while (lsa)
+  for (ospf6_lsdb_head (&node, lsdb); ! ospf6_lsdb_is_end (&node);
+       ospf6_lsdb_next (&node))
     {
-      if ((! adv_router || lsa->header->adv_router == *adv_router) &&
-          (! id || lsa->header->id == *id))
-        (*showfunc) (vty, lsa);
-
-      if (type && adv_router)
-        lsa = ospf6_lsdb_type_router_next (*type, *adv_router, lsa);
-      else if (type)
-        lsa = ospf6_lsdb_type_next (*type, lsa);
-      else
-        lsa = ospf6_lsdb_next (lsa);
-    }
-}
-
-/* Decide new Link State ID to originate.
-   note return value is network byte order */
-u_int32_t
-ospf6_new_ls_id (u_int16_t type, u_int32_t adv_router,
-                 struct ospf6_lsdb *lsdb)
-{
-  struct ospf6_lsa *lsa;
-  u_int32_t id = 1;
-
-  for (lsa = ospf6_lsdb_type_router_head (type, adv_router, lsdb); lsa;
-       lsa = ospf6_lsdb_type_router_next (type, adv_router, lsa))
-    {
-      if (ntohl (lsa->header->id) < id)
+      if (! ospf6_lsdb_match (flag, type, id, adv_router, node.lsa))
         continue;
-      if (ntohl (lsa->header->id) > id)
-        break;
-      id++;
+
+      if (CHECK_FLAG (flag, OSPF6_LSDB_SHOW_DUMP))
+        ospf6_lsa_show_dump (vty, node.lsa);
+      else if (CHECK_FLAG (flag, OSPF6_LSDB_SHOW_DETAIL))
+        ospf6_lsa_show (vty, node.lsa);
+      else
+        ospf6_lsa_show_summary (vty, node.lsa);
     }
 
-  return ((u_int32_t) htonl (id));
+  return CMD_SUCCESS;
 }
 
-/* Decide new LS sequence number to originate.
-   note return value is network byte order */
-u_int32_t
-ospf6_new_ls_seqnum (u_int16_t type, u_int32_t id, u_int32_t adv_router,
-                     struct ospf6_lsdb *lsdb)
+DEFUN (show_ipv6_ospf6_database,
+       show_ipv6_ospf6_database_cmd,
+       "show ipv6 ospf6 database",
+       SHOW_STR
+       IP6_STR
+       OSPF6_STR
+       "LSA Database\n"
+       )
 {
-  struct ospf6_lsa *lsa;
-  signed long seqnum = 0;
+  struct ospf6_area *o6a;
+  struct ospf6_interface *o6i;
+  listnode i, j;
 
-  /* if current database copy not found, return InitialSequenceNumber */
-  lsa = ospf6_lsdb_lookup (type, id, adv_router, lsdb);
-  if (lsa == NULL)
-    seqnum = INITIAL_SEQUENCE_NUMBER;
-  else
-    seqnum = (signed long) ntohl (lsa->header->seqnum) + 1;
+  /* call show function for each of LSAs in the LSDBs */
 
-  return ((u_int32_t) htonl (seqnum));
+  for (i = listhead (ospf6->area_list); i; nextnode (i))
+    {
+      o6a = (struct ospf6_area *) getdata (i);
+
+      /* LinkLocal LSDBs */
+      for (j = listhead (o6a->if_list); j; nextnode (j))
+        {
+          o6i = (struct ospf6_interface *) getdata (j);
+
+          vty_out (vty, "%s", VTY_NEWLINE);
+          vty_out (vty, "                Interface %s (Area: %s):%s",
+                   o6i->interface->name, o6a->str, VTY_NEWLINE);
+          vty_out (vty, "%s", VTY_NEWLINE);
+          show_ipv6_ospf6_lsdb (vty, argc, argv, o6i->lsdb);
+        }
+
+      /* Area LSDBs */
+      vty_out (vty, "%s", VTY_NEWLINE);
+      vty_out (vty, "                Area %s:%s", o6a->str, VTY_NEWLINE);
+      vty_out (vty, "%s", VTY_NEWLINE);
+      show_ipv6_ospf6_lsdb (vty, argc, argv, o6a->lsdb);
+    }
+
+  /* AS LSDBs */
+  vty_out (vty, "%s", VTY_NEWLINE);
+  vty_out (vty, "                AS:%s", VTY_NEWLINE);
+  vty_out (vty, "%s", VTY_NEWLINE);
+  show_ipv6_ospf6_lsdb (vty, argc, argv, ospf6->lsdb);
+
+  return CMD_SUCCESS;
+}
+
+ALIAS (show_ipv6_ospf6_database,
+       show_ipv6_ospf6_database_type_cmd,
+       "show ipv6 ospf6 database (router|network|as-external|intra-prefix|inter-prefix|inter-router|link|*|HEX|dump|detail)",
+       SHOW_STR
+       IP6_STR
+       OSPF6_STR
+       "LSA Database\n"
+       "Router-LSA\n"
+       "Network-LSA\n"
+       "AS-External-LSA\n"
+       "Intra-Area-Prefix-LSA\n"
+       "Inter-Area-Router-LSA\n"
+       "Inter-Area-Prefix-LSA\n"
+       "Link-LSA\n"
+       "All LS Type\n"
+       "Specify LS Type by Hex\n"
+       "Dump raw LSA data in Hex\n"
+       "show detail of LSAs\n"
+       )
+
+ALIAS (show_ipv6_ospf6_database,
+       show_ipv6_ospf6_database_type_id_cmd,
+       "show ipv6 ospf6 database (router|network|as-external|intra-prefix|inter-prefix|inter-router|link|*|HEX) (A.B.C.D|*|dump|detail)",
+       SHOW_STR
+       IP6_STR
+       OSPF6_STR
+       "LSA Database\n"
+       "Router-LSA\n"
+       "Network-LSA\n"
+       "AS-External-LSA\n"
+       "Intra-Area-Prefix-LSA\n"
+       "Inter-Area-Router-LSA\n"
+       "Inter-Area-Prefix-LSA\n"
+       "Link-LSA\n"
+       "All LS Type\n"
+       "Specify LS Type by Hex\n"
+       "Link State ID\n"
+       "All Link State ID\n"
+       "Dump raw LSA data in Hex\n"
+       "show detail of LSAs\n"
+       )
+
+ALIAS (show_ipv6_ospf6_database,
+       show_ipv6_ospf6_database_type_id_adv_router_cmd,
+       "show ipv6 ospf6 database (router|network|as-external|intra-prefix|inter-prefix|inter-router|link|*|HEX) (A.B.C.D|*) (A.B.C.D|*|dump|detail)",
+       SHOW_STR
+       IP6_STR
+       OSPF6_STR
+       "LSA Database\n"
+       "Router-LSA\n"
+       "Network-LSA\n"
+       "AS-External-LSA\n"
+       "Intra-Area-Prefix-LSA\n"
+       "Inter-Area-Router-LSA\n"
+       "Inter-Area-Prefix-LSA\n"
+       "Link-LSA\n"
+       "All LS Type\n"
+       "Specify LS Type by Hex\n"
+       "Link State ID\n"
+       "All Link State ID\n"
+       "Advertising Router\n"
+       "All Advertising Router\n"
+       "Dump raw LSA data in Hex\n"
+       "show detail of LSAs\n"
+       )
+
+ALIAS (show_ipv6_ospf6_database,
+       show_ipv6_ospf6_database_type_id_adv_router_dump_cmd,
+       "show ipv6 ospf6 database (router|network|as-external|intra-prefix|inter-prefix|inter-router|link|*|HEX) (A.B.C.D|*) (A.B.C.D|*) (dump|detail|)",
+       SHOW_STR
+       IP6_STR
+       OSPF6_STR
+       "LSA Database\n"
+       "Router-LSA\n"
+       "Network-LSA\n"
+       "AS-External-LSA\n"
+       "Intra-Area-Prefix-LSA\n"
+       "Inter-Area-Router-LSA\n"
+       "Inter-Area-Prefix-LSA\n"
+       "Link-LSA\n"
+       "All LS Type\n"
+       "Specify LS Type by Hex\n"
+       "Link State ID\n"
+       "All Link State ID\n"
+       "Advertising Router\n"
+       "All Advertising Router\n"
+       "Dump raw LSA data in Hex\n"
+       "show detail of LSAs\n"
+       )
+
+void
+ospf6_lsdb_init ()
+{
+  install_element (VIEW_NODE, &show_ipv6_ospf6_database_cmd);
+  install_element (VIEW_NODE, &show_ipv6_ospf6_database_type_cmd);
+  install_element (VIEW_NODE, &show_ipv6_ospf6_database_type_id_cmd);
+  install_element (VIEW_NODE, &show_ipv6_ospf6_database_type_id_adv_router_cmd);
+  install_element (VIEW_NODE, &show_ipv6_ospf6_database_type_id_adv_router_dump_cmd);
+
+  install_element (ENABLE_NODE, &show_ipv6_ospf6_database_cmd);
+  install_element (ENABLE_NODE, &show_ipv6_ospf6_database_type_cmd);
+  install_element (ENABLE_NODE, &show_ipv6_ospf6_database_type_id_cmd);
+  install_element (ENABLE_NODE, &show_ipv6_ospf6_database_type_id_adv_router_cmd);
+  install_element (ENABLE_NODE, &show_ipv6_ospf6_database_type_id_adv_router_dump_cmd);
 }
 
 

@@ -22,7 +22,7 @@
 
 #include <zebra.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "getopt.h"
 #include "thread.h"
 #include "prefix.h"
@@ -36,8 +36,6 @@
 #include "stream.h"
 #include "log.h"
 #include "memory.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_interface.h"
@@ -49,29 +47,8 @@
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_vty.h"
 
-/* ospfd privileges */
-zebra_capabilities_t _caps_p [] = 
-{
-  ZCAP_NET_RAW,
-  ZCAP_BIND,
-  ZCAP_NET_ADMIN,
-};
-
-struct zebra_privs_t ospfd_privs =
-{
-#if defined(QUAGGA_USER) && defined(QUAGGA_GROUP)
-  .user = QUAGGA_USER,
-  .group = QUAGGA_GROUP,
-#endif
-#if defined(VTY_GROUP)
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = sizeof(_caps_p)/sizeof(_caps_p[0]),
-  .cap_num_i = 0
-};
-
 /* Configuration filename and directory. */
+char config_current[] = OSPF_DEFAULT_CONFIG;
 char config_default[] = SYSCONFDIR OSPF_DEFAULT_CONFIG;
 
 /* OSPFd options. */
@@ -81,13 +58,9 @@ struct option longopts[] =
   { "config_file", required_argument, NULL, 'f'},
   { "pid_file",    required_argument, NULL, 'i'},
   { "log_mode",    no_argument,       NULL, 'l'},
-  { "dryrun",      no_argument,       NULL, 'C'},
   { "help",        no_argument,       NULL, 'h'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
-  { "apiserver",   no_argument,       NULL, 'a'},
   { "version",     no_argument,       NULL, 'v'},
   { 0 }
 };
@@ -98,14 +71,10 @@ struct option longopts[] =
 struct thread_master *master;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_OSPFD_PID;
-
-#ifdef SUPPORT_OSPF_API
-extern int ospf_apiserver_enable;
-#endif /* SUPPORT_OSPF_API */
+char *pid_file = PATH_OSPFD_PID;
 
 /* Help information display. */
-static void __attribute__ ((noreturn))
+static void
 usage (char *progname, int status)
 {
   if (status != 0)
@@ -119,11 +88,7 @@ Daemon which manages OSPF.\n\n\
 -i, --pid_file     Set process identifier file name\n\
 -A, --vty_addr     Set vty's bind address\n\
 -P, --vty_port     Set vty's port number\n\
--u, --user         User to run as\n\
--g, --group        Group to run as\n\
--a. --apiserver    Enable OSPF apiserver\n\
 -v, --version      Print program version\n\
--C, --dryrun       Check configuration for validity and exit\n\
 -h, --help         Display this help and exit\n\
 \n\
 Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
@@ -132,46 +97,72 @@ Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
 }
 
 /* SIGHUP handler. */
-static void 
-sighup (void)
+void 
+sighup (int sig)
 {
   zlog (NULL, LOG_INFO, "SIGHUP received");
 }
 
-/* SIGINT / SIGTERM handler. */
-static void
-sigint (void)
+/* SIGINT handler. */
+void
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal");
+  zlog (NULL, LOG_INFO, "Terminating on signal");
+
   ospf_terminate ();
+
+  exit (0);
 }
 
 /* SIGUSR1 handler. */
-static void
-sigusr1 (void)
+void
+sigusr1 (int sig)
 {
   zlog_rotate (NULL);
 }
 
-struct quagga_signal_t ospf_signals[] =
+/* Signal wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
 {
-  {
-    .signal = SIGHUP,
-    .handler = &sighup,
-  },
-  {
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },  
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigint,
-  },
-};
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
+
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
+/* Initialization of signal handles. */
+void
+signal_init ()
+{
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigint);
+  signal_set (SIGPIPE, SIG_IGN);
+#ifdef SIGTSTP
+  signal_set (SIGTSTP, SIG_IGN);
+#endif
+#ifdef SIGTTIN
+  signal_set (SIGTTIN, SIG_IGN);
+#endif
+#ifdef SIGTTOU
+  signal_set (SIGTTOU, SIG_IGN);
+#endif
+  signal_set (SIGUSR1, sigusr1);
+}
 
 /* OSPFd main routine. */
 int
@@ -179,12 +170,11 @@ main (int argc, char **argv)
 {
   char *p;
   char *vty_addr = NULL;
-  int vty_port = OSPF_VTY_PORT;
+  int vty_port = 0;
   int daemon_mode = 0;
   char *config_file = NULL;
   char *progname;
   struct thread thread;
-  int dryrun = 0;
 
   /* Set umask before anything for security */
   umask (0027);
@@ -193,29 +183,21 @@ main (int argc, char **argv)
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
   /* Invoked by a priviledged user? -- endo. */
-  if (geteuid () != 0)
+  if (getuid () != 0)
     {
       errno = EPERM;
       perror (progname);
       exit (1);
     }
 
-  zlog_default = openzlog (progname, ZLOG_OSPF,
+  zlog_default = openzlog (progname, ZLOG_NOLOG, ZLOG_OSPF,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
-
-  /* OSPF master init. */
-  ospf_master_init ();
-
-#ifdef SUPPORT_OSPF_API
-  /* OSPF apiserver is disabled by default. */
-  ospf_apiserver_enable = 0;
-#endif /* SUPPORT_OSPF_API */
 
   while (1) 
     {
       int opt;
 
-      opt = getopt_long (argc, argv, "dlf:i:hA:P:u:g:avC", longopts, 0);
+      opt = getopt_long (argc, argv, "dlf:hA:P:v", longopts, 0);
     
       if (opt == EOF)
 	break;
@@ -237,33 +219,11 @@ main (int argc, char **argv)
           pid_file = optarg;
           break;
 	case 'P':
-          /* Deal with atoi() returning 0 on failure, and ospfd not
-             listening on ospfd port... */
-          if (strcmp(optarg, "0") == 0) 
-            {
-              vty_port = 0;
-              break;
-            } 
-          vty_port = atoi (optarg);
-          vty_port = (vty_port ? vty_port : OSPF_VTY_PORT);
-  	  break;
-	case 'u':
-	  ospfd_privs.user = optarg;
+	  vty_port = atoi (optarg);
 	  break;
-	case 'g':
-	  ospfd_privs.group = optarg;
-	  break;
-#ifdef SUPPORT_OSPF_API
-	case 'a':
-	  ospf_apiserver_enable = 1;
-	  break;
-#endif /* SUPPORT_OSPF_API */
 	case 'v':
 	  print_version (progname);
 	  exit (0);
-	  break;
-	case 'C':
-	  dryrun = 1;
 	  break;
 	case 'h':
 	  usage (progname, 0);
@@ -275,20 +235,20 @@ main (int argc, char **argv)
     }
 
   /* Initializations. */
-  master = om->master;
+  master = thread_master_create ();
 
   /* Library inits. */
-  zprivs_init (&ospfd_privs);
-  signal_init (master, Q_SIGC(ospf_signals), ospf_signals);
+  signal_init ();
   cmd_init (1);
   debug_init ();
-  vty_init (master);
+  vty_init ();
   memory_init ();
 
   access_list_init ();
   prefix_list_init ();
 
   /* OSPFd inits. */
+  ospf_init ();
   ospf_if_init ();
   ospf_zebra_init ();
 
@@ -307,12 +267,8 @@ main (int argc, char **argv)
   sort_node ();
 
   /* Get configuration file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Start execution only if not in dry-run mode */
-  if (dryrun)
-    return(0);
-  
   /* Change to the daemon program. */
   if (daemon_mode)
     daemon (0, 0);
@@ -321,16 +277,17 @@ main (int argc, char **argv)
   pid_output (pid_file);
 
   /* Create VTY socket */
-  vty_serv_sock (vty_addr, vty_port, OSPF_VTYSH_PATH);
+  vty_serv_sock (vty_addr,
+		 vty_port ? vty_port : OSPF_VTY_PORT, OSPF_VTYSH_PATH);
 
   /* Print banner. */
-  zlog_notice ("OSPFd %s starting: vty@%d", QUAGGA_VERSION, vty_port);
+  zlog (NULL, LOG_INFO, "OSPFd (%s) starts", ZEBRA_VERSION);
 
   /* Fetch next active thread. */
   while (thread_fetch (master, &thread))
     thread_call (&thread);
 
   /* Not reached. */
-  return (0);
+  exit (0);
 }
 

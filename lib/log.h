@@ -1,7 +1,4 @@
-/*
- * $Id$
- *
- * Zebra logging funcions.
+/* Zebra logging funcions.
  * Copyright (C) 1997, 1998, 1999 Kunihiro Ishiguro
  *
  * This file is part of GNU Zebra.
@@ -27,21 +24,18 @@
 
 #include <syslog.h>
 
-/* Here is some guidance on logging levels to use:
- *
- * LOG_DEBUG	- For all messages that are enabled by optional debugging
- *		  features, typically preceded by "if (IS...DEBUG...)"
- * LOG_INFO	- Information that may be of interest, but everything seems
- *		  to be working properly.
- * LOG_NOTICE	- Only for message pertaining to daemon startup or shutdown.
- * LOG_WARNING	- Warning conditions: unexpected events, but the daemon believes
- *		  it can continue to operate correctly.
- * LOG_ERR	- Error situations indicating malfunctions.  Probably require
- *		  attention.
- *
- * Note: LOG_CRIT, LOG_ALERT, and LOG_EMERG are currently not used anywhere,
- * please use LOG_ERR instead.
- */
+#define ZLOG_NOLOG              0x00
+#define ZLOG_FILE		0x01
+#define ZLOG_SYSLOG		0x02
+#define ZLOG_STDOUT             0x04
+#define ZLOG_STDERR             0x08
+
+#define ZLOG_NOLOG_INDEX        0
+#define ZLOG_FILE_INDEX         1
+#define ZLOG_SYSLOG_INDEX       2
+#define ZLOG_STDOUT_INDEX       3
+#define ZLOG_STDERR_INDEX       4
+#define ZLOG_MAX_INDEX          5
 
 typedef enum 
 {
@@ -53,55 +47,40 @@ typedef enum
   ZLOG_OSPF,
   ZLOG_RIPNG,  
   ZLOG_OSPF6,
-  ZLOG_ISIS,
   ZLOG_MASC
 } zlog_proto_t;
 
-/* If maxlvl is set to ZLOG_DISABLED, then no messages will be sent
-   to that logging destination. */
-#define ZLOG_DISABLED	(LOG_EMERG-1)
-
-typedef enum
-{
-  ZLOG_DEST_SYSLOG = 0,
-  ZLOG_DEST_STDOUT,
-  ZLOG_DEST_MONITOR,
-  ZLOG_DEST_FILE
-} zlog_dest_t;
-#define ZLOG_NUM_DESTS		(ZLOG_DEST_FILE+1)
-
 struct zlog 
 {
-  const char *ident;	/* daemon name (first arg to openlog) */
+  const char *ident;
   zlog_proto_t protocol;
-  int maxlvl[ZLOG_NUM_DESTS];	/* maximum priority to send to associated
-  				   logging destination */
-  int default_lvl;	/* maxlvl to use if none is specified */
+  int flags;
   FILE *fp;
   char *filename;
+  int syslog;
+  int stat;
+  int connected;
+  int maskpri;		/* as per syslog setlogmask */
+  int priority;		/* as per syslog priority */
   int facility;		/* as per syslog facility */
-  int record_priority;	/* should messages logged through stdio include the
-  			   priority of the message? */
-  int syslog_options;	/* 2nd arg to openlog */
-  int timestamp_precision;	/* # of digits of subsecond precision */
+  int record_priority;
 };
 
 /* Message structure. */
 struct message
 {
   int key;
-  const char *str;
+  char *str;
 };
 
 /* Default logging strucutre. */
 extern struct zlog *zlog_default;
 
 /* Open zlog function */
-extern struct zlog *openzlog (const char *progname, zlog_proto_t protocol,
-		              int syslog_options, int syslog_facility);
+struct zlog *openzlog (const char *, int, zlog_proto_t, int, int);
 
 /* Close zlog function. */
-extern void closezlog (struct zlog *zl);
+void closezlog (struct zlog *zl);
 
 /* GCC have printf type attribute check.  */
 #ifdef __GNUC__
@@ -111,115 +90,39 @@ extern void closezlog (struct zlog *zl);
 #endif /* __GNUC__ */
 
 /* Generic function for zlog. */
-extern void zlog (struct zlog *zl, int priority, const char *format, ...) PRINTF_ATTRIBUTE(3, 4);
+void zlog (struct zlog *zl, int priority, const char *format, ...) PRINTF_ATTRIBUTE(3, 4);
 
 /* Handy zlog functions. */
-extern void zlog_err (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
-extern void zlog_warn (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
-extern void zlog_info (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
-extern void zlog_notice (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
-extern void zlog_debug (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+void zlog_err (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+void zlog_warn (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+void zlog_info (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+void zlog_notice (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+void zlog_debug (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 
 /* For bgpd's peer oriented log. */
-extern void plog_err (struct zlog *, const char *format, ...);
-extern void plog_warn (struct zlog *, const char *format, ...);
-extern void plog_info (struct zlog *, const char *format, ...);
-extern void plog_notice (struct zlog *, const char *format, ...);
-extern void plog_debug (struct zlog *, const char *format, ...);
+void plog_err (struct zlog *, const char *format, ...);
+void plog_warn (struct zlog *, const char *format, ...);
+void plog_info (struct zlog *, const char *format, ...);
+void plog_notice (struct zlog *, const char *format, ...);
+void plog_debug (struct zlog *, const char *format, ...);
 
-/* Set logging level for the given destination.  If the log_level
-   argument is ZLOG_DISABLED, then the destination is disabled.
-   This function should not be used for file logging (use zlog_set_file
-   or zlog_reset_file instead). */
-extern void zlog_set_level (struct zlog *zl, zlog_dest_t, int log_level);
+/* Set zlog flags. */
+void zlog_set_flag (struct zlog *zl, int flags);
+void zlog_reset_flag (struct zlog *zl, int flags);
 
-/* Set logging to the given filename at the specified level. */
-extern int zlog_set_file (struct zlog *zl, const char *filename, int log_level);
-/* Disable file logging. */
-extern int zlog_reset_file (struct zlog *zl);
+/* Set zlog filename. */
+int zlog_set_file (struct zlog *zl, int flags, char *filename);
+int zlog_reset_file (struct zlog *zl);
 
 /* Rotate log. */
-extern int zlog_rotate (struct zlog *);
+int zlog_rotate ();
 
 /* For hackey massage lookup and check */
 #define LOOKUP(x, y) mes_lookup(x, x ## _max, y)
 
-extern const char *lookup (struct message *, int);
-extern const char *mes_lookup (struct message *meslist, int max, int index);
+char *lookup (struct message *, int);
+char *mes_lookup (struct message *meslist, int max, int index);
 
 extern const char *zlog_priority[];
-extern const char *zlog_proto_names[];
-
-/* Safe version of strerror -- never returns NULL. */
-extern const char *safe_strerror(int errnum);
-
-/* To be called when a fatal signal is caught. */
-extern void zlog_signal(int signo, const char *action
-#ifdef SA_SIGINFO
-			, siginfo_t *siginfo, void *program_counter
-#endif
-		       );
-
-/* Log a backtrace. */
-extern void zlog_backtrace(int priority);
-
-/* Log a backtrace, but in an async-signal-safe way.  Should not be
-   called unless the program is about to exit or abort, since it messes
-   up the state of zlog file pointers.  If program_counter is non-NULL,
-   that is logged in addition to the current backtrace. */
-extern void zlog_backtrace_sigsafe(int priority, void *program_counter);
-
-/* Puts a current timestamp in buf and returns the number of characters
-   written (not including the terminating NUL).  The purpose of
-   this function is to avoid calls to localtime appearing all over the code.
-   It caches the most recent localtime result and can therefore
-   avoid multiple calls within the same second.  If buflen is too small,
-   *buf will be set to '\0', and 0 will be returned. */
-extern size_t quagga_timestamp(int timestamp_precision /* # subsecond digits */,
-			       char *buf, size_t buflen);
-
-/* structure useful for avoiding repeated rendering of the same timestamp */
-struct timestamp_control {
-   size_t len;		/* length of rendered timestamp */
-   int precision;	/* configuration parameter */
-   int already_rendered; /* should be initialized to 0 */
-   char buf[40];	/* will contain the rendered timestamp */
-};
-
-/* Defines for use in command construction: */
-
-#define LOG_LEVELS "(emergencies|alerts|critical|errors|warnings|notifications|informational|debugging)"
-
-#define LOG_LEVEL_DESC \
-  "System is unusable\n" \
-  "Immediate action needed\n" \
-  "Critical conditions\n" \
-  "Error conditions\n" \
-  "Warning conditions\n" \
-  "Normal but significant conditions\n" \
-  "Informational messages\n" \
-  "Debugging messages\n"
-
-#define LOG_FACILITIES "(kern|user|mail|daemon|auth|syslog|lpr|news|uucp|cron|local0|local1|local2|local3|local4|local5|local6|local7)"
-
-#define LOG_FACILITY_DESC \
-       "Kernel\n" \
-       "User process\n" \
-       "Mail system\n" \
-       "System daemons\n" \
-       "Authorization system\n" \
-       "Syslog itself\n" \
-       "Line printer system\n" \
-       "USENET news\n" \
-       "Unix-to-Unix copy system\n" \
-       "Cron/at facility\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n" \
-       "Local use\n"
 
 #endif /* _ZEBRA_LOG_H */

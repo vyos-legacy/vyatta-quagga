@@ -33,8 +33,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_fsm.h"
 #include "bgpd/bgp_packet.h"
 #include "bgpd/bgp_open.h"
-#include "bgpd/bgp_vty.h"
-
+
 /* BGP-4 Multiprotocol Extentions lead us to the complex world. We can
    negotiate remote peer supports extentions or not. But if
    remote-peer doesn't supports negotiation process itself.  We would
@@ -48,8 +47,8 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 void
 bgp_capability_vty_out (struct vty *vty, struct peer *peer)
 {
-  char *pnt;
-  char *end;
+  u_char *pnt;
+  u_char *end;
   struct capability cap;
 
   pnt = peer->notify.data;
@@ -112,7 +111,7 @@ bgp_capability_vty_out (struct vty *vty, struct peer *peer)
 }
 
 /* Set negotiated capability value. */
-static int
+int
 bgp_capability_mp (struct peer *peer, struct capability *cap)
 {
   if (ntohs (cap->mpc.afi) == AFI_IP)
@@ -181,16 +180,16 @@ bgp_capability_mp (struct peer *peer, struct capability *cap)
   return 0;
 }
 
-static void
+void
 bgp_capability_orf_not_support (struct peer *peer, afi_t afi, safi_t safi,
 				u_char type, u_char mode)
 {
   if (BGP_DEBUG (normal, NORMAL))
-    zlog_debug ("%s Addr-family %d/%d has ORF type/mode %d/%d not supported",
+    zlog_info ("%s Addr-family %d/%d has ORF type/mode %d/%d not supported",
 	       peer->host, afi, safi, type, mode);
 }
 
-static int
+int
 bgp_capability_orf (struct peer *peer, struct capability *cap,
 		    u_char *pnt)
 {
@@ -213,7 +212,7 @@ bgp_capability_orf (struct peer *peer, struct capability *cap,
     }
 
   if (BGP_DEBUG (normal, NORMAL))
-    zlog_debug ("%s OPEN has ORF CAP(%s) for afi/safi: %u/%u",
+    zlog_info ("%s OPEN has ORF CAP(%s) for afi/safi: %u/%u",
 	       peer->host, (cap->code == CAPABILITY_CODE_ORF ?
                        "new" : "old"), afi, safi);
 
@@ -253,7 +252,7 @@ bgp_capability_orf (struct peer *peer, struct capability *cap,
 	      sm_cap = PEER_CAP_ORF_PREFIX_SM_RCV;
 	      rm_cap = PEER_CAP_ORF_PREFIX_RM_RCV;
 	      if (BGP_DEBUG (normal, NORMAL))
-		zlog_debug ("%s OPEN has Prefixlist ORF(%d) capability as %s for afi/safi: %d/%d",
+		zlog_info ("%s OPEN has Prefixlist ORF(%d) capability as %s for afi/safi: %d/%d",
 			   peer->host, ORF_TYPE_PREFIX, (mode == ORF_MODE_SEND ? "SEND" :
 			   mode == ORF_MODE_RECEIVE ? "RECEIVE" : "BOTH") , afi, safi);
 	    }
@@ -273,7 +272,7 @@ bgp_capability_orf (struct peer *peer, struct capability *cap,
 	      sm_cap = PEER_CAP_ORF_PREFIX_SM_OLD_RCV;
 	      rm_cap = PEER_CAP_ORF_PREFIX_RM_OLD_RCV;
 	      if (BGP_DEBUG (normal, NORMAL))
-		zlog_debug ("%s OPEN has Prefixlist ORF(%d) capability as %s for afi/safi: %d/%d",
+		zlog_info ("%s OPEN has Prefixlist ORF(%d) capability as %s for afi/safi: %d/%d",
 			   peer->host, ORF_TYPE_PREFIX_OLD, (mode == ORF_MODE_SEND ? "SEND" :
 			   mode == ORF_MODE_RECEIVE ? "RECEIVE" : "BOTH") , afi, safi);
 	    }
@@ -307,7 +306,7 @@ bgp_capability_orf (struct peer *peer, struct capability *cap,
 }
 
 /* Parse given capability. */
-static int
+int
 bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
 		      u_char **error)
 {
@@ -329,7 +328,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
       safi = cap.mpc.safi;
 
       if (BGP_DEBUG (normal, NORMAL))
-	zlog_debug ("%s OPEN has CAPABILITY code: %d, length %d",
+	zlog_info ("%s OPEN has CAPABILITY code: %d, length %d",
 		   peer->host, cap.code, cap.length);
 
       /* We need at least capability code and capability length. */
@@ -352,7 +351,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
       if (cap.code == CAPABILITY_CODE_MP)
 	{
 	  if (BGP_DEBUG (normal, NORMAL))
-	    zlog_debug ("%s OPEN has MP_EXT CAP for afi/safi: %u/%u",
+	    zlog_info ("%s OPEN has MP_EXT CAP for afi/safi: %u/%u",
 		       peer->host, afi, safi);
 
 	  /* Ignore capability when override-capability is set. */
@@ -374,7 +373,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
 	       || cap.code == CAPABILITY_CODE_REFRESH_OLD)
 	{
 	  /* Check length. */
-	  if (cap.length != CAPABILITY_CODE_REFRESH_LEN)
+	  if (cap.length != 0)
 	    {
 	      zlog_info ("%s Route Refresh Capability length error %d",
 			 peer->host, cap.length);
@@ -383,7 +382,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
 	    }
 
 	  if (BGP_DEBUG (normal, NORMAL))
-	    zlog_debug ("%s OPEN has ROUTE-REFRESH capability(%s) for all address-families",
+	    zlog_info ("%s OPEN has ROUTE-REFRESH capability(%s) for all address-families",
 		       peer->host,
 		       cap.code == CAPABILITY_CODE_REFRESH_OLD ? "old" : "new");
 
@@ -396,81 +395,10 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
       else if (cap.code == CAPABILITY_CODE_ORF
 	       || cap.code == CAPABILITY_CODE_ORF_OLD)
 	bgp_capability_orf (peer, &cap, pnt + sizeof (struct capability));
-      else if (cap.code == CAPABILITY_CODE_RESTART)
-       {
-         struct graceful_restart_af graf;
-         u_int16_t restart_flag_time;
-         int restart_bit = 0;
-         u_char *restart_pnt;
-         u_char *restart_end;
-
-         /* Check length. */
-         if (cap.length < CAPABILITY_CODE_RESTART_LEN)
-           {
-             zlog_info ("%s Graceful Restart Capability length error %d",
-                        peer->host, cap.length);
-             bgp_notify_send (peer, BGP_NOTIFY_CEASE, 0);
-             return -1;
-           }
-
-         SET_FLAG (peer->cap, PEER_CAP_RESTART_RCV);
-         restart_flag_time = ntohs(cap.mpc.afi);
-         if (CHECK_FLAG (restart_flag_time, RESTART_R_BIT))
-           restart_bit = 1;
-         UNSET_FLAG (restart_flag_time, 0xF000);
-	 peer->v_gr_restart = restart_flag_time;
-
-         if (BGP_DEBUG (normal, NORMAL))
-           {
-             zlog_debug ("%s OPEN has Graceful Restart capability", peer->host);
-             zlog_debug ("%s Peer has%srestarted. Restart Time : %d",
-                        peer->host, restart_bit ? " " : " not ",
-			peer->v_gr_restart);
-           }
-
-         restart_pnt = pnt + 4;
-         restart_end = pnt + cap.length + 2;
-
-         while (restart_pnt < restart_end)
-           {
-             memcpy (&graf, restart_pnt, sizeof (struct graceful_restart_af));
-
-             afi = ntohs(graf.afi);
-             safi = graf.safi;
-
-             if (CHECK_FLAG (graf.flag, RESTART_F_BIT))
-		SET_FLAG (peer->af_cap[afi][safi], PEER_CAP_RESTART_AF_PRESERVE_RCV);
-
-             if (strcmp (afi_safi_print (afi, safi), "Unknown") == 0)
-               {
-                  if (BGP_DEBUG (normal, NORMAL))
-                    zlog_debug ("%s Addr-family %d/%d(afi/safi) not supported. I gnore the Graceful Restart capability",
-                               peer->host, afi, safi);
-               }
-             else if (! peer->afc[afi][safi])
-               {
-                  if (BGP_DEBUG (normal, NORMAL))
-                     zlog_debug ("%s Addr-family %d/%d(afi/safi) not enabled. Ignore the Graceful Restart capability",
-                                peer->host, afi, safi);
-               }
-             else
-               {
-                 if (BGP_DEBUG (normal, NORMAL))
-                   zlog_debug ("%s Address family %s is%spreserved", peer->host,
-			       afi_safi_print (afi, safi),
-			       CHECK_FLAG (peer->af_cap[afi][safi],
-			       PEER_CAP_RESTART_AF_PRESERVE_RCV)
-			       ? " " : " not ");
-
-                   SET_FLAG (peer->af_cap[afi][safi], PEER_CAP_RESTART_AF_RCV);
-               }
-             restart_pnt += 4;
-           }
-       }
       else if (cap.code == CAPABILITY_CODE_DYNAMIC)
 	{
 	  /* Check length. */
-	  if (cap.length != CAPABILITY_CODE_DYNAMIC_LEN)
+	  if (cap.length != 0)
 	    {
 	      zlog_info ("%s Dynamic Capability length error %d",
 			 peer->host, cap.length);
@@ -479,7 +407,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
 	    }
 
 	  if (BGP_DEBUG (normal, NORMAL))
-	    zlog_debug ("%s OPEN has DYNAMIC capability", peer->host);
+	    zlog_info ("%s OPEN has DYNAMIC capability", peer->host);
 
 	  SET_FLAG (peer->cap, PEER_CAP_DYNAMIC_RCV);
 	}
@@ -504,7 +432,7 @@ bgp_capability_parse (struct peer *peer, u_char *pnt, u_char length,
   return 0;
 }
 
-static int
+int
 bgp_auth_parse (struct peer *peer, u_char *pnt, size_t length)
 {
   bgp_notify_send (peer, 
@@ -513,7 +441,7 @@ bgp_auth_parse (struct peer *peer, u_char *pnt, size_t length)
   return -1;
 }
 
-static int
+int
 strict_capability_same (struct peer *peer)
 {
   int i, j;
@@ -547,7 +475,7 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
   error = error_data;
 
   if (BGP_DEBUG (normal, NORMAL))
-    zlog_debug ("%s rcv OPEN w/ OPTION parameter len: %u",
+    zlog_info ("%s rcv OPEN w/ OPTION parameter len: %u",
 	       peer->host, length);
   
   while (pnt < end) 
@@ -573,7 +501,7 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
 	}
 
       if (BGP_DEBUG (normal, NORMAL))
-	zlog_debug ("%s rcvd OPEN w/ optional parameter type %u (%s) len %u",
+	zlog_info ("%s rcvd OPEN w/ optional parameter type %u (%s) len %u",
 		   peer->host, opt_type,
 		   opt_type == BGP_OPEN_OPT_AUTH ? "Authentication" :
 		   opt_type == BGP_OPEN_OPT_CAP ? "Capability" : "Unknown",
@@ -660,7 +588,7 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
   return 0;
 }
 
-static void
+void
 bgp_open_capability_orf (struct stream *s, struct peer *peer,
                          afi_t afi, safi_t safi, u_char code)
 {
@@ -675,15 +603,15 @@ bgp_open_capability_orf (struct stream *s, struct peer *peer,
     safi = BGP_SAFI_VPNV4;
 
   stream_putc (s, BGP_OPEN_OPT_CAP);
-  capp = stream_get_endp (s);           /* Set Capability Len Pointer */
+  capp = stream_get_putp (s);           /* Set Capability Len Pointer */
   stream_putc (s, 0);                   /* Capability Length */
   stream_putc (s, code);                /* Capability Code */
-  orfp = stream_get_endp (s);           /* Set ORF Len Pointer */
+  orfp = stream_get_putp (s);           /* Set ORF Len Pointer */
   stream_putc (s, 0);                   /* ORF Length */
   stream_putw (s, afi);
   stream_putc (s, 0);
   stream_putc (s, safi);
-  numberp = stream_get_endp (s);        /* Set Number Pointer */
+  numberp = stream_get_putp (s);        /* Set Number Pointer */
   stream_putc (s, 0);                   /* Number of ORFs */
 
   /* Address Prefix ORF */
@@ -717,11 +645,11 @@ bgp_open_capability_orf (struct stream *s, struct peer *peer,
   stream_putc_at (s, numberp, number_of_orfs);
 
   /* Total ORF Len. */
-  orf_len = stream_get_endp (s) - orfp - 1;
+  orf_len = stream_get_putp (s) - orfp - 1;
   stream_putc_at (s, orfp, orf_len);
 
   /* Total Capability Len. */
-  cap_len = stream_get_endp (s) - capp - 1;
+  cap_len = stream_get_putp (s) - capp - 1;
   stream_putc_at (s, capp, cap_len);
 }
 
@@ -735,7 +663,7 @@ bgp_open_capability (struct stream *s, struct peer *peer)
   safi_t safi;
 
   /* Remember current pointer for Opt Parm Len. */
-  cp = stream_get_endp (s);
+  cp = stream_get_putp (s);
 
   /* Opt Parm Len. */
   stream_putc (s, 0);
@@ -743,6 +671,23 @@ bgp_open_capability (struct stream *s, struct peer *peer)
   /* Do not send capability. */
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_CAPABILITY_OPEN) 
       || CHECK_FLAG (peer->flags, PEER_FLAG_DONT_CAPABILITY))
+    return;
+
+  /* When the peer is IPv4 unicast only, do not send capability. */
+  if (! peer->afc[AFI_IP][SAFI_MULTICAST] 
+      && ! peer->afc[AFI_IP][SAFI_MPLS_VPN]
+      && ! peer->afc[AFI_IP6][SAFI_UNICAST] 
+      && ! peer->afc[AFI_IP6][SAFI_MULTICAST]
+      && CHECK_FLAG (peer->flags, PEER_FLAG_NO_ROUTE_REFRESH_CAP)
+      && ! CHECK_FLAG (peer->af_flags[AFI_IP][SAFI_UNICAST],
+		       PEER_FLAG_ORF_PREFIX_SM)
+      && ! CHECK_FLAG (peer->af_flags[AFI_IP][SAFI_UNICAST],
+		       PEER_FLAG_ORF_PREFIX_RM)
+      && ! CHECK_FLAG (peer->af_flags[AFI_IP][SAFI_MULTICAST],
+		       PEER_FLAG_ORF_PREFIX_SM)
+      && ! CHECK_FLAG (peer->af_flags[AFI_IP][SAFI_MULTICAST],
+		       PEER_FLAG_ORF_PREFIX_RM)
+      && ! CHECK_FLAG (peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
     return;
 
   /* IPv4 unicast. */
@@ -809,15 +754,18 @@ bgp_open_capability (struct stream *s, struct peer *peer)
 #endif /* HAVE_IPV6 */
 
   /* Route refresh. */
-  SET_FLAG (peer->cap, PEER_CAP_REFRESH_ADV);
-  stream_putc (s, BGP_OPEN_OPT_CAP);
-  stream_putc (s, CAPABILITY_CODE_REFRESH_LEN + 2);
-  stream_putc (s, CAPABILITY_CODE_REFRESH_OLD);
-  stream_putc (s, CAPABILITY_CODE_REFRESH_LEN);
-  stream_putc (s, BGP_OPEN_OPT_CAP);
-  stream_putc (s, CAPABILITY_CODE_REFRESH_LEN + 2);
-  stream_putc (s, CAPABILITY_CODE_REFRESH);
-  stream_putc (s, CAPABILITY_CODE_REFRESH_LEN);
+  if (! CHECK_FLAG (peer->flags, PEER_FLAG_NO_ROUTE_REFRESH_CAP))
+    {
+      SET_FLAG (peer->cap, PEER_CAP_REFRESH_ADV);
+      stream_putc (s, BGP_OPEN_OPT_CAP);
+      stream_putc (s, CAPABILITY_CODE_REFRESH_LEN + 2);
+      stream_putc (s, CAPABILITY_CODE_REFRESH_OLD);
+      stream_putc (s, CAPABILITY_CODE_REFRESH_LEN);
+      stream_putc (s, BGP_OPEN_OPT_CAP);
+      stream_putc (s, CAPABILITY_CODE_REFRESH_LEN + 2);
+      stream_putc (s, CAPABILITY_CODE_REFRESH);
+      stream_putc (s, CAPABILITY_CODE_REFRESH_LEN);
+    }
 
   /* ORF capability. */
   for (afi = AFI_IP ; afi < AFI_MAX ; afi++)
@@ -839,18 +787,7 @@ bgp_open_capability (struct stream *s, struct peer *peer)
       stream_putc (s, CAPABILITY_CODE_DYNAMIC_LEN);
     }
 
-  /* Graceful restart capability */
-  if (bgp_flag_check (peer->bgp, BGP_FLAG_GRACEFUL_RESTART))
-    {
-      SET_FLAG (peer->cap, PEER_CAP_RESTART_ADV);
-      stream_putc (s, BGP_OPEN_OPT_CAP);
-      stream_putc (s, CAPABILITY_CODE_RESTART_LEN + 2);
-      stream_putc (s, CAPABILITY_CODE_RESTART);
-      stream_putc (s, CAPABILITY_CODE_RESTART_LEN);
-      stream_putw (s, peer->bgp->restart_time);
-     }
-
   /* Total Opt Parm Len. */
-  len = stream_get_endp (s) - cp - 1;
+  len = stream_get_putp (s) - cp - 1;
   stream_putc_at (s, cp, len);
 }

@@ -40,65 +40,59 @@
 #include "ospfd/ospf_zebra.h"
 
 /* Hook function for updating route_map assignment. */
-static void
-ospf_route_map_update (const char *name)
+void
+ospf_route_map_update (char *name)
 {
-  struct ospf *ospf;
   int type;
 
   /* If OSPF instatnce does not exist, return right now. */
-  ospf = ospf_lookup ();
-  if (ospf == NULL)
+  if (!ospf_top)
     return;
 
   /* Update route-map */
   for (type = 0; type <= ZEBRA_ROUTE_MAX; type++)
     {
-      if (ROUTEMAP_NAME (ospf, type)
-	  && strcmp (ROUTEMAP_NAME (ospf, type), name) == 0)
+      if (ROUTEMAP_NAME (type) && strcmp (ROUTEMAP_NAME (type), name) == 0)
 	{
 	  /* Keep old route-map. */
-	  struct route_map *old = ROUTEMAP (ospf, type);
+	  struct route_map *old = ROUTEMAP (type);
 
 	  /* Update route-map. */
-	  ROUTEMAP (ospf, type) =
-	    route_map_lookup_by_name (ROUTEMAP_NAME (ospf, type));
+	  ROUTEMAP (type) = route_map_lookup_by_name (ROUTEMAP_NAME (type));
 
 	  /* No update for this distribute type. */
-	  if (old == NULL && ROUTEMAP (ospf, type) == NULL)
+	  if (old == NULL && ROUTEMAP (type) == NULL)
 	    continue;
 
-	  ospf_distribute_list_update (ospf, type);
+	  ospf_distribute_list_update (type);
 	}
     }
 }
 
-static void
-ospf_route_map_event (route_map_event_t event, const char *name)
+void
+ospf_route_map_event (route_map_event_t event, char *name)
 {
-  struct ospf *ospf;
   int type;
 
   /* If OSPF instatnce does not exist, return right now. */
-  ospf = ospf_lookup ();
-  if (ospf == NULL)
+  if (!ospf_top)
     return;
 
   /* Update route-map. */
   for (type = 0; type <= ZEBRA_ROUTE_MAX; type++)
     {
-      if (ROUTEMAP_NAME (ospf, type) &&  ROUTEMAP (ospf, type)
-	  && !strcmp (ROUTEMAP_NAME (ospf, type), name))
+      if (ROUTEMAP_NAME (type) &&  ROUTEMAP (type) &&
+          !strcmp (ROUTEMAP_NAME (type), name))
         {
-          ospf_distribute_list_update (ospf, type);
+          ospf_distribute_list_update (type);
         }
     }
 }
 
 /* Delete rip route map rule. */
-static int
+int
 ospf_route_match_delete (struct vty *vty, struct route_map_index *index,
-			 const char *command, const char *arg)
+			 char *command, char *arg)
 {
   int ret;
 
@@ -110,18 +104,20 @@ ospf_route_match_delete (struct vty *vty, struct route_map_index *index,
         case RMAP_RULE_MISSING:
           vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         case RMAP_COMPILE_ERROR:
           vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         }
     }
 
   return CMD_SUCCESS;
 }
 
-static int
+int
 ospf_route_match_add (struct vty *vty, struct route_map_index *index,
-		      const char *command, const char *arg)
+		      char *command, char *arg)
 {                                                                              
   int ret;
 
@@ -133,18 +129,20 @@ ospf_route_match_add (struct vty *vty, struct route_map_index *index,
         case RMAP_RULE_MISSING:
           vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         case RMAP_COMPILE_ERROR:
           vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         }
     }
 
   return CMD_SUCCESS;
 }
 
-static int
+int
 ospf_route_set_add (struct vty *vty, struct route_map_index *index,
-		    const char *command, const char *arg)
+		    char *command, char *arg)
 {
   int ret;
 
@@ -156,9 +154,11 @@ ospf_route_set_add (struct vty *vty, struct route_map_index *index,
         case RMAP_RULE_MISSING:
           vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         case RMAP_COMPILE_ERROR:
           vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         }
     }
 
@@ -166,9 +166,9 @@ ospf_route_set_add (struct vty *vty, struct route_map_index *index,
 }
 
 /* Delete rip route map rule. */
-static int
+int
 ospf_route_set_delete (struct vty *vty, struct route_map_index *index,
-		       const char *command, const char *arg)
+		       char *command, char *arg)
 {                                              
   int ret;
 
@@ -180,9 +180,11 @@ ospf_route_set_delete (struct vty *vty, struct route_map_index *index,
         case RMAP_RULE_MISSING:
           vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         case RMAP_COMPILE_ERROR:
           vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
           return CMD_WARNING;
+          break;
         }
     }
 
@@ -191,7 +193,7 @@ ospf_route_set_delete (struct vty *vty, struct route_map_index *index,
 
 /* `match ip netxthop ' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t
+route_map_result_t
 route_match_ip_nexthop (void *rule, struct prefix *prefix,
 			route_map_object_t type, void *object)
 {
@@ -217,14 +219,14 @@ route_match_ip_nexthop (void *rule, struct prefix *prefix,
 
 /* Route map `ip next-hop' match statement. `arg' should be
    access-list name. */
-static void *
-route_match_ip_nexthop_compile (const char *arg)
+void *
+route_match_ip_nexthop_compile (char *arg)
 {
   return XSTRDUP (MTYPE_ROUTE_MAP_COMPILED, arg);
 }
 
 /* Free route map's compiled `ip address' value. */
-static void
+void
 route_match_ip_nexthop_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -241,7 +243,7 @@ struct route_map_rule_cmd route_match_ip_nexthop_cmd =
 
 /* `match ip next-hop prefix-list PREFIX_LIST' */
 
-static route_map_result_t
+route_map_result_t
 route_match_ip_next_hop_prefix_list (void *rule, struct prefix *prefix,
                                     route_map_object_t type, void *object)
 {
@@ -265,13 +267,13 @@ route_match_ip_next_hop_prefix_list (void *rule, struct prefix *prefix,
   return RMAP_NOMATCH;
 }
 
-static void *
-route_match_ip_next_hop_prefix_list_compile (const char *arg)
+void *
+route_match_ip_next_hop_prefix_list_compile (char *arg)
 {
   return XSTRDUP (MTYPE_ROUTE_MAP_COMPILED, arg);
 }
 
-static void
+void
 route_match_ip_next_hop_prefix_list_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -288,7 +290,7 @@ struct route_map_rule_cmd route_match_ip_next_hop_prefix_list_cmd =
 /* `match ip address IP_ACCESS_LIST' */
 /* Match function should return 1 if match is success else return
    zero. */
-static route_map_result_t
+route_map_result_t
 route_match_ip_address (void *rule, struct prefix *prefix,
                         route_map_object_t type, void *object)
 {
@@ -309,14 +311,14 @@ route_match_ip_address (void *rule, struct prefix *prefix,
 
 /* Route map `ip address' match statement.  `arg' should be
    access-list name. */
-static void *
-route_match_ip_address_compile (const char *arg)
+void *
+route_match_ip_address_compile (char *arg)
 {
   return XSTRDUP (MTYPE_ROUTE_MAP_COMPILED, arg);
 }
 
 /* Free route map's compiled `ip address' value. */
-static void
+void
 route_match_ip_address_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -332,7 +334,7 @@ struct route_map_rule_cmd route_match_ip_address_cmd =
 };
 
 /* `match ip address prefix-list PREFIX_LIST' */
-static route_map_result_t
+route_map_result_t
 route_match_ip_address_prefix_list (void *rule, struct prefix *prefix,
                                     route_map_object_t type, void *object)
 {
@@ -350,13 +352,13 @@ route_match_ip_address_prefix_list (void *rule, struct prefix *prefix,
   return RMAP_NOMATCH;
 }
 
-static void *
-route_match_ip_address_prefix_list_compile (const char *arg)
+void *
+route_match_ip_address_prefix_list_compile (char *arg)
 {
   return XSTRDUP (MTYPE_ROUTE_MAP_COMPILED, arg);
 }
 
-static void
+void
 route_match_ip_address_prefix_list_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -373,7 +375,7 @@ struct route_map_rule_cmd route_match_ip_address_prefix_list_cmd =
 /* `match interface IFNAME' */
 /* Match function should return 1 if match is success else return
    zero. */
-static route_map_result_t
+route_map_result_t
 route_match_interface (void *rule, struct prefix *prefix,
 		       route_map_object_t type, void *object)
 {
@@ -395,14 +397,14 @@ route_match_interface (void *rule, struct prefix *prefix,
 
 /* Route map `interface' match statement.  `arg' should be
    interface name. */
-static void *
-route_match_interface_compile (const char *arg)
+void *
+route_match_interface_compile (char *arg)
 {
   return XSTRDUP (MTYPE_ROUTE_MAP_COMPILED, arg);
 }
 
 /* Free route map's compiled `interface' value. */
-static void
+void
 route_match_interface_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -419,7 +421,7 @@ struct route_map_rule_cmd route_match_interface_cmd =
 
 /* `set metric METRIC' */
 /* Set metric to attribute. */
-static route_map_result_t
+route_map_result_t
 route_set_metric (void *rule, struct prefix *prefix,
                   route_map_object_t type, void *object)
 {
@@ -439,8 +441,8 @@ route_set_metric (void *rule, struct prefix *prefix,
 }
 
 /* set metric compilation. */
-static void *
-route_set_metric_compile (const char *arg)
+void *
+route_set_metric_compile (char *arg)
 {
   u_int32_t *metric;
 
@@ -455,7 +457,7 @@ route_set_metric_compile (const char *arg)
 }
 
 /* Free route map's compiled `set metric' value. */
-static void
+void
 route_set_metric_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -472,7 +474,7 @@ struct route_map_rule_cmd route_set_metric_cmd =
 
 /* `set metric-type TYPE' */
 /* Set metric-type to attribute. */
-static route_map_result_t
+route_map_result_t
 route_set_metric_type (void *rule, struct prefix *prefix,
 		       route_map_object_t type, void *object)
 {
@@ -492,8 +494,8 @@ route_set_metric_type (void *rule, struct prefix *prefix,
 }
 
 /* set metric-type compilation. */
-static void *
-route_set_metric_type_compile (const char *arg)
+void *
+route_set_metric_type_compile (char *arg)
 {
   u_int32_t *metric_type;
 
@@ -512,7 +514,7 @@ route_set_metric_type_compile (const char *arg)
 }
 
 /* Free route map's compiled `set metric-type' value. */
-static void
+void
 route_set_metric_type_free (void *rule)
 {
   XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
@@ -748,8 +750,8 @@ DEFUN (set_metric_type,
        "set metric-type (type-1|type-2)",
        SET_STR
        "Type of metric for destination routing protocol\n"
-       "OSPF[6] external type 1 metric\n"
-       "OSPF[6] external type 2 metric\n")
+       "OSPF external type 1 metric\n"
+       "OSPF external type 2 metric\n")
 {
   if (strcmp (argv[0], "1") == 0)
     return ospf_route_set_add (vty, vty->index, "metric-type", "type-1");
@@ -778,8 +780,8 @@ ALIAS (no_set_metric_type,
        NO_STR
        SET_STR
        "Type of metric for destination routing protocol\n"
-       "OSPF[6] external type 1 metric\n"
-       "OSPF[6] external type 2 metric\n")
+       "OSPF external type 1 metric\n"
+       "OSPF external type 2 metric\n")
 
 /* Route-map init */
 void

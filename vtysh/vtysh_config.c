@@ -28,8 +28,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 vector configvec;
 
-extern int vtysh_writeconfig_integrated;
-
 struct config
 {
   /* Configuration node name. */
@@ -46,7 +44,7 @@ struct config
 };
 
 struct list *config_top;
-
+
 int
 line_cmp (char *c1, char *c2)
 {
@@ -83,12 +81,12 @@ config_del (struct config* config)
 }
 
 struct config *
-config_get (int index, const char *line)
+config_get (int index, char *line)
 {
   struct config *config;
   struct config *config_loop;
   struct list *master;
-  struct listnode *node, *nnode;
+  struct listnode *nn;
 
   config = config_loop = NULL;
 
@@ -102,7 +100,7 @@ config_get (int index, const char *line)
       vector_set_index (configvec, index, master);
     }
   
-  for (ALL_LIST_ELEMENTS (master, node, nnode, config_loop))
+  LIST_LOOP (master, config_loop, nn)
     {
       if (strcmp (config_loop->name, line) == 0)
 	config = config_loop;
@@ -122,18 +120,18 @@ config_get (int index, const char *line)
 }
 
 void
-config_add_line (struct list *config, const char *line)
+config_add_line (struct list *config, char *line)
 {
   listnode_add (config, XSTRDUP (MTYPE_VTYSH_CONFIG_LINE, line));
 }
 
 void
-config_add_line_uniq (struct list *config, const char *line)
+config_add_line_uniq (struct list *config, char *line)
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   char *pnt;
 
-  for (ALL_LIST_ELEMENTS (config, node, nnode, pnt))
+  LIST_LOOP (config, pnt, nn)
     {
       if (strcmp (pnt, line) == 0)
 	return;
@@ -142,7 +140,7 @@ config_add_line_uniq (struct list *config, const char *line)
 }
 
 void
-vtysh_config_parse_line (const char *line)
+vtysh_config_parse_line (char *line)
 {
   char c;
   static struct config *config = NULL;
@@ -166,18 +164,13 @@ vtysh_config_parse_line (const char *line)
       /* Store line to current configuration. */
       if (config)
 	{
-	  if (strncmp (line, " address-family vpnv4",
-	      strlen (" address-family vpnv4")) == 0)
+	  if (strncmp (line, " address-family vpnv4", strlen (" address-family vpnv4")) == 0)
 	    config = config_get (BGP_VPNV4_NODE, line);
-	  else if (strncmp (line, " address-family ipv4 multicast",
-		   strlen (" address-family ipv4 multicast")) == 0)
+	  else if (strncmp (line, " address-family ipv4 multicast", strlen (" address-family ipv4 multicast")) == 0)
 	    config = config_get (BGP_IPV4M_NODE, line);
-	  else if (strncmp (line, " address-family ipv6",
-		   strlen (" address-family ipv6")) == 0)
+	  else if (strncmp (line, " address-family ipv6", strlen (" address-family ipv6")) == 0)
 	    config = config_get (BGP_IPV6_NODE, line);
-	  else if (config->index == RMAP_NODE ||
-	           config->index == INTERFACE_NODE ||
-		   config->index == VTY_NODE)
+	  else if (config->index == RMAP_NODE)
 	    config_add_line_uniq (config->line, line);
 	  else
 	    config_add_line (config->line, line);
@@ -188,67 +181,33 @@ vtysh_config_parse_line (const char *line)
     default:
       if (strncmp (line, "interface", strlen ("interface")) == 0)
 	config = config_get (INTERFACE_NODE, line);
-      else if (strncmp (line, "router-id", strlen ("router-id")) == 0)
-	config = config_get (ZEBRA_NODE, line);
       else if (strncmp (line, "router rip", strlen ("router rip")) == 0)
 	config = config_get (RIP_NODE, line);
-      else if (strncmp (line, "router ripng", strlen ("router ripng")) == 0)
-	config = config_get (RIPNG_NODE, line);
       else if (strncmp (line, "router ospf", strlen ("router ospf")) == 0)
 	config = config_get (OSPF_NODE, line);
-      else if (strncmp (line, "router ospf6", strlen ("router ospf6")) == 0)
-	config = config_get (OSPF6_NODE, line);
       else if (strncmp (line, "router bgp", strlen ("router bgp")) == 0)
 	config = config_get (BGP_NODE, line);
-      else if (strncmp (line, "router isis", strlen ("router isis")) == 0)
-  	config = config_get (ISIS_NODE, line);
-      else if (strncmp (line, "router bgp", strlen ("router bgp")) == 0)
+      else if (strncmp (line, "router", strlen ("router")) == 0)
 	config = config_get (BGP_NODE, line);
       else if (strncmp (line, "route-map", strlen ("route-map")) == 0)
 	config = config_get (RMAP_NODE, line);
       else if (strncmp (line, "access-list", strlen ("access-list")) == 0)
 	config = config_get (ACCESS_NODE, line);
-      else if (strncmp (line, "ipv6 access-list",
-	       strlen ("ipv6 access-list")) == 0)
-	config = config_get (ACCESS_IPV6_NODE, line);
-      else if (strncmp (line, "ip prefix-list",
-	       strlen ("ip prefix-list")) == 0)
+      else if (strncmp (line, "ip prefix-list", strlen ("ip prefix-list")) == 0)
 	config = config_get (PREFIX_NODE, line);
-      else if (strncmp (line, "ipv6 prefix-list",
-	       strlen ("ipv6 prefix-list")) == 0)
-	config = config_get (PREFIX_IPV6_NODE, line);
-      else if (strncmp (line, "ip as-path access-list",
-	       strlen ("ip as-path access-list")) == 0)
+      else if (strncmp (line, "ip as-path access-list", strlen ("ip as-path access-list")) == 0)
 	config = config_get (AS_LIST_NODE, line);
-      else if (strncmp (line, "ip community-list",
-	       strlen ("ip community-list")) == 0)
+      else if (strncmp (line, "ip community-list", strlen ("ip community-list")) == 0)
 	config = config_get (COMMUNITY_LIST_NODE, line);
       else if (strncmp (line, "ip route", strlen ("ip route")) == 0)
 	config = config_get (IP_NODE, line);
-      else if (strncmp (line, "ipv6 route", strlen ("ipv6 route")) == 0)
-   	config = config_get (IP_NODE, line);
       else if (strncmp (line, "key", strlen ("key")) == 0)
 	config = config_get (KEYCHAIN_NODE, line);
-      else if (strncmp (line, "line", strlen ("line")) == 0)
-	config = config_get (VTY_NODE, line);
-      else if ( (strncmp (line, "ipv6 forwarding",
-		 strlen ("ipv6 forwarding")) == 0)
-	       || (strncmp (line, "ip forwarding",
-		   strlen ("ip forwarding")) == 0) )
-	config = config_get (FORWARDING_NODE, line);
-      else if (strncmp (line, "service", strlen ("service")) == 0)
-	config = config_get (SERVICE_NODE, line);
-      else if (strncmp (line, "debug", strlen ("debug")) == 0)
-	config = config_get (DEBUG_NODE, line);
-      else if (strncmp (line, "password", strlen ("password")) == 0
-	       || strncmp (line, "enable password",
-			   strlen ("enable password")) == 0)
-	config = config_get (AAA_NODE, line);
       else
 	{
 	  if (strncmp (line, "log", strlen ("log")) == 0
 	      || strncmp (line, "hostname", strlen ("hostname")) == 0
-	     )
+	      || strncmp (line, "password", strlen ("hostname")) == 0)
 	    config_add_line_uniq (config_top, line);
 	  else
 	    config_add_line (config_top, line);
@@ -282,26 +241,23 @@ vtysh_config_parse (char *line)
 }
 
 /* Macro to check delimiter is needed between each configuration line
- * or not. */
+   or not.  */
 #define NO_DELIMITER(I)  \
   ((I) == ACCESS_NODE || (I) == PREFIX_NODE || (I) == IP_NODE \
-   || (I) == AS_LIST_NODE || (I) == COMMUNITY_LIST_NODE || \
-   (I) == ACCESS_IPV6_NODE || (I) == PREFIX_IPV6_NODE \
-   || (I) == SERVICE_NODE || (I) == FORWARDING_NODE || (I) == DEBUG_NODE \
-   || (I) == AAA_NODE)
+   || (I) == AS_LIST_NODE || (I) == COMMUNITY_LIST_NODE)
 
-/* Display configuration to file pointer. */
+/* Display configuration to file pointer.  */
 void
 vtysh_config_dump (FILE *fp)
 {
-  struct listnode *node, *nnode;
-  struct listnode *mnode, *mnnode;
+  struct listnode *nn;
+  struct listnode *nm;
   struct config *config;
   struct list *master;
   char *line;
-  unsigned int i;
+  int i;
 
-  for (ALL_LIST_ELEMENTS (config_top, node, nnode, line))
+  LIST_LOOP (config_top, line, nn)
     {
       fprintf (fp, "%s\n", line);
       fflush (fp);
@@ -309,15 +265,15 @@ vtysh_config_dump (FILE *fp)
   fprintf (fp, "!\n");
   fflush (fp);
 
-  for (i = 0; i < vector_active (configvec); i++)
+  for (i = 0; i < vector_max (configvec); i++)
     if ((master = vector_slot (configvec, i)) != NULL)
       {
-	for (ALL_LIST_ELEMENTS (master, node, nnode, config))
+	LIST_LOOP (master, config, nn)
 	  {
 	    fprintf (fp, "%s\n", config->name);
-	    fflush (fp);
+            fflush (fp);
 
-	    for (ALL_LIST_ELEMENTS (config->line, mnode, mnnode, line))
+	    LIST_LOOP (config->line, line, nm)
 	      {
 		fprintf  (fp, "%s\n", line);
 		fflush (fp);
@@ -335,7 +291,7 @@ vtysh_config_dump (FILE *fp)
 	  }
       }
 
-  for (i = 0; i < vector_active (configvec); i++)
+  for (i = 0; i < vector_max (configvec); i++)
     if ((master = vector_slot (configvec, i)) != NULL)
       {
 	list_delete (master);
@@ -359,7 +315,7 @@ vtysh_read_file (FILE *confp)
   vtysh_execute_no_pager ("enable");
   vtysh_execute_no_pager ("configure terminal");
 
-  /* Execute configuration file. */
+  /* Execute configuration file */
   ret = vtysh_config_from_file (vty, confp);
 
   vtysh_execute_no_pager ("end");
@@ -384,40 +340,81 @@ vtysh_read_file (FILE *confp)
     }
 }
 
-/* Read up configuration file from config_default_dir. */
-int
-vtysh_read_config (char *config_default_dir)
+/* Read up configuration file from file_name. */
+void
+vtysh_read_config (char *config_file,
+		   char *config_current_dir,
+		   char *config_default_dir)
 {
+  char *cwd;
   FILE *confp = NULL;
+  char *fullpath;
 
-  confp = fopen (config_default_dir, "r");
-  if (confp == NULL)
-    return (1);
+  /* If -f flag specified. */
+  if (config_file != NULL)
+    {
+      if (! IS_DIRECTORY_SEP (config_file[0]))
+	{
+	  cwd = getcwd (NULL, MAXPATHLEN);
+	  fullpath = XMALLOC (MTYPE_TMP, 
+			      strlen (cwd) + strlen (config_file) + 2);
+	  sprintf (fullpath, "%s/%s", cwd, config_file);
+	}
+      else
+	fullpath = config_file;
 
+      confp = fopen (fullpath, "r");
+
+      if (confp == NULL)
+	{
+	  fprintf (stderr, "can't open configuration file [%s]\n", 
+		   config_file);
+	  exit(1);
+	}
+    }
+  else
+    {
+      /* Relative path configuration file open. */
+      if (config_current_dir)
+	confp = fopen (config_current_dir, "r");
+
+      /* If there is no relative path exists, open system default file. */
+      if (confp == NULL)
+	{
+	  confp = fopen (config_default_dir, "r");
+	  if (confp == NULL)
+	    {
+	      fprintf (stderr, "can't open configuration file [%s]\n",
+		       config_default_dir);
+	      exit (1);
+	    }      
+	  else
+	    fullpath = config_default_dir;
+	}
+      else
+	{
+	  /* Rleative path configuration file. */
+	  cwd = getcwd (NULL, MAXPATHLEN);
+	  fullpath = XMALLOC (MTYPE_TMP, 
+			      strlen (cwd) + strlen (config_current_dir) + 2);
+	  sprintf (fullpath, "%s/%s", cwd, config_current_dir);
+	}  
+    }  
   vtysh_read_file (confp);
-  fclose (confp);
-  host_config_set (config_default_dir);
 
-  return (0);
+  fclose (confp);
+
+  host_config_set (fullpath);
 }
 
-/* We don't write vtysh specific into file from vtysh. vtysh.conf should
- * be edited by hand. So, we handle only "write terminal" case here and
- * integrate vtysh specific conf with conf from daemons.
- */
 void
-vtysh_config_write ()
+vtysh_config_write (FILE *fp)
 {
-  char line[81];
   extern struct host host;
 
   if (host.name)
-    {
-      sprintf (line, "hostname %s", host.name);
-      vtysh_config_parse_line(line);
-    }
-  if (vtysh_writeconfig_integrated)
-    vtysh_config_parse_line ("service integrated-vtysh-config");
+    fprintf (fp, "hostname %s\n", host.name);
+  fprintf (fp, "!\n");
 }
 
 void

@@ -32,17 +32,12 @@ void bgp_node_delete (struct bgp_node *);
 void bgp_table_free (struct bgp_table *);
 
 struct bgp_table *
-bgp_table_init (afi_t afi, safi_t safi)
+bgp_table_init (void)
 {
   struct bgp_table *rt;
 
   rt = XMALLOC (MTYPE_BGP_TABLE, sizeof (struct bgp_table));
   memset (rt, 0, sizeof (struct bgp_table));
-
-  rt->type = BGP_TABLE_MAIN;
-  rt->afi = afi;
-  rt->safi = safi;
-  
   return rt;
 }
 
@@ -52,7 +47,7 @@ bgp_table_finish (struct bgp_table *rt)
   bgp_table_free (rt);
 }
 
-static struct bgp_node *
+struct bgp_node *
 bgp_node_create ()
 {
   struct bgp_node *rn;
@@ -63,7 +58,7 @@ bgp_node_create ()
 }
 
 /* Allocate new route node with prefix set. */
-static struct bgp_node *
+struct bgp_node *
 bgp_node_set (struct bgp_table *table, struct prefix *prefix)
 {
   struct bgp_node *node;
@@ -77,7 +72,7 @@ bgp_node_set (struct bgp_table *table, struct prefix *prefix)
 }
 
 /* Free route node. */
-static void
+void
 bgp_node_free (struct bgp_node *node)
 {
   XFREE (MTYPE_BGP_NODE, node);
@@ -350,10 +345,8 @@ bgp_node_get (struct bgp_table *table, struct prefix *p)
 	  match = new;
 	  new = bgp_node_set (table, p);
 	  set_link (match, new);
-	  table->count++;
 	}
     }
-  table->count++;
   bgp_lock_node (new);
   
   return new;
@@ -391,9 +384,7 @@ bgp_node_delete (struct bgp_node *node)
     }
   else
     node->table->top = child;
-  
-  node->table->count--;
-  
+
   bgp_node_free (node);
 
   /* If parent node is stub then delete it also. */
@@ -495,10 +486,4 @@ bgp_route_next_until (struct bgp_node *node, struct bgp_node *limit)
     }
   bgp_unlock_node (start);
   return NULL;
-}
-
-unsigned long
-bgp_table_count (struct bgp_table *table)
-{
-  return table->count;
 }

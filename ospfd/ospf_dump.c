@@ -28,7 +28,6 @@
 #include "command.h"
 #include "stream.h"
 #include "log.h"
-#include "sockopt.h"
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_interface.h"
@@ -58,7 +57,6 @@ int ospf_ism_state_msg_max = OSPF_ISM_STATE_MAX;
 struct message ospf_nsm_state_msg[] =
 {
   { NSM_DependUpon, "DependUpon" },
-  { NSM_Deleted,    "Deleted"    },
   { NSM_Down,       "Down" },
   { NSM_Attempt,    "Attempt" },
   { NSM_Init,       "Init" },
@@ -104,6 +102,21 @@ struct message ospf_link_state_id_type_msg[] =
 };
 int ospf_link_state_id_type_msg_max = OSPF_MAX_LSA;
 
+struct message ospf_redistributed_proto[] =
+{
+  { ZEBRA_ROUTE_SYSTEM,   "System" },
+  { ZEBRA_ROUTE_KERNEL,   "Kernel" },
+  { ZEBRA_ROUTE_CONNECT,  "Connected" },
+  { ZEBRA_ROUTE_STATIC,   "Static" },
+  { ZEBRA_ROUTE_RIP,      "RIP" },
+  { ZEBRA_ROUTE_RIPNG,    "RIPng" },
+  { ZEBRA_ROUTE_OSPF,     "OSPF" },
+  { ZEBRA_ROUTE_OSPF6,    "OSPFv3" },
+  { ZEBRA_ROUTE_BGP,      "BGP" },
+  { ZEBRA_ROUTE_MAX,	  "Default" },
+};
+int ospf_redistributed_proto_max = ZEBRA_ROUTE_MAX + 1;
+
 struct message ospf_network_type_msg[] =
 {
   { OSPF_IFTYPE_NONE,		  "NONE" },
@@ -134,16 +147,8 @@ unsigned long term_debug_ospf_zebra = 0;
 unsigned long term_debug_ospf_nssa = 0;
 
 
-
-const char *
-ospf_redist_string(u_int route_type)
-{
-  return (route_type == ZEBRA_ROUTE_MAX) ?
-  	 "Default" : zebra_route_string(route_type);
-}
-
 #define OSPF_AREA_STRING_MAXLEN  16
-const char *
+char *
 ospf_area_name_string (struct ospf_area *area)
 {
   static char buf[OSPF_AREA_STRING_MAXLEN] = "";
@@ -160,7 +165,7 @@ ospf_area_name_string (struct ospf_area *area)
 }
 
 #define OSPF_AREA_DESC_STRING_MAXLEN  23
-const char *
+char *
 ospf_area_desc_string (struct ospf_area *area)
 {
   static char buf[OSPF_AREA_DESC_STRING_MAXLEN] = "";
@@ -182,13 +187,14 @@ ospf_area_desc_string (struct ospf_area *area)
       break;
     default:
       return ospf_area_name_string (area);
+      break;
     }
 
   return buf;
 }
 
 #define OSPF_IF_STRING_MAXLEN  40
-const char *
+char *
 ospf_if_name_string (struct ospf_interface *oi)
 {
   static char buf[OSPF_IF_STRING_MAXLEN] = "";
@@ -229,79 +235,36 @@ ospf_nbr_state_message (struct ospf_neighbor *nbr, char *buf, size_t size)
 	    LOOKUP (ospf_ism_state_msg, state));
 }
 
-const char *
-ospf_timeval_dump (struct timeval *t, char *buf, size_t size)
-{
-  /* Making formatted timer strings. */
-#define MINUTE_IN_SECONDS	60
-#define HOUR_IN_SECONDS		(60*MINUTE_IN_SECONDS)
-#define DAY_IN_SECONDS		(24*HOUR_IN_SECONDS)
-#define WEEK_IN_SECONDS		(7*DAY_IN_SECONDS)
-  unsigned long w, d, h, m, s, ms;
-  
-  if (!t)
-    return "inactive";
-  
-  w = d = h = m = s = ms = 0;
-  memset (buf, 0, size);
-  
-  ms = t->tv_usec / 1000;
-  
-  if (ms >= 1000)
-    {
-      t->tv_sec += ms / 1000;
-      ms %= 1000;
-    }
-  
-  if (t->tv_sec > WEEK_IN_SECONDS)
-    {
-      w = t->tv_sec / WEEK_IN_SECONDS;
-      t->tv_sec -= w * WEEK_IN_SECONDS;
-    }
-  
-  if (t->tv_sec > DAY_IN_SECONDS)
-    {
-      d = t->tv_sec / DAY_IN_SECONDS;
-      t->tv_sec -= d * DAY_IN_SECONDS;
-    }
-  
-  if (t->tv_sec >= HOUR_IN_SECONDS)
-    {
-      h = t->tv_sec / HOUR_IN_SECONDS;
-      t->tv_sec -= h * HOUR_IN_SECONDS;
-    }
-  
-  if (t->tv_sec >= MINUTE_IN_SECONDS)
-    {
-      m = t->tv_sec / MINUTE_IN_SECONDS;
-      t->tv_sec -= m * MINUTE_IN_SECONDS;
-    }
-  
-  if (w > 99)
-    snprintf (buf, size, "%ldw%1ldd", w, d);
-  else if (w)
-    snprintf (buf, size, "%ldw%1ldd%02ldh", w, d, h);
-  else if (d)
-    snprintf (buf, size, "%1ldd%02ldh%02ldm", d, h, m);
-  else if (h)
-    snprintf (buf, size, "%ldh%02ldm%02lds", h, m, t->tv_sec);
-  else if (m)
-    snprintf (buf, size, "%ldm%02lds", m, t->tv_sec);
-  else
-    snprintf (buf, size, "%ld.%03lds", t->tv_sec, ms);
-  
-  return buf;
-}
-
-const char *
+char *
 ospf_timer_dump (struct thread *t, char *buf, size_t size)
 {
-  struct timeval result;
+  struct timeval now;
+  unsigned long h, m, s;
+
   if (!t)
     return "inactive";
-  
-  result = tv_sub (t->u.sands, recent_relative_time());
-  return ospf_timeval_dump (&result, buf, size);
+
+  h = m = s = 0;
+  memset (buf, 0, size);
+
+  gettimeofday (&now, NULL);
+
+  s = t->u.sands.tv_sec - now.tv_sec;
+  if (s >= 3600)
+    {
+      h = s / 3600;
+      s -= h * 3600;
+    }
+
+  if (s >= 60)
+    {
+      m = s / 60;
+      s -= m * 60;
+    }
+
+  snprintf (buf, size, "%02ld:%02ld:%02ld", h, m, s);
+
+  return buf;
 }
 
 #define OSPF_OPTION_STR_MAXLEN		24
@@ -322,7 +285,7 @@ ospf_options_dump (u_char options)
   return buf;
 }
 
-static void
+void
 ospf_packet_hello_dump (struct stream *s, u_int16_t length)
 {
   struct ospf_hello *hello;
@@ -330,23 +293,23 @@ ospf_packet_hello_dump (struct stream *s, u_int16_t length)
 
   hello = (struct ospf_hello *) STREAM_PNT (s);
 
-  zlog_debug ("Hello");
-  zlog_debug ("  NetworkMask %s", inet_ntoa (hello->network_mask));
-  zlog_debug ("  HelloInterval %d", ntohs (hello->hello_interval));
-  zlog_debug ("  Options %d (%s)", hello->options,
+  zlog_info ("Hello");
+  zlog_info ("  NetworkMask %s", inet_ntoa (hello->network_mask));
+  zlog_info ("  HelloInterval %d", ntohs (hello->hello_interval));
+  zlog_info ("  Options %d (%s)", hello->options,
 	     ospf_options_dump (hello->options));
-  zlog_debug ("  RtrPriority %d", hello->priority);
-  zlog_debug ("  RtrDeadInterval %ld", (u_long)ntohl (hello->dead_interval));
-  zlog_debug ("  DRouter %s", inet_ntoa (hello->d_router));
-  zlog_debug ("  BDRouter %s", inet_ntoa (hello->bd_router));
+  zlog_info ("  RtrPriority %d", hello->priority);
+  zlog_info ("  RtrDeadInterval %ld", (u_long)ntohl (hello->dead_interval));
+  zlog_info ("  DRouter %s", inet_ntoa (hello->d_router));
+  zlog_info ("  BDRouter %s", inet_ntoa (hello->bd_router));
 
   length -= OSPF_HEADER_SIZE + OSPF_HELLO_MIN_SIZE;
-  zlog_debug ("  # Neighbors %d", length / 4);
+  zlog_info ("  # Neighbors %d", length / 4);
   for (i = 0; length > 0; i++, length -= sizeof (struct in_addr))
-    zlog_debug ("    Neighbor %s", inet_ntoa (hello->neighbors[i]));
+    zlog_info ("    Neighbor %s", inet_ntoa (hello->neighbors[i]));
 }
 
-static char *
+char *
 ospf_dd_flags_dump (u_char flags, char *buf, size_t size)
 {
   memset (buf, 0, size);
@@ -362,22 +325,20 @@ ospf_dd_flags_dump (u_char flags, char *buf, size_t size)
 void
 ospf_lsa_header_dump (struct lsa_header *lsah)
 {
-  const char *lsah_type = LOOKUP (ospf_lsa_type_msg, lsah->type);
-  
-  zlog_debug ("  LSA Header");
-  zlog_debug ("    LS age %d", ntohs (lsah->ls_age));
-  zlog_debug ("    Options %d (%s)", lsah->options,
+  zlog_info ("  LSA Header");
+  zlog_info ("    LS age %d", ntohs (lsah->ls_age));
+  zlog_info ("    Options %d (%s)", lsah->options,
 	     ospf_options_dump (lsah->options));
-  zlog_debug ("    LS type %d (%s)", lsah->type,
-             (lsah->type ? lsah_type : "unknown type"));
-  zlog_debug ("    Link State ID %s", inet_ntoa (lsah->id));
-  zlog_debug ("    Advertising Router %s", inet_ntoa (lsah->adv_router));
-  zlog_debug ("    LS sequence number 0x%lx", (u_long)ntohl (lsah->ls_seqnum));
-  zlog_debug ("    LS checksum 0x%x", ntohs (lsah->checksum));
-  zlog_debug ("    length %d", ntohs (lsah->length));
+  zlog_info ("    LS type %d (%s)", lsah->type,
+	     LOOKUP (ospf_lsa_type_msg, lsah->type));
+  zlog_info ("    Link State ID %s", inet_ntoa (lsah->id));
+  zlog_info ("    Advertising Router %s", inet_ntoa (lsah->adv_router));
+  zlog_info ("    LS sequence number 0x%lx", (u_long)ntohl (lsah->ls_seqnum));
+  zlog_info ("    LS checksum 0x%x", ntohs (lsah->checksum));
+  zlog_info ("    length %d", ntohs (lsah->length));
 }
 
-static char *
+char *
 ospf_router_lsa_flags_dump (u_char flags, char *buf, size_t size)
 {
   memset (buf, 0, size);
@@ -390,7 +351,7 @@ ospf_router_lsa_flags_dump (u_char flags, char *buf, size_t size)
   return buf;
 }
 
-static void
+void
 ospf_router_lsa_dump (struct stream *s, u_int16_t length)
 {
   char buf[BUFSIZ];
@@ -399,25 +360,25 @@ ospf_router_lsa_dump (struct stream *s, u_int16_t length)
 
   rl = (struct router_lsa *) STREAM_PNT (s);
 
-  zlog_debug ("  Router-LSA");
-  zlog_debug ("    flags %s", 
+  zlog_info ("  Router-LSA");
+  zlog_info ("    flags %s", 
 	     ospf_router_lsa_flags_dump (rl->flags, buf, BUFSIZ));
-  zlog_debug ("    # links %d", ntohs (rl->links));
+  zlog_info ("    # links %d", ntohs (rl->links));
 
   len = ntohs (rl->header.length) - OSPF_LSA_HEADER_SIZE - 4;
   for (i = 0; len > 0; i++)
     {
-      zlog_debug ("    Link ID %s", inet_ntoa (rl->link[i].link_id));
-      zlog_debug ("    Link Data %s", inet_ntoa (rl->link[i].link_data));
-      zlog_debug ("    Type %d", (u_char) rl->link[i].type);
-      zlog_debug ("    TOS %d", (u_char) rl->link[i].tos);
-      zlog_debug ("    metric %d", ntohs (rl->link[i].metric));
+      zlog_info ("    Link ID %s", inet_ntoa (rl->link[i].link_id));
+      zlog_info ("    Link Data %s", inet_ntoa (rl->link[i].link_data));
+      zlog_info ("    Type %d", (u_char) rl->link[i].type);
+      zlog_info ("    TOS %d", (u_char) rl->link[i].tos);
+      zlog_info ("    metric %d", ntohs (rl->link[i].metric));
 
       len -= 12;
     }
 }
 
-static void
+void
 ospf_network_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct network_lsa *nl;
@@ -426,19 +387,19 @@ ospf_network_lsa_dump (struct stream *s, u_int16_t length)
   nl = (struct network_lsa *) STREAM_PNT (s);
   cnt = (ntohs (nl->header.length) - (OSPF_LSA_HEADER_SIZE + 4)) / 4;
   
-  zlog_debug ("  Network-LSA");
+  zlog_info ("  Network-LSA");
   /*
-  zlog_debug ("LSA total size %d", ntohs (nl->header.length));
-  zlog_debug ("Network-LSA size %d", 
+  zlog_info ("LSA total size %d", ntohs (nl->header.length));
+  zlog_info ("Network-LSA size %d", 
   ntohs (nl->header.length) - OSPF_LSA_HEADER_SIZE);
   */
-  zlog_debug ("    Network Mask %s", inet_ntoa (nl->mask));
-  zlog_debug ("    # Attached Routers %d", cnt);
+  zlog_info ("    Network Mask %s", inet_ntoa (nl->mask));
+  zlog_info ("    # Attached Routers %d", cnt);
   for (i = 0; i < cnt; i++)
-    zlog_debug ("      Attached Router %s", inet_ntoa (nl->routers[i]));
+    zlog_info ("      Attached Router %s", inet_ntoa (nl->routers[i]));
 }
 
-static void
+void
 ospf_summary_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct summary_lsa *sl;
@@ -447,16 +408,16 @@ ospf_summary_lsa_dump (struct stream *s, u_int16_t length)
 
   sl = (struct summary_lsa *) STREAM_PNT (s);
 
-  zlog_debug ("  Summary-LSA");
-  zlog_debug ("    Network Mask %s", inet_ntoa (sl->mask));
+  zlog_info ("  Summary-LSA");
+  zlog_info ("    Network Mask %s", inet_ntoa (sl->mask));
 
   size = ntohs (sl->header.length) - OSPF_LSA_HEADER_SIZE - 4;
   for (i = 0; size > 0; size -= 4, i++)
-    zlog_debug ("    TOS=%d metric %d", sl->tos,
+    zlog_info ("    TOS=%d metric %d", sl->tos,
 	       GET_METRIC (sl->metric));
 }
 
-static void
+void
 ospf_as_external_lsa_dump (struct stream *s, u_int16_t length)
 {
   struct as_external_lsa *al;
@@ -464,26 +425,27 @@ ospf_as_external_lsa_dump (struct stream *s, u_int16_t length)
   int i;
 
   al = (struct as_external_lsa *) STREAM_PNT (s);
-  zlog_debug ("  %s", ospf_lsa_type_msg[al->header.type].str);
-  zlog_debug ("    Network Mask %s", inet_ntoa (al->mask));
+
+  zlog_info ("  AS-external-LSA");
+  zlog_info ("    Network Mask %s", inet_ntoa (al->mask));
 
   size = ntohs (al->header.length) - OSPF_LSA_HEADER_SIZE -4;
   for (i = 0; size > 0; size -= 12, i++)
     {
-      zlog_debug ("    bit %s TOS=%d metric %d",
+      zlog_info ("    bit %s TOS=%d metric %d",
 		 IS_EXTERNAL_METRIC (al->e[i].tos) ? "E" : "-",
 		 al->e[i].tos & 0x7f, GET_METRIC (al->e[i].metric));
-      zlog_debug ("    Forwarding address %s", inet_ntoa (al->e[i].fwd_addr));
-      zlog_debug ("    External Route Tag %d", al->e[i].route_tag);
+      zlog_info ("    Forwarding address %s", inet_ntoa (al->e[i].fwd_addr));
+      zlog_info ("    External Route Tag %d", al->e[i].route_tag);
     }
 }
 
-static void
+void
 ospf_lsa_header_list_dump (struct stream *s, u_int16_t length)
 {
   struct lsa_header *lsa;
 
-  zlog_debug ("  # LSA Headers %d", length / OSPF_LSA_HEADER_SIZE);
+  zlog_info ("  # LSA Headers %d", length / OSPF_LSA_HEADER_SIZE);
 
   /* LSA Headers. */
   while (length > 0)
@@ -491,12 +453,12 @@ ospf_lsa_header_list_dump (struct stream *s, u_int16_t length)
       lsa = (struct lsa_header *) STREAM_PNT (s);
       ospf_lsa_header_dump (lsa);
 
-      stream_forward_getp (s, OSPF_LSA_HEADER_SIZE);
+      stream_forward (s, OSPF_LSA_HEADER_SIZE);
       length -= OSPF_LSA_HEADER_SIZE;
     }
 }
 
-static void
+void
 ospf_packet_db_desc_dump (struct stream *s, u_int16_t length)
 {
   struct ospf_db_desc *dd;
@@ -507,24 +469,24 @@ ospf_packet_db_desc_dump (struct stream *s, u_int16_t length)
   gp = stream_get_getp (s);
   dd = (struct ospf_db_desc *) STREAM_PNT (s);
 
-  zlog_debug ("Database Description");
-  zlog_debug ("  Interface MTU %d", ntohs (dd->mtu));
-  zlog_debug ("  Options %d (%s)", dd->options,
+  zlog_info ("Database Description");
+  zlog_info ("  Interface MTU %d", ntohs (dd->mtu));
+  zlog_info ("  Options %d (%s)", dd->options,
 	     ospf_options_dump (dd->options));
-  zlog_debug ("  Flags %d (%s)", dd->flags,
+  zlog_info ("  Flags %d (%s)", dd->flags,
 	     ospf_dd_flags_dump (dd->flags, dd_flags, sizeof dd_flags));
-  zlog_debug ("  Sequence Number 0x%08lx", (u_long)ntohl (dd->dd_seqnum));
+  zlog_info ("  Sequence Number 0x%08lx", (u_long)ntohl (dd->dd_seqnum));
 
   length -= OSPF_HEADER_SIZE + OSPF_DB_DESC_MIN_SIZE;
 
-  stream_forward_getp (s, OSPF_DB_DESC_MIN_SIZE);
+  stream_forward (s, OSPF_DB_DESC_MIN_SIZE);
 
   ospf_lsa_header_list_dump (s, length);
 
   stream_set_getp (s, gp);
 }
 
-static void
+void
 ospf_packet_ls_req_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -536,8 +498,8 @@ ospf_packet_ls_req_dump (struct stream *s, u_int16_t length)
 
   length -= OSPF_HEADER_SIZE;
 
-  zlog_debug ("Link State Request");
-  zlog_debug ("  # Requests %d", length / 12);
+  zlog_info ("Link State Request");
+  zlog_info ("  # Requests %d", length / 12);
 
   for (; length > 0; length -= 12)
     {
@@ -545,16 +507,16 @@ ospf_packet_ls_req_dump (struct stream *s, u_int16_t length)
       ls_id.s_addr = stream_get_ipv4 (s);
       adv_router.s_addr = stream_get_ipv4 (s);
 
-      zlog_debug ("  LS type %d", ls_type);
-      zlog_debug ("  Link State ID %s", inet_ntoa (ls_id));
-      zlog_debug ("  Advertising Router %s",
+      zlog_info ("  LS type %d", ls_type);
+      zlog_info ("  Link State ID %s", inet_ntoa (ls_id));
+      zlog_info ("  Advertising Router %s",
 		 inet_ntoa (adv_router));
     }
 
   stream_set_getp (s, sp);
 }
 
-static void
+void
 ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -569,14 +531,14 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
   count = stream_getl (s);
   length -= 4;
 
-  zlog_debug ("Link State Update");
-  zlog_debug ("  # LSAs %d", count);
+  zlog_info ("Link State Update");
+  zlog_info ("  # LSAs %d", count);
 
   while (length > 0 && count > 0)
     {
       if (length < OSPF_HEADER_SIZE || length % 4 != 0)
 	{
-          zlog_debug ("  Remaining %d bytes; Incorrect length.", length);
+          zlog_info ("  Remaining %d bytes; Incorrect length.", length);
 	  break;
 	}
 
@@ -599,9 +561,11 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
 	case OSPF_AS_EXTERNAL_LSA:
 	  ospf_as_external_lsa_dump (s, length);
 	  break;
+#ifdef HAVE_NSSA
 	case OSPF_AS_NSSA_LSA:
-	  ospf_as_external_lsa_dump (s, length);
+	  /* XXX */
 	  break;
+#endif /* HAVE_NSSA */
 #ifdef HAVE_OPAQUE_LSA
 	case OSPF_OPAQUE_LINK_LSA:
 	case OSPF_OPAQUE_AREA_LSA:
@@ -613,7 +577,7 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
 	  break;
 	}
 
-      stream_forward_getp (s, lsa_len);
+      stream_forward (s, lsa_len);
       length -= lsa_len;
       count--;
     }
@@ -621,7 +585,7 @@ ospf_packet_ls_upd_dump (struct stream *s, u_int16_t length)
   stream_set_getp (s, sp);
 }
 
-static void
+void
 ospf_packet_ls_ack_dump (struct stream *s, u_int16_t length)
 {
   u_int32_t sp;
@@ -629,44 +593,56 @@ ospf_packet_ls_ack_dump (struct stream *s, u_int16_t length)
   length -= OSPF_HEADER_SIZE;
   sp = stream_get_getp (s);
 
-  zlog_debug ("Link State Acknowledgment");
+  zlog_info ("Link State Acknowledgment");
   ospf_lsa_header_list_dump (s, length);
 
   stream_set_getp (s, sp);
 }
 
-/* Expects header to be in host order */
 void
-ospf_ip_header_dump (struct ip *iph)
+ospf_ip_header_dump (struct stream *s)
 {
+  u_int16_t length;
+  struct ip *iph;
+
+  iph = (struct ip *) STREAM_PNT (s);
+
+#ifdef GNU_LINUX
+  length = ntohs (iph->ip_len);
+#else /* GNU_LINUX */
+  length = iph->ip_len;
+#endif /* GNU_LINUX */
+
   /* IP Header dump. */
-  zlog_debug ("ip_v %d", iph->ip_v);
-  zlog_debug ("ip_hl %d", iph->ip_hl);
-  zlog_debug ("ip_tos %d", iph->ip_tos);
-  zlog_debug ("ip_len %d", iph->ip_len);
-  zlog_debug ("ip_id %u", (u_int32_t) iph->ip_id);
-  zlog_debug ("ip_off %u", (u_int32_t) iph->ip_off);
-  zlog_debug ("ip_ttl %d", iph->ip_ttl);
-  zlog_debug ("ip_p %d", iph->ip_p);
-  zlog_debug ("ip_sum 0x%x", (u_int32_t) iph->ip_sum);
-  zlog_debug ("ip_src %s",  inet_ntoa (iph->ip_src));
-  zlog_debug ("ip_dst %s", inet_ntoa (iph->ip_dst));
+  zlog_info ("ip_v %d", iph->ip_v);
+  zlog_info ("ip_hl %d", iph->ip_hl);
+  zlog_info ("ip_tos %d", iph->ip_tos);
+  zlog_info ("ip_len %d", length);
+  zlog_info ("ip_id %u", (u_int32_t) iph->ip_id);
+  zlog_info ("ip_off %u", (u_int32_t) iph->ip_off);
+  zlog_info ("ip_ttl %d", iph->ip_ttl);
+  zlog_info ("ip_p %d", iph->ip_p);
+  /* There is a report that Linux 2.0.37 does not have ip_sum.  But
+     I'm not sure.  Temporary commented out by kunihiro. */
+  /* zlog_info ("ip_sum 0x%x", (u_int32_t) ntohs (iph->ip_sum)); */
+  zlog_info ("ip_src %s",  inet_ntoa (iph->ip_src));
+  zlog_info ("ip_dst %s", inet_ntoa (iph->ip_dst));
 }
 
-static void
+void
 ospf_header_dump (struct ospf_header *ospfh)
 {
   char buf[9];
 
-  zlog_debug ("Header");
-  zlog_debug ("  Version %d", ospfh->version);
-  zlog_debug ("  Type %d (%s)", ospfh->type,
+  zlog_info ("Header");
+  zlog_info ("  Version %d", ospfh->version);
+  zlog_info ("  Type %d (%s)", ospfh->type,
 	     ospf_packet_type_str[ospfh->type]);
-  zlog_debug ("  Packet Len %d", ntohs (ospfh->length));
-  zlog_debug ("  Router ID %s", inet_ntoa (ospfh->router_id));
-  zlog_debug ("  Area ID %s", inet_ntoa (ospfh->area_id));
-  zlog_debug ("  Checksum 0x%x", ntohs (ospfh->checksum));
-  zlog_debug ("  AuType %d", ntohs (ospfh->auth_type));
+  zlog_info ("  Packet Len %d", ntohs (ospfh->length));
+  zlog_info ("  Router ID %s", inet_ntoa (ospfh->router_id));
+  zlog_info ("  Area ID %s", inet_ntoa (ospfh->area_id));
+  zlog_info ("  Checksum 0x%x", ntohs (ospfh->checksum));
+  zlog_info ("  AuType %d", ntohs (ospfh->auth_type));
 
   switch (ntohs (ospfh->auth_type))
     {
@@ -674,18 +650,18 @@ ospf_header_dump (struct ospf_header *ospfh)
       break;
     case OSPF_AUTH_SIMPLE:
       memset (buf, 0, 9);
-      strncpy (buf, (char *) ospfh->u.auth_data, 8);
-      zlog_debug ("  Simple Password %s", buf);
+      strncpy (buf, ospfh->u.auth_data, 8);
+      zlog_info ("  Simple Password %s", buf);
       break;
     case OSPF_AUTH_CRYPTOGRAPHIC:
-      zlog_debug ("  Cryptographic Authentication");
-      zlog_debug ("  Key ID %d", ospfh->u.crypt.key_id);
-      zlog_debug ("  Auth Data Len %d", ospfh->u.crypt.auth_data_len);
-      zlog_debug ("  Sequence number %ld",
+      zlog_info ("  Cryptographic Authentication");
+      zlog_info ("  Key ID %d", ospfh->u.crypt.key_id);
+      zlog_info ("  Auth Data Len %d", ospfh->u.crypt.auth_data_len);
+      zlog_info ("  Sequence number %ld",
 		 (u_long)ntohl (ospfh->u.crypt.crypt_seqnum));
       break;
     default:
-      zlog_debug ("* This is not supported authentication type");
+      zlog_info ("* This is not supported authentication type");
       break;
     }
     
@@ -709,7 +685,7 @@ ospf_packet_dump (struct stream *s)
 
   /* Show OSPF header detail. */
   ospf_header_dump (ospfh);
-  stream_forward_getp (s, OSPF_HEADER_SIZE);
+  stream_forward (s, OSPF_HEADER_SIZE);
 
   switch (ospfh->type)
     {
@@ -902,10 +878,8 @@ DEFUN (no_debug_ospf_packet,
       }
 
 #ifdef DEBUG
-  /*
   for (i = 0; i < 5; i++)
-    zlog_debug ("flag[%d] = %d", i, ospf_debug_packet[i]);
-  */
+    zlog_info ("flag[%d] = %d", i, ospf_debug_packet[i]);
 #endif /* DEBUG */
 
   return CMD_SUCCESS;
@@ -1420,11 +1394,7 @@ DEFUN (show_debugging_ospf,
 {
   int i;
 
-  vty_out (vty, "OSPF debugging status:%s", VTY_NEWLINE);
-
-  /* Show debug status for events. */
-  if (IS_DEBUG_OSPF(event,EVENT))
-    vty_out (vty, "  OSPF event debugging is on%s", VTY_NEWLINE);
+  vty_out (vty, "Zebra debugging status:%s", VTY_NEWLINE);
 
   /* Show debug status for ISM. */
   if (IS_DEBUG_OSPF (ism, ISM) == OSPF_DEBUG_ISM)
@@ -1501,10 +1471,6 @@ DEFUN (show_debugging_ospf,
 	vty_out (vty, "  OSPF Zebra redistribute debugging is on%s", VTY_NEWLINE);
     }
 
-  /* Show debug status for NSSA. */
-  if (IS_DEBUG_OSPF (nssa, NSSA) == OSPF_DEBUG_NSSA)
-    vty_out (vty, "  OSPF NSSA debugging is on%s", VTY_NEWLINE);
-
   return CMD_SUCCESS;
 }
 
@@ -1512,18 +1478,17 @@ DEFUN (show_debugging_ospf,
 struct cmd_node debug_node =
 {
   DEBUG_NODE,
-  "",
-  1 /* VTYSH */
+  ""
 };
 
-static int
+int
 config_write_debug (struct vty *vty)
 {
   int write = 0;
   int i, r;
 
-  const char *type_str[] = {"hello", "dd", "ls-request", "ls-update", "ls-ack"};
-  const char *detail_str[] = {"", " send", " recv", "", " detail",
+  char *type_str[] = {"hello", "dd", "ls-request", "ls-update", "ls-ack"};
+  char *detail_str[] = {"", " send", " recv", "", " detail",
 			" send detail", " recv detail", " detail"};
 
   /* debug ospf ism (status|events|timers). */
@@ -1545,7 +1510,7 @@ config_write_debug (struct vty *vty)
   else
     {
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_STATUS))
-	vty_out (vty, "debug ospf nsm status%s", VTY_NEWLINE);
+	vty_out (vty, "debug ospf ism status%s", VTY_NEWLINE);
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_EVENTS))
 	vty_out (vty, "debug ospf nsm event%s", VTY_NEWLINE);
       if (IS_CONF_DEBUG_OSPF (nsm, NSM_TIMERS))
@@ -1656,7 +1621,9 @@ debug_init ()
   install_element (ENABLE_NODE, &debug_ospf_zebra_sub_cmd);
   install_element (ENABLE_NODE, &debug_ospf_zebra_cmd);
   install_element (ENABLE_NODE, &debug_ospf_event_cmd);
+#ifdef HAVE_NSSA
   install_element (ENABLE_NODE, &debug_ospf_nssa_cmd);
+#endif /* HAVE_NSSA */
   install_element (ENABLE_NODE, &no_debug_ospf_packet_send_recv_detail_cmd);
   install_element (ENABLE_NODE, &no_debug_ospf_packet_send_recv_cmd);
   install_element (ENABLE_NODE, &no_debug_ospf_packet_all_cmd);
@@ -1669,7 +1636,9 @@ debug_init ()
   install_element (ENABLE_NODE, &no_debug_ospf_zebra_sub_cmd);
   install_element (ENABLE_NODE, &no_debug_ospf_zebra_cmd);
   install_element (ENABLE_NODE, &no_debug_ospf_event_cmd);
+#ifdef HAVE_NSSA
   install_element (ENABLE_NODE, &no_debug_ospf_nssa_cmd);
+#endif /* HAVE_NSSA */
 
   install_element (CONFIG_NODE, &debug_ospf_packet_send_recv_detail_cmd);
   install_element (CONFIG_NODE, &debug_ospf_packet_send_recv_cmd);
@@ -1683,7 +1652,9 @@ debug_init ()
   install_element (CONFIG_NODE, &debug_ospf_zebra_sub_cmd);
   install_element (CONFIG_NODE, &debug_ospf_zebra_cmd);
   install_element (CONFIG_NODE, &debug_ospf_event_cmd);
+#ifdef HAVE_NSSA
   install_element (CONFIG_NODE, &debug_ospf_nssa_cmd);
+#endif /* HAVE_NSSA */
   install_element (CONFIG_NODE, &no_debug_ospf_packet_send_recv_detail_cmd);
   install_element (CONFIG_NODE, &no_debug_ospf_packet_send_recv_cmd);
   install_element (CONFIG_NODE, &no_debug_ospf_packet_all_cmd);
@@ -1696,5 +1667,7 @@ debug_init ()
   install_element (CONFIG_NODE, &no_debug_ospf_zebra_sub_cmd);
   install_element (CONFIG_NODE, &no_debug_ospf_zebra_cmd);
   install_element (CONFIG_NODE, &no_debug_ospf_event_cmd);
+#ifdef HAVE_NSSA
   install_element (CONFIG_NODE, &no_debug_ospf_nssa_cmd);
+#endif /* HAVE_NSSA */
 }

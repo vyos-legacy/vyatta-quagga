@@ -46,8 +46,8 @@ route_table_finish (struct route_table *rt)
 }
 
 /* Allocate new route node. */
-static struct route_node *
-route_node_new (void)
+struct route_node *
+route_node_new ()
 {
   struct route_node *node;
   node = XCALLOC (MTYPE_ROUTE_NODE, sizeof (struct route_node));
@@ -55,7 +55,7 @@ route_node_new (void)
 }
 
 /* Allocate new route node with prefix set. */
-static struct route_node *
+struct route_node *
 route_node_set (struct route_table *table, struct prefix *prefix)
 {
   struct route_node *node;
@@ -69,7 +69,7 @@ route_node_set (struct route_table *table, struct prefix *prefix)
 }
 
 /* Free route node. */
-static void
+void
 route_node_free (struct route_node *node)
 {
   XFREE (MTYPE_ROUTE_NODE, node);
@@ -185,8 +185,8 @@ check_bit (u_char *prefix, u_char prefixlen)
 }
 
 /* Macro version of set_link (). */
-#define SET_LINK(X,Y) do { (X)->link[CHECK_BIT(&(Y)->p.u.prefix,(X)->p.prefixlen)] = (Y);\
-                      (Y)->parent = (X); } while (0)
+#define SET_LINK(X,Y) (X)->link[CHECK_BIT(&(Y)->prefix,(X)->prefixlen)] = (Y);\
+                      (Y)->parent = (X)
 
 static void
 set_link (struct route_node *node, struct route_node *new)
@@ -220,7 +220,7 @@ route_unlock_node (struct route_node *node)
 }
 
 /* Dump routing table. */
-static void __attribute__ ((unused))
+void
 route_dump_node (struct route_table *t)
 {
   struct route_node *node;

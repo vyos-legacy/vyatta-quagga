@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004 Yasuhiro Ohara
+ * Copyright (C) 2001 Yasuhiro Ohara
  *
  * This file is part of GNU Zebra.
  *
@@ -22,54 +22,35 @@
 #ifndef OSPF6_ABR_H
 #define OSPF6_ABR_H
 
-/* Debug option */
-extern unsigned char conf_debug_ospf6_abr;
-#define OSPF6_DEBUG_ABR_ON() \
-  (conf_debug_ospf6_abr = 1)
-#define OSPF6_DEBUG_ABR_OFF() \
-  (conf_debug_ospf6_abr = 0)
-#define IS_OSPF6_DEBUG_ABR \
-  (conf_debug_ospf6_abr)
-
 /* Inter-Area-Prefix-LSA */
-struct ospf6_inter_prefix_lsa
+struct ospf6_inter_area_prefix_lsa
 {
-  u_int32_t metric;
-  struct ospf6_prefix prefix;
+  u_int32_t metric;           /* 12bits reserved, 20bits metric */
+  struct ospf6_prefix prefix; /* followed by one address prefix */
 };
 
 /* Inter-Area-Router-LSA */
-struct ospf6_inter_router_lsa
+struct ospf6_inter_area_router_lsa
 {
-  u_char mbz;
-  u_char options[3];
-  u_int32_t metric;
-  u_int32_t router_id;
+  u_char reserved;
+  u_char options[3];      /* Optional Capability */
+  u_int32_t metric;       /* 12bits reserved, 20bits metric */
+  u_int32_t router_id;    /* Destination Router ID */
 };
 
-#define OSPF6_ABR_SUMMARY_METRIC(E) (ntohl ((E)->metric & htonl (0x00ffffff)))
-#define OSPF6_ABR_SUMMARY_METRIC_SET(E,C) \
-  { (E)->metric &= htonl (0x00000000); \
-    (E)->metric |= htonl (0x00ffffff) & htonl (C); }
+void ospf6_abr_prefix_lsa_add (struct ospf6_lsa *);
+void ospf6_abr_prefix_lsa_remove (struct ospf6_lsa *);
+void ospf6_abr_prefix_lsa_change (struct ospf6_lsa *, struct ospf6_lsa *);
 
-int ospf6_is_router_abr (struct ospf6 *o);
+void ospf6_abr_abr_entry_add (struct ospf6_route_req *);
+void ospf6_abr_abr_entry_remove (struct ospf6_route_req *);
 
-void ospf6_abr_enable_area (struct ospf6_area *oa);
-void ospf6_abr_disable_area (struct ospf6_area *oa);
+void ospf6_abr_route_add (struct ospf6_route_req *);
+void ospf6_abr_route_remove (struct ospf6_route_req *);
 
-void ospf6_abr_originate_summary_to_area (struct ospf6_route *route,
-                                          struct ospf6_area *area);
-void ospf6_abr_originate_summary (struct ospf6_route *route);
-void ospf6_abr_examin_summary (struct ospf6_lsa *lsa, struct ospf6_area *oa);
-void ospf6_abr_examin_brouter (u_int32_t router_id);
-void ospf6_abr_reimport (struct ospf6_area *oa);
-
-int config_write_ospf6_debug_abr (struct vty *vty);
-void install_element_ospf6_debug_abr ();
-int ospf6_abr_config_write (struct vty *vty);
+void ospf6_abr_inter_route_calculation (struct ospf6_area *);
 
 void ospf6_abr_init ();
 
-#endif /*OSPF6_ABR_H*/
-
+#endif /* OSPF6_ABR_H */
 

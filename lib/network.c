@@ -21,12 +21,10 @@
  */
 
 #include <zebra.h>
-#include "log.h"
-#include "network.h"
 
 /* Read nbytes from fd and store into ptr. */
 int
-readn (int fd, u_char *ptr, int nbytes)
+readn (int fd, char *ptr, int nbytes)
 {
   int nleft;
   int nread;
@@ -52,7 +50,7 @@ readn (int fd, u_char *ptr, int nbytes)
 
 /* Write nbytes from ptr to fd. */
 int
-writen(int fd, const u_char *ptr, int nbytes)
+writen(int fd, char *ptr, int nbytes)
 {
   int nleft;
   int nwritten;
@@ -70,26 +68,4 @@ writen(int fd, const u_char *ptr, int nbytes)
       ptr += nwritten;
     }
   return nbytes - nleft;
-}
-
-int
-set_nonblocking(int fd)
-{
-  int flags;
-
-  /* According to the Single UNIX Spec, the return value for F_GETFL should
-     never be negative. */
-  if ((flags = fcntl(fd, F_GETFL)) < 0)
-    {
-      zlog_warn("fcntl(F_GETFL) failed for fd %d: %s",
-      		fd, safe_strerror(errno));
-      return -1;
-    }
-  if (fcntl(fd, F_SETFL, (flags | O_NONBLOCK)) < 0)
-    {
-      zlog_warn("fcntl failed setting fd %d non-blocking: %s",
-      		fd, safe_strerror(errno));
-      return -1;
-    }
-  return 0;
 }

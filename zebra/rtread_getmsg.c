@@ -27,7 +27,6 @@
 #include "if.h"
 
 #include "zebra/rib.h"
-#include "zebra/zserv.h"
 
 #include <sys/stream.h>
 #include <sys/tihdr.h>
@@ -66,8 +65,7 @@
 
 #define RT_BUFSIZ		8192
 
-static void 
-handle_route_entry (mib2_ipRouteEntry_t *routeEntry)
+void handle_route_entry (mib2_ipRouteEntry_t *routeEntry)
 {
 	struct prefix_ipv4	prefix;
  	struct in_addr		tmpaddr, gateway;
@@ -90,11 +88,10 @@ handle_route_entry (mib2_ipRouteEntry_t *routeEntry)
 	gateway.s_addr = routeEntry->ipRouteNextHop;
 
 	rib_add_ipv4 (ZEBRA_ROUTE_KERNEL, zebra_flags, &prefix,
-		      &gateway, NULL, 0, 0, 0, 0);
+		      &gateway, 0, 0, 0, 0);
 }
 
-void
-route_read (void)
+void route_read ()
 {
 	char 			storage[RT_BUFSIZ];
 
@@ -111,7 +108,7 @@ route_read (void)
 
 	if ((dev = open (_PATH_GETMSG_ROUTE, O_RDWR)) == -1) {
 		zlog_warn ("can't open %s: %s", _PATH_GETMSG_ROUTE,
-			safe_strerror (errno));
+			strerror (errno));
 		return;
 	}
 
@@ -132,7 +129,7 @@ route_read (void)
 	flags = 0;
 
 	if (putmsg (dev, &msgdata, NULL, flags) == -1) {
-		zlog_warn ("putmsg failed: %s", safe_strerror (errno));
+		zlog_warn ("putmsg failed: %s", strerror (errno));
 		goto exit;
 	}
 
@@ -144,7 +141,7 @@ route_read (void)
 		retval = getmsg (dev, &msgdata, NULL, &flags);
 
 		if (retval == -1) {
-			zlog_warn ("getmsg(ctl) failed: %s", safe_strerror (errno));
+			zlog_warn ("getmsg(ctl) failed: %s", strerror (errno));
 			goto exit;
 		}
 
@@ -159,7 +156,7 @@ route_read (void)
 		if (msgdata.len >= sizeof (struct T_error_ack) &&
 			TLIerr->PRIM_type == T_ERROR_ACK) {
 			zlog_warn ("getmsg(ctl) returned T_ERROR_ACK: %s",
-				safe_strerror ((TLIerr->TLI_error == TSYSERR)
+				strerror ((TLIerr->TLI_error == TSYSERR)
 				? TLIerr->UNIX_error : EPROTO));
 			break;
 		}
@@ -199,7 +196,7 @@ route_read (void)
 
 			if (retval == -1) {
 				zlog_warn ("getmsg(data) failed: %s",
-					safe_strerror (errno));
+					strerror (errno));
 				goto exit;
 			}
 

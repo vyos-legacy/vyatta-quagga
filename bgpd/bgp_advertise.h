@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_ADVERTISE_H
-#define _QUAGGA_BGP_ADVERTISE_H
-
 /* BGP advertise FIFO.  */
 struct bgp_advertise_fifo
 {
@@ -102,6 +99,39 @@ struct bgp_synchronize
   struct bgp_advertise_fifo withdraw_low;
 };
 
+/* FIFO -- first in first out structure and macros.  */
+struct fifo
+{
+  struct fifo *next;
+  struct fifo *prev;
+};
+
+#define FIFO_INIT(F)                                  \
+  do {                                                \
+    struct fifo *Xfifo = (struct fifo *)(F);          \
+    Xfifo->next = Xfifo->prev = Xfifo;                \
+  } while (0)
+
+#define FIFO_ADD(F,N)                                 \
+  do {                                                \
+    struct fifo *Xfifo = (struct fifo *)(F);          \
+    struct fifo *Xnode = (struct fifo *)(N);          \
+    Xnode->next = Xfifo;                              \
+    Xnode->prev = Xfifo->prev;                        \
+    Xfifo->prev = Xfifo->prev->next = Xnode;          \
+  } while (0)
+
+#define FIFO_DEL(N)                                   \
+  do {                                                \
+    struct fifo *Xnode = (struct fifo *)(N);          \
+    Xnode->prev->next = Xnode->next;                  \
+    Xnode->next->prev = Xnode->prev;                  \
+  } while (0)
+
+#define FIFO_HEAD(F)                                  \
+  ((((struct fifo *)(F))->next == (struct fifo *)(F)) \
+  ? NULL : (F)->next)
+
 /* BGP adjacency linked list.  */
 #define BGP_INFO_ADD(N,A,TYPE)                        \
   do {                                                \
@@ -128,23 +158,21 @@ struct bgp_synchronize
 #define BGP_ADJ_OUT_DEL(N,A)   BGP_INFO_DEL(N,A,adj_out)
 
 /* Prototypes.  */
-extern void bgp_adj_out_set (struct bgp_node *, struct peer *, struct prefix *,
+void bgp_adj_out_set (struct bgp_node *, struct peer *, struct prefix *,
 		      struct attr *, afi_t, safi_t, struct bgp_info *);
-extern void bgp_adj_out_unset (struct bgp_node *, struct peer *, struct prefix *,
+void bgp_adj_out_unset (struct bgp_node *, struct peer *, struct prefix *,
 			afi_t, safi_t);
-extern void bgp_adj_out_remove (struct bgp_node *, struct bgp_adj_out *, 
+void bgp_adj_out_remove (struct bgp_node *, struct bgp_adj_out *, 
 			 struct peer *, afi_t, safi_t);
-extern int bgp_adj_out_lookup (struct peer *, struct prefix *, afi_t, safi_t,
+int bgp_adj_out_lookup (struct peer *, struct prefix *, afi_t, safi_t,
 			struct bgp_node *);
 
-extern void bgp_adj_in_set (struct bgp_node *, struct peer *, struct attr *);
-extern void bgp_adj_in_unset (struct bgp_node *, struct peer *);
-extern void bgp_adj_in_remove (struct bgp_node *, struct bgp_adj_in *);
+void bgp_adj_in_set (struct bgp_node *, struct peer *, struct attr *);
+void bgp_adj_in_unset (struct bgp_node *, struct peer *);
+void bgp_adj_in_remove (struct bgp_node *, struct bgp_adj_in *);
 
-extern struct bgp_advertise *
+struct bgp_advertise *
 bgp_advertise_clean (struct peer *, struct bgp_adj_out *, afi_t, safi_t);
 
-extern void bgp_sync_init (struct peer *);
-extern void bgp_sync_delete (struct peer *);
-
-#endif /* _QUAGGA_BGP_ADVERTISE_H */
+void bgp_sync_init (struct peer *);
+void bgp_sync_delete (struct peer *);

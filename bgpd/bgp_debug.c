@@ -20,7 +20,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #include <zebra.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "prefix.h"
 #include "linklist.h"
 #include "stream.h"
@@ -43,7 +43,6 @@ unsigned long conf_bgp_debug_filter;
 unsigned long conf_bgp_debug_keepalive;
 unsigned long conf_bgp_debug_update;
 unsigned long conf_bgp_debug_normal;
-unsigned long conf_bgp_debug_zebra;
 
 unsigned long term_bgp_debug_fsm;
 unsigned long term_bgp_debug_events;
@@ -52,7 +51,6 @@ unsigned long term_bgp_debug_filter;
 unsigned long term_bgp_debug_keepalive;
 unsigned long term_bgp_debug_update;
 unsigned long term_bgp_debug_normal;
-unsigned long term_bgp_debug_zebra;
 
 /* messages for BGP-4 status */
 struct message bgp_status_msg[] = 
@@ -64,13 +62,11 @@ struct message bgp_status_msg[] =
   { OpenSent, "OpenSent" },
   { OpenConfirm, "OpenConfirm" },
   { Established, "Established" },
-  { Clearing,    "Clearing"    },
-  { Deleted,     "Deleted"     },
 };
 int bgp_status_msg_max = BGP_STATUS_MAX;
 
 /* BGP message type string. */
-const char *bgp_type_str[] =
+char *bgp_type_str[] =
 {
   NULL,
   "OPEN",
@@ -98,152 +94,139 @@ int bgp_notify_msg_max = BGP_NOTIFY_MAX;
 struct message bgp_notify_head_msg[] = 
 {
   { 0, "null"},
-  { BGP_NOTIFY_HEADER_NOT_SYNC, "/Connection Not Synchronized"},
-  { BGP_NOTIFY_HEADER_BAD_MESLEN, "/Bad Message Length"},
-  { BGP_NOTIFY_HEADER_BAD_MESTYPE, "/Bad Message Type"}
+  { BGP_NOTIFY_HEADER_NOT_SYNC, "/Connection Not Synchronized."},
+  { BGP_NOTIFY_HEADER_BAD_MESLEN, "/Bad Message Length."},
+  { BGP_NOTIFY_HEADER_BAD_MESTYPE, "/Bad Message Type."}
 };
 int bgp_notify_head_msg_max = BGP_NOTIFY_HEADER_MAX;
 
 struct message bgp_notify_open_msg[] = 
 {
   { 0, "null" },
-  { BGP_NOTIFY_OPEN_UNSUP_VERSION, "/Unsupported Version Number" },
-  { BGP_NOTIFY_OPEN_BAD_PEER_AS, "/Bad Peer AS"},
-  { BGP_NOTIFY_OPEN_BAD_BGP_IDENT, "/Bad BGP Identifier"},
-  { BGP_NOTIFY_OPEN_UNSUP_PARAM, "/Unsupported Optional Parameter"},
-  { BGP_NOTIFY_OPEN_AUTH_FAILURE, "/Authentication Failure"},
-  { BGP_NOTIFY_OPEN_UNACEP_HOLDTIME, "/Unacceptable Hold Time"}, 
-  { BGP_NOTIFY_OPEN_UNSUP_CAPBL, "/Unsupported Capability"},
+  { BGP_NOTIFY_OPEN_UNSUP_VERSION, "/Unsupported Version Number." },
+  { BGP_NOTIFY_OPEN_BAD_PEER_AS, "/Bad Peer AS."},
+  { BGP_NOTIFY_OPEN_BAD_BGP_IDENT, "/Bad BGP Identifier."},
+  { BGP_NOTIFY_OPEN_UNSUP_PARAM, "/Unsupported Optional Parameter."},
+  { BGP_NOTIFY_OPEN_AUTH_FAILURE, "/Authentication Failure."},
+  { BGP_NOTIFY_OPEN_UNACEP_HOLDTIME, "/Unacceptable Hold Time."}, 
+  { BGP_NOTIFY_OPEN_UNSUP_CAPBL, "/Unsupported Capability."},
 };
 int bgp_notify_open_msg_max = BGP_NOTIFY_OPEN_MAX;
 
 struct message bgp_notify_update_msg[] = 
 {
   { 0, "null"}, 
-  { BGP_NOTIFY_UPDATE_MAL_ATTR, "/Malformed Attribute List"},
-  { BGP_NOTIFY_UPDATE_UNREC_ATTR, "/Unrecognized Well-known Attribute"},
-  { BGP_NOTIFY_UPDATE_MISS_ATTR, "/Missing Well-known Attribute"},
-  { BGP_NOTIFY_UPDATE_ATTR_FLAG_ERR, "/Attribute Flags Error"},
-  { BGP_NOTIFY_UPDATE_ATTR_LENG_ERR, "/Attribute Length Error"},
-  { BGP_NOTIFY_UPDATE_INVAL_ORIGIN, "/Invalid ORIGIN Attribute"},
-  { BGP_NOTIFY_UPDATE_AS_ROUTE_LOOP, "/AS Routing Loop"},
-  { BGP_NOTIFY_UPDATE_INVAL_NEXT_HOP, "/Invalid NEXT_HOP Attribute"},
-  { BGP_NOTIFY_UPDATE_OPT_ATTR_ERR, "/Optional Attribute Error"},
-  { BGP_NOTIFY_UPDATE_INVAL_NETWORK, "/Invalid Network Field"},
-  { BGP_NOTIFY_UPDATE_MAL_AS_PATH, "/Malformed AS_PATH"},
+  { BGP_NOTIFY_UPDATE_MAL_ATTR, "/Malformed Attribute List."},
+  { BGP_NOTIFY_UPDATE_UNREC_ATTR, "/Unrecognized Well-known Attribute."},
+  { BGP_NOTIFY_UPDATE_MISS_ATTR, "/Missing Well-known Attribute."},
+  { BGP_NOTIFY_UPDATE_ATTR_FLAG_ERR, "/Attribute Flags Error."},
+  { BGP_NOTIFY_UPDATE_ATTR_LENG_ERR, "/Attribute Length Error."},
+  { BGP_NOTIFY_UPDATE_INVAL_ORIGIN, "/Invalid ORIGIN Attribute."},
+  { BGP_NOTIFY_UPDATE_AS_ROUTE_LOOP, "/AS Routing Loop."},
+  { BGP_NOTIFY_UPDATE_INVAL_NEXT_HOP, "/Invalid NEXT_HOP Attribute."},
+  { BGP_NOTIFY_UPDATE_OPT_ATTR_ERR, "/Optional Attribute Error."},
+  { BGP_NOTIFY_UPDATE_INVAL_NETWORK, "/Invalid Network Field."},
+  { BGP_NOTIFY_UPDATE_MAL_AS_PATH, "/Malformed AS_PATH."},
 };
 int bgp_notify_update_msg_max = BGP_NOTIFY_UPDATE_MAX;
 
 struct message bgp_notify_cease_msg[] =
 {
   { 0, ""},
-  { BGP_NOTIFY_CEASE_MAX_PREFIX, "/Maximum Number of Prefixes Reached"},
-  { BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN, "/Administratively Shutdown"},
-  { BGP_NOTIFY_CEASE_PEER_UNCONFIG, "/Peer Unconfigured"},
-  { BGP_NOTIFY_CEASE_ADMIN_RESET, "/Administratively Reset"},
-  { BGP_NOTIFY_CEASE_CONNECT_REJECT, "/Connection Rejected"},
-  { BGP_NOTIFY_CEASE_CONFIG_CHANGE, "/Other Configuration Change"},
-  { BGP_NOTIFY_CEASE_COLLISION_RESOLUTION, "/Connection collision resolution"},
-  { BGP_NOTIFY_CEASE_OUT_OF_RESOURCE, "/Out of Resource"},
+  { BGP_NOTIFY_CEASE_MAX_PREFIX, "/Maximum Number of Prefixes Reached."},
+  { BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN, "/Administratively Shutdown."},
+  { BGP_NOTIFY_CEASE_PEER_UNCONFIG, "/Peer Unconfigured."},
+  { BGP_NOTIFY_CEASE_ADMIN_RESET, "/Administratively Reset."},
+  { BGP_NOTIFY_CEASE_CONNECT_REJECT, "/Connection Rejected."},
+  { BGP_NOTIFY_CEASE_CONFIG_CHANGE, "/Other Configuration Change."},
 };
 int bgp_notify_cease_msg_max = BGP_NOTIFY_CEASE_MAX;
 
 struct message bgp_notify_capability_msg[] = 
 {
   { 0, "null" },
-  { BGP_NOTIFY_CAPABILITY_INVALID_ACTION, "/Invalid Action Value" },
-  { BGP_NOTIFY_CAPABILITY_INVALID_LENGTH, "/Invalid Capability Length"},
-  { BGP_NOTIFY_CAPABILITY_MALFORMED_CODE, "/Malformed Capability Value"},
+  { BGP_NOTIFY_CAPABILITY_INVALID_ACTION, "/Invalid Action Value." },
+  { BGP_NOTIFY_CAPABILITY_INVALID_LENGTH, "/Invalid Capability Length."},
+  { BGP_NOTIFY_CAPABILITY_MALFORMED_CODE, "/Malformed Capability Value."},
 };
 int bgp_notify_capability_msg_max = BGP_NOTIFY_CAPABILITY_MAX;
 
 /* Origin strings. */
-const char *bgp_origin_str[] = {"i","e","?"};
-const char *bgp_origin_long_str[] = {"IGP","EGP","incomplete"};
+char *bgp_origin_str[] = {"i","e","?"};
+char *bgp_origin_long_str[] = {"IGP","EGP","incomplete"};
 
 /* Dump attribute. */
-int
+void
 bgp_dump_attr (struct peer *peer, struct attr *attr, char *buf, size_t size)
 {
+
   if (! attr)
-    return 0;
+    return;
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_NEXT_HOP)))
-    snprintf (buf, size, "nexthop %s", inet_ntoa (attr->nexthop));
-
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_ORIGIN)))
-    snprintf (buf + strlen (buf), size - strlen (buf), ", origin %s",
-	      bgp_origin_str[attr->origin]);
+  snprintf (buf, size, "nexthop %s", inet_ntoa (attr->nexthop));
+  snprintf (buf + strlen (buf), size - strlen (buf), ", origin %s",
+	    bgp_origin_str[attr->origin]);
 
 #ifdef HAVE_IPV6
-  if (attr->extra)
-    {
-      char addrbuf[BUFSIZ];
+  {
+    char addrbuf[BUFSIZ];
 
-      /* Add MP case. */
-      if (attr->extra->mp_nexthop_len == 16 
-          || attr->extra->mp_nexthop_len == 32)
-        snprintf (buf + strlen (buf), size - strlen (buf), ", mp_nexthop %s",
-                  inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global, 
-                             addrbuf, BUFSIZ));
+    /* Add MP case. */
+    if (attr->mp_nexthop_len == 16 || attr->mp_nexthop_len == 32)
+      snprintf (buf + strlen (buf), size - strlen (buf), ", mp_nexthop %s",
+		inet_ntop (AF_INET6, &attr->mp_nexthop_global, 
+			   addrbuf, BUFSIZ));
 
-      if (attr->extra->mp_nexthop_len == 32)
-        snprintf (buf + strlen (buf), size - strlen (buf), "(%s)",
-                  inet_ntop (AF_INET6, &attr->extra->mp_nexthop_local, 
-                             addrbuf, BUFSIZ));
-    }
+    if (attr->mp_nexthop_len == 32)
+      snprintf (buf + strlen (buf), size - strlen (buf), "(%s)",
+		inet_ntop (AF_INET6, &attr->mp_nexthop_local, 
+			   addrbuf, BUFSIZ));
+  }
 #endif /* HAVE_IPV6 */
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_LOCAL_PREF)))
+  if (peer_sort (peer) == BGP_PEER_IBGP)
     snprintf (buf + strlen (buf), size - strlen (buf), ", localpref %d",
 	      attr->local_pref);
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC))) 
+  if (attr->med)
     snprintf (buf + strlen (buf), size - strlen (buf), ", metric %d",
 	      attr->med);
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES))) 
+  if (attr->community) 
     snprintf (buf + strlen (buf), size - strlen (buf), ", community %s",
 	      community_str (attr->community));
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_ATOMIC_AGGREGATE)))
+  if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ATOMIC_AGGREGATE))
     snprintf (buf + strlen (buf), size - strlen (buf), ", atomic-aggregate");
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR)))
+  if (attr->aggregator_as)
     snprintf (buf + strlen (buf), size - strlen (buf), ", aggregated by %d %s",
-	      attr->extra->aggregator_as,
-	      inet_ntoa (attr->extra->aggregator_addr));
+	      attr->aggregator_as, inet_ntoa (attr->aggregator_addr));
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID)))
+  if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
     snprintf (buf + strlen (buf), size - strlen (buf), ", originator %s",
-	      inet_ntoa (attr->extra->originator_id));
+	      inet_ntoa (attr->originator_id));
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_CLUSTER_LIST)))
+  if (attr->flag & ATTR_FLAG_BIT (BGP_ATTR_CLUSTER_LIST))
     {
       int i;
 
-      snprintf (buf + strlen (buf), size - strlen (buf), ", clusterlist");
-      for (i = 0; i < attr->extra->cluster->length / 4; i++)
-	snprintf (buf + strlen (buf), size - strlen (buf), " %s",
-		  inet_ntoa (attr->extra->cluster->list[i]));
+      snprintf (buf + strlen (buf), size - strlen (buf), ", clusterlist ");
+      for (i = 0; i < attr->cluster->length / 4; i++)
+	snprintf (buf + strlen (buf), size - strlen (buf), "%s",
+		  inet_ntoa (attr->cluster->list[i]));
     }
 
-  if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_AS_PATH))) 
+  if (attr->aspath) 
     snprintf (buf + strlen (buf), size - strlen (buf), ", path %s",
 	      aspath_print (attr->aspath));
-
-  if (strlen (buf) > 1)
-    return 1;
-  else
-    return 0;
 }
 
 /* dump notify packet */
 void
-bgp_notify_print(struct peer *peer, struct bgp_notify *bgp_notify, 
-                 const char *direct)
+bgp_notify_print(struct peer *peer, struct bgp_notify *bgp_notify, char *direct)
 {
-  const char *subcode_str;
+  char *subcode_str;
 
   subcode_str = "";
 
@@ -271,16 +254,8 @@ bgp_notify_print(struct peer *peer, struct bgp_notify *bgp_notify,
       subcode_str = LOOKUP (bgp_notify_capability_msg, bgp_notify->subcode);
       break;
     }
-
-  if (bgp_flag_check (peer->bgp, BGP_FLAG_LOG_NEIGHBOR_CHANGES))
-    zlog_info ("%%NOTIFICATION: %s neighbor %s %d/%d (%s%s) %d bytes %s",
-              strcmp (direct, "received") == 0 ? "received from" : "sent to",
-              peer->host, bgp_notify->code, bgp_notify->subcode,
-               LOOKUP (bgp_notify_msg, bgp_notify->code),
-              subcode_str, bgp_notify->length,
-              bgp_notify->data ? bgp_notify->data : "");
-  else if (BGP_DEBUG (normal, NORMAL))
-    plog_debug (peer->log, "%s %s NOTIFICATION %d/%d (%s%s) %d bytes %s",
+  if (BGP_DEBUG (normal, NORMAL))
+    plog_info (peer->log, "%s %s NOTIFICATION %d/%d (%s%s) %d bytes %s",
 	       peer ? peer->host : "",
 	       direct, bgp_notify->code, bgp_notify->subcode,
 	       LOOKUP (bgp_notify_msg, bgp_notify->code),
@@ -595,49 +570,6 @@ ALIAS (no_debug_bgp_normal,
        UNDEBUG_STR
        BGP_STR)
 
-DEFUN (debug_bgp_zebra,
-       debug_bgp_zebra_cmd,
-       "debug bgp zebra",
-       DEBUG_STR
-       BGP_STR
-       "BGP Zebra messages\n")
-{
-  if (vty->node == CONFIG_NODE)
-    DEBUG_ON (zebra, ZEBRA);
-  else
-    {
-      TERM_DEBUG_ON (zebra, ZEBRA);
-      vty_out (vty, "BGP zebra debugging is on%s", VTY_NEWLINE);
-    }
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_debug_bgp_zebra,
-       no_debug_bgp_zebra_cmd,
-       "no debug bgp zebra",
-       NO_STR
-       DEBUG_STR
-       BGP_STR
-       "BGP Zebra messages\n")
-{
-  if (vty->node == CONFIG_NODE)
-    DEBUG_OFF (zebra, ZEBRA);
-  else
-    {
-      TERM_DEBUG_OFF (zebra, ZEBRA);
-      vty_out (vty, "BGP zebra debugging is off%s", VTY_NEWLINE);
-    }
-  return CMD_SUCCESS;
-}
-
-ALIAS (no_debug_bgp_zebra,
-       undebug_bgp_zebra_cmd,
-       "undebug bgp zebra",
-       UNDEBUG_STR
-       DEBUG_STR
-       BGP_STR
-       "BGP Zebra messages\n")
-
 DEFUN (no_debug_bgp_all,
        no_debug_bgp_all_cmd,
        "no debug all bgp",
@@ -653,7 +585,6 @@ DEFUN (no_debug_bgp_all,
   TERM_DEBUG_OFF (update, UPDATE_OUT);
   TERM_DEBUG_OFF (fsm, FSM);
   TERM_DEBUG_OFF (filter, FILTER);
-  TERM_DEBUG_OFF (zebra, ZEBRA);
   vty_out (vty, "All possible debugging has been turned off%s", VTY_NEWLINE);
       
   return CMD_SUCCESS;
@@ -691,13 +622,11 @@ DEFUN (show_debugging_bgp,
     vty_out (vty, "  BGP fsm debugging is on%s", VTY_NEWLINE);
   if (BGP_DEBUG (filter, FILTER))
     vty_out (vty, "  BGP filter debugging is on%s", VTY_NEWLINE);
-  if (BGP_DEBUG (zebra, ZEBRA))
-    vty_out (vty, "  BGP zebra debugging is on%s", VTY_NEWLINE);
   vty_out (vty, "%s", VTY_NEWLINE);
   return CMD_SUCCESS;
 }
 
-static int
+int
 bgp_config_write_debug (struct vty *vty)
 {
   int write = 0;
@@ -748,12 +677,6 @@ bgp_config_write_debug (struct vty *vty)
       write++;
     }
 
-  if (CONF_BGP_DEBUG (zebra, ZEBRA))
-    {
-      vty_out (vty, "debug bgp zebra%s", VTY_NEWLINE);
-      write++;
-    }
-
   return write;
 }
 
@@ -765,7 +688,7 @@ struct cmd_node debug_node =
 };
 
 void
-bgp_debug_init (void)
+bgp_debug_init ()
 {
   install_node (&debug_node, bgp_config_write_debug);
 
@@ -785,8 +708,6 @@ bgp_debug_init (void)
   install_element (CONFIG_NODE, &debug_bgp_update_direct_cmd);
   install_element (ENABLE_NODE, &debug_bgp_normal_cmd);
   install_element (CONFIG_NODE, &debug_bgp_normal_cmd);
-  install_element (ENABLE_NODE, &debug_bgp_zebra_cmd);
-  install_element (CONFIG_NODE, &debug_bgp_zebra_cmd);
 
   install_element (ENABLE_NODE, &no_debug_bgp_fsm_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_fsm_cmd);
@@ -806,9 +727,6 @@ bgp_debug_init (void)
   install_element (ENABLE_NODE, &no_debug_bgp_normal_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_normal_cmd);
   install_element (CONFIG_NODE, &no_debug_bgp_normal_cmd);
-  install_element (ENABLE_NODE, &no_debug_bgp_zebra_cmd);
-  install_element (ENABLE_NODE, &undebug_bgp_zebra_cmd);
-  install_element (CONFIG_NODE, &no_debug_bgp_zebra_cmd);
   install_element (ENABLE_NODE, &no_debug_bgp_all_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_all_cmd);
 }

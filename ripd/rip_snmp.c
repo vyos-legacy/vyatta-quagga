@@ -22,9 +22,6 @@
 #include <zebra.h>
 
 #ifdef HAVE_SNMP
-#ifdef HAVE_NETSNMP
-#include <net-snmp/net-snmp-config.h>
-#endif
 #include <asn1.h>
 #include <snmp.h>
 #include <snmp_impl.h>
@@ -40,6 +37,10 @@
 
 /* RIPv2-MIB. */
 #define RIPV2MIB 1,3,6,1,2,1,23
+
+/* Zebra enterprise RIP MIB.  This variable is used for register
+   RIPv2-MIB to SNMP agent under SMUX protocol.  */
+#define RIPDOID 1,3,6,1,4,1,3317,1,2,3
 
 /* RIPv2-MIB rip2Globals values. */
 #define RIP2GLOBALROUTECHANGES  1
@@ -86,6 +87,7 @@ SNMP_LOCAL_VARIABLES
 
 /* RIP-MIB instances. */
 oid rip_oid [] = { RIPV2MIB };
+oid ripd_oid [] = { RIPDOID };
 
 /* Interface cache table sorted by interface's address. */
 struct route_table *rip_ifaddr_table;
@@ -136,7 +138,7 @@ struct variable rip_variables[] =
   {RIP2PEERADDRESS,           IPADDRESS, RONLY, rip2PeerTable,
    /* RIP Peer Table. */
    3, {4, 1, 1}},
-  {RIP2PEERDOMAIN,            STRING, RONLY, rip2PeerTable,
+  {RIP2PEERDOMAIN,            INTEGER, RONLY, rip2PeerTable,
    3, {4, 1, 2}},
   {RIP2PEERLASTUPDATE,        TIMETICKS, RONLY, rip2PeerTable,
    3, {4, 1, 3}},
@@ -147,8 +149,6 @@ struct variable rip_variables[] =
   {RIP2PEERRCVBADROUTES,      COUNTER, RONLY, rip2PeerTable,
    3, {4, 1, 6}}
 };
-
-extern struct thread_master *master;
 
 static u_char *
 rip2Globals (struct variable *v, oid name[], size_t *length,
@@ -403,9 +403,9 @@ rip2IfConfSend (struct rip_interface *ri)
     return ripVersion1;
   else if (rip)
     {
-      if (rip->version_send == RIPv2)
+      if (rip->version == RIPv2)
 	return ripVersion2;
-      else if (rip->version_send == RIPv1)
+      else if (rip->version == RIPv1)
 	return ripVersion1;
     }
   return doNotSend;
@@ -419,19 +419,15 @@ rip2IfConfReceive (struct rip_interface *ri)
 #define rip1OrRip2      3
 #define doNotReceive    4
 
-  int recvv;
-
   if (! ri->running)
     return doNotReceive;
 
-  recvv = (ri->ri_receive == RI_RIP_UNSPEC) ?  rip->version_recv :
-                                               ri->ri_receive;
-  if (recvv == RI_RIP_VERSION_1_AND_2)
+  if (ri->ri_receive == RI_RIP_VERSION_1_AND_2)
     return rip1OrRip2;
-  else if (recvv & RIPv2)
-    return rip2;
-  else if (recvv & RIPv1)
-    return rip1;
+  else if (ri->ri_receive & RIPv2)
+    return ripVersion2;
+  else if (ri->ri_receive & RIPv1)
+    return ripVersion1;
   else
     return doNotReceive;
 }
@@ -512,7 +508,6 @@ rip2PeerTable (struct variable *v, oid name[], size_t *length,
 	       int exact, size_t *val_len, WriteMethod **write_method)
 {
   static struct in_addr addr;
-  static int domain = 0;
   static int version;
   /* static time_t uptime; */
 
@@ -532,8 +527,8 @@ rip2PeerTable (struct variable *v, oid name[], size_t *length,
       return (u_char *) &peer->addr;
 
     case RIP2PEERDOMAIN:
-      *val_len = 2;
-      return (u_char *) &domain;
+      *val_len = sizeof (int);
+      return (u_char *) &peer->domain;
 
     case RIP2PEERLASTUPDATE:
 #if 0 
@@ -575,7 +570,8 @@ rip_snmp_init ()
 {
   rip_ifaddr_table = route_table_init ();
 
-  smux_init (master);
+  smux_init (ripd_oid, sizeof (ripd_oid) / sizeof (oid));
   REGISTER_MIB("mibII/rip", rip_variables, variable, rip_oid);
+  smux_start ();
 }
 #endif /* HAVE_SNMP */

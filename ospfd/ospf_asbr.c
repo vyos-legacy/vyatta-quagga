@@ -43,16 +43,15 @@
 #include "ospfd/ospf_route.h"
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_dump.h"
-
 
 /* Remove external route. */
 void
-ospf_external_route_remove (struct ospf *ospf, struct prefix_ipv4 *p)
+ospf_external_route_remove (struct prefix_ipv4 *p)
 {
   struct route_node *rn;
   struct ospf_route *or;
 
-  rn = route_node_lookup (ospf->old_external_route, (struct prefix *) p);
+  rn = route_node_lookup (ospf_top->old_external_route, (struct prefix *) p);
   if (rn)
     if ((or = rn->info))
       {
@@ -77,12 +76,11 @@ ospf_external_route_remove (struct ospf *ospf, struct prefix_ipv4 *p)
 
 /* Lookup external route. */
 struct ospf_route *
-ospf_external_route_lookup (struct ospf *ospf,
-			    struct prefix_ipv4 *p)
+ospf_external_route_lookup (struct prefix_ipv4 *p)
 {
   struct route_node *rn;
 
-  rn = route_node_lookup (ospf->old_external_route, (struct prefix *) p);
+  rn = route_node_lookup (ospf_top->old_external_route, (struct prefix *) p);
   if (rn)
     {
       route_unlock_node (rn);
@@ -112,7 +110,7 @@ ospf_external_info_new (u_char type)
   return new;
 }
 
-static void
+void
 ospf_external_info_free (struct external_info *ei)
 {
   XFREE (MTYPE_OSPF_EXTERNAL_INFO, ei);
@@ -152,7 +150,7 @@ ospf_external_info_add (u_char type, struct prefix_ipv4 p,
       {
 	route_unlock_node (rn);
 	zlog_warn ("Redistribute[%s]: %s/%d already exists, discard.",
-		   ospf_redist_string(type),
+		   LOOKUP (ospf_redistributed_proto, type),
 		   inet_ntoa (p.prefix), p.prefixlen);
 	/* XFREE (MTYPE_OSPF_TMP, rn->info); */
 	return rn->info;
@@ -168,8 +166,8 @@ ospf_external_info_add (u_char type, struct prefix_ipv4 p,
   rn->info = new;
 
   if (IS_DEBUG_OSPF (lsa, LSA_GENERATE))
-    zlog_debug ("Redistribute[%s]: %s/%d external info created.",
-	       ospf_redist_string(type),
+    zlog_info ("Redistribute[%s]: %s/%d external info created.",
+	       LOOKUP (ospf_redistributed_proto, type),
 	       inet_ntoa (p.prefix), p.prefixlen);
   return new;
 }
@@ -205,15 +203,14 @@ ospf_external_info_lookup (u_char type, struct prefix_ipv4 *p)
 }
 
 struct ospf_lsa *
-ospf_external_info_find_lsa (struct ospf *ospf,
-			     struct prefix_ipv4 *p)
+ospf_external_info_find_lsa (struct prefix_ipv4 *p)
 {
   struct ospf_lsa *lsa;
   struct as_external_lsa *al;
   struct in_addr mask, id;
 
-  lsa = ospf_lsdb_lookup_by_id (ospf->lsdb, OSPF_AS_EXTERNAL_LSA,
-				p->prefix, ospf->router_id);
+  lsa = ospf_lsdb_lookup_by_id (ospf_top->lsdb, OSPF_AS_EXTERNAL_LSA,
+			       p->prefix, ospf_top->router_id);
 
   if (!lsa)
     return NULL;
@@ -225,8 +222,8 @@ ospf_external_info_find_lsa (struct ospf *ospf,
   if (mask.s_addr != al->mask.s_addr)
     {
       id.s_addr = p->prefix.s_addr | (~mask.s_addr);
-      lsa = ospf_lsdb_lookup_by_id (ospf->lsdb, OSPF_AS_EXTERNAL_LSA,
-				   id, ospf->router_id);
+      lsa = ospf_lsdb_lookup_by_id (ospf_top->lsdb, OSPF_AS_EXTERNAL_LSA,
+				   id, ospf_top->router_id);
       if (!lsa)
 	return NULL;
     }
@@ -237,7 +234,7 @@ ospf_external_info_find_lsa (struct ospf *ospf,
 
 /* Update ASBR status. */
 void
-ospf_asbr_status_update (struct ospf *ospf, u_char status)
+ospf_asbr_status_update (u_char status)
 {
   zlog_info ("ASBR[Status:%d]: Update", status);
 
@@ -245,32 +242,32 @@ ospf_asbr_status_update (struct ospf *ospf, u_char status)
   if (status)
     {
       /* Already ASBR. */
-      if (IS_OSPF_ASBR (ospf))
+      if (OSPF_IS_ASBR)
 	{
 	  zlog_info ("ASBR[Status:%d]: Already ASBR", status);
 	  return;
 	}
-      SET_FLAG (ospf->flags, OSPF_FLAG_ASBR);
+      SET_FLAG (ospf_top->flags, OSPF_FLAG_ASBR);
     }
   else
     {
       /* Already non ASBR. */
-      if (! IS_OSPF_ASBR (ospf))
+      if (! OSPF_IS_ASBR)
 	{
 	  zlog_info ("ASBR[Status:%d]: Already non ASBR", status);
 	  return;
 	}
-      UNSET_FLAG (ospf->flags, OSPF_FLAG_ASBR);
+      UNSET_FLAG (ospf_top->flags, OSPF_FLAG_ASBR);
     }
 
   /* Transition from/to status ASBR, schedule timer. */
-  ospf_spf_calculate_schedule (ospf);
-  OSPF_TIMER_ON (ospf->t_router_lsa_update,
+  ospf_spf_calculate_schedule ();
+  OSPF_TIMER_ON (ospf_top->t_router_lsa_update,
 		 ospf_router_lsa_update_timer, OSPF_LSA_UPDATE_DELAY);
 }
 
 void
-ospf_redistribute_withdraw (struct ospf *ospf, u_char type)
+ospf_redistribute_withdraw (u_char type)
 {
   struct route_node *rn;
   struct external_info *ei;
@@ -279,13 +276,12 @@ ospf_redistribute_withdraw (struct ospf *ospf, u_char type)
   if (EXTERNAL_INFO (type))
     for (rn = route_top (EXTERNAL_INFO (type)); rn; rn = route_next (rn))
       if ((ei = rn->info))
-	if (ospf_external_info_find_lsa (ospf, &ei->p))
+	if (ospf_external_info_find_lsa (&ei->p))
 	  {
 	    if (is_prefix_default (&ei->p) &&
-		ospf->default_originate != DEFAULT_ORIGINATE_NONE)
+		ospf_top->default_originate != DEFAULT_ORIGINATE_NONE)
 	      continue;
-	    ospf_external_lsa_flush (ospf, type, &ei->p,
-				     ei->ifindex /*, ei->nexthop */);
+	    ospf_external_lsa_flush (type, &ei->p, ei->ifindex, ei->nexthop);
 	    ospf_external_info_delete (type, ei->p);
 	  }
 }

@@ -67,7 +67,7 @@ struct ospf_mpls_te
   enum { disabled, enabled } status;
 
   /* List elements are zebra-interfaces (ifp), not ospf-interfaces (oi). */
-  struct list *iflist;
+  list iflist;
 
   /* Store Router-TLV in network byte order. */
   struct te_tlv_router_addr router_addr;
@@ -201,7 +201,7 @@ del_mpls_te_link (void *val)
 }
 
 static u_int32_t
-get_mpls_te_instance_value (void)
+get_mpls_te_instance_value ()
 {
   static u_int32_t seqno = 0;
 
@@ -252,12 +252,13 @@ out:
 static struct mpls_te_link *
 lookup_linkparams_by_ifp (struct interface *ifp)
 {
-  struct listnode *node, *nnode;
+  listnode node;
   struct mpls_te_link *lp;
 
-  for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
-    if (lp->ifp == ifp)
-      return lp;
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
+    if ((lp = getdata (node)) != NULL)
+      if (lp->ifp == ifp)
+        return lp;
 
   return NULL;
 }
@@ -265,13 +266,14 @@ lookup_linkparams_by_ifp (struct interface *ifp)
 static struct mpls_te_link *
 lookup_linkparams_by_instance (struct ospf_lsa *lsa)
 {
-  struct listnode *node;
+  listnode node;
   struct mpls_te_link *lp;
-  unsigned int key = GET_OPAQUE_ID (ntohl (lsa->data->id.s_addr));
+  int key = GET_OPAQUE_ID (ntohl (lsa->data->id.s_addr));
 
-  for (ALL_LIST_ELEMENTS_RO (OspfMplsTE.iflist, node, lp))
-    if (lp->instance == key)
-      return lp;
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
+    if ((lp = getdata (node)) != NULL)
+      if (lp->instance == key)
+        return lp;
 
   zlog_warn ("lookup_linkparams_by_instance: Entry not found: key(%x)", key);
   return NULL;
@@ -282,13 +284,14 @@ ospf_mpls_te_foreach_area (
   void (*func)(struct mpls_te_link *lp, enum sched_opcode),
   enum sched_opcode sched_opcode)
 {
-  struct listnode *node, *nnode; 
-  struct listnode *node2;
+  listnode node, node2;
   struct mpls_te_link *lp;
   struct ospf_area *area;
 
-  for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
     {
+      if ((lp = getdata (node)) == NULL)
+        continue;
       if ((area = lp->area) == NULL)
         continue;
       if (lp->flags & LPFLG_LOOKUP_DONE)
@@ -297,16 +300,17 @@ ospf_mpls_te_foreach_area (
       if (func != NULL)
         (* func)(lp, sched_opcode);
 
-      for (node2 = listnextnode (node); node2; node2 = listnextnode (node2))
-        if ((lp = listgetdata (node2)) != NULL)
+      for (node2 = nextnode (node); node2; nextnode (node2))
+        if ((lp = getdata (node2)) != NULL)
           if (lp->area != NULL)
             if (IPV4_ADDR_SAME (&lp->area->area_id, &area->area_id))
               lp->flags |= LPFLG_LOOKUP_DONE;
     }
 
-  for (ALL_LIST_ELEMENTS_RO (OspfMplsTE.iflist, node, lp))
-    if (lp->area != NULL)
-      lp->flags &= ~LPFLG_LOOKUP_DONE;
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
+    if ((lp = getdata (node)) != NULL)
+      if (lp->area != NULL)
+        lp->flags &= ~LPFLG_LOOKUP_DONE;
 
   return;
 }
@@ -410,8 +414,8 @@ set_linkparams_link_id (struct ospf_interface *oi, struct mpls_te_link *lp)
     {
     case OSPF_IFTYPE_POINTOPOINT:
       /* Take the router ID of the neighbor. */
-      if ((nbr = ospf_nbr_lookup_ptop (oi))
-	  && nbr->state == NSM_Full)
+      if (((nbr = ospf_nbr_lookup_ptop (oi->nbrs, oi->area->top->router_id)))
+      &&  (nbr->state == NSM_Full))
         {
           lp->link_id.value = nbr->router_id;
           done = 1;
@@ -425,7 +429,7 @@ set_linkparams_link_id (struct ospf_interface *oi, struct mpls_te_link *lp)
 
       if (nbr->state == NSM_Full
       || (IPV4_ADDR_SAME (&oi->address->u.prefix4, &DR (oi))
-      &&  ospf_nbr_count (oi, NSM_Full) > 0))
+      &&  ospf_nbr_count (oi->nbrs, NSM_Full) > 0))
         {
           lp->link_id.value = DR (oi);
           done = 1;
@@ -564,7 +568,7 @@ ospf_mpls_te_new_if (struct interface *ifp)
   if ((new = XMALLOC (MTYPE_OSPF_MPLS_TE_LINKPARAMS,
                   sizeof (struct mpls_te_link))) == NULL)
     {
-      zlog_warn ("ospf_mpls_te_new_if: XMALLOC: %s", safe_strerror (errno));
+      zlog_warn ("ospf_mpls_te_new_if: XMALLOC: %s", strerror (errno));
       goto out;
     }
   memset (new, 0, sizeof (struct mpls_te_link));
@@ -593,7 +597,7 @@ ospf_mpls_te_del_if (struct interface *ifp)
 
   if ((lp = lookup_linkparams_by_ifp (ifp)) != NULL)
     {
-      struct list *iflist = OspfMplsTE.iflist;
+      list iflist = OspfMplsTE.iflist;
 
       /* Dequeue listnode entry from the list. */
       listnode_delete (iflist, lp);
@@ -624,7 +628,7 @@ ospf_mpls_te_ism_change (struct ospf_interface *oi, int old_state)
       zlog_warn ("ospf_mpls_te_ism_change: Cannot get linkparams from OI(%s)?", IF_NAME (oi));
       goto out;
     }
-  if (oi->area == NULL || oi->area->ospf == NULL)
+  if (oi->area == NULL || oi->area->top == NULL)
     {
       zlog_warn ("ospf_mpls_te_ism_change: Cannot refer to OSPF from OI(%s)?",
 IF_NAME (oi));
@@ -874,7 +878,9 @@ ospf_mpls_te_lsa_new (struct ospf_area *area, struct mpls_te_link *lp)
   lsah = (struct lsa_header *) STREAM_DATA (s);
 
   options  = LSA_OPTIONS_GET (area);
-  options |= LSA_OPTIONS_NSSA_GET (area);
+#ifdef HAVE_NSSA
+  options |= LSA_NSSA_GET (area);
+#endif /* HAVE_NSSA */
   options |= OSPF_OPTION_O; /* Don't forget this :-) */
 
   lsa_type = OSPF_OPAQUE_AREA_LSA;
@@ -882,10 +888,10 @@ ospf_mpls_te_lsa_new (struct ospf_area *area, struct mpls_te_link *lp)
   lsa_id.s_addr = htonl (tmp);
 
   if (IS_DEBUG_OSPF (lsa, LSA_GENERATE))
-    zlog_debug ("LSA[Type%d:%s]: Create an Opaque-LSA/MPLS-TE instance", lsa_type, inet_ntoa (lsa_id));
+    zlog_info ("LSA[Type%d:%s]: Create an Opaque-LSA/MPLS-TE instance", lsa_type, inet_ntoa (lsa_id));
 
   /* Set opaque-LSA header fields. */
-  lsa_header_set (s, options, lsa_type, lsa_id, area->ospf->router_id);
+  lsa_header_set (s, options, lsa_type, lsa_id);
 
   /* Set opaque-LSA body fields. */
   ospf_mpls_te_lsa_body_set (s, lp);
@@ -904,7 +910,7 @@ ospf_mpls_te_lsa_new (struct ospf_area *area, struct mpls_te_link *lp)
   if ((new->data = ospf_lsa_data_new (length)) == NULL)
     {
       zlog_warn ("ospf_mpls_te_lsa_new: ospf_lsa_data_new() ?");
-      ospf_lsa_unlock (&new);
+      ospf_lsa_free (new);
       new = NULL;
       stream_free (s);
       goto out;
@@ -933,10 +939,10 @@ ospf_mpls_te_lsa_originate1 (struct ospf_area *area, struct mpls_te_link *lp)
     }
 
   /* Install this LSA into LSDB. */
-  if (ospf_lsa_install (area->ospf, NULL/*oi*/, new) == NULL)
+  if (ospf_lsa_install (NULL/*oi*/, new) == NULL)
     {
       zlog_warn ("ospf_mpls_te_lsa_originate1: ospf_lsa_install() ?");
-      ospf_lsa_unlock (&new);
+      ospf_lsa_free (new);
       goto out;
     }
 
@@ -944,7 +950,7 @@ ospf_mpls_te_lsa_originate1 (struct ospf_area *area, struct mpls_te_link *lp)
   lp->flags |= LPFLG_LSA_ENGAGED;
 
   /* Update new LSA origination count. */
-  area->ospf->lsa_originate_count++;
+  area->top->lsa_originate_count++;
 
   /* Flood new LSA through area. */
   ospf_flood_through_area (area, NULL/*nbr*/, new);
@@ -953,7 +959,7 @@ ospf_mpls_te_lsa_originate1 (struct ospf_area *area, struct mpls_te_link *lp)
     {
       char area_id[INET_ADDRSTRLEN];
       strcpy (area_id, inet_ntoa (area->area_id));
-      zlog_debug ("LSA[Type%d:%s]: Originate Opaque-LSA/MPLS-TE: Area(%s), Link(%s)", new->data->type, inet_ntoa (new->data->id), area_id, lp->ifp->name);
+      zlog_info ("LSA[Type%d:%s]: Originate Opaque-LSA/MPLS-TE: Area(%s), Link(%s)", new->data->type, inet_ntoa (new->data->id), area_id, lp->ifp->name);
       ospf_lsa_header_dump (new->data);
     }
 
@@ -966,7 +972,7 @@ static int
 ospf_mpls_te_lsa_originate (void *arg)
 {
   struct ospf_area *area = (struct ospf_area *) arg;
-  struct listnode *node, *nnode;
+  listnode node;
   struct mpls_te_link *lp;
   int rc = -1;
 
@@ -977,8 +983,10 @@ ospf_mpls_te_lsa_originate (void *arg)
       goto out;
     }
 
-  for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
     {
+      if ((lp = getdata (node)) == NULL)
+        continue;
       if (lp->area == NULL)
         continue;
       if (! IPV4_ADDR_SAME (&lp->area->area_id, &area->area_id))
@@ -1051,10 +1059,10 @@ ospf_mpls_te_lsa_refresh (struct ospf_lsa *lsa)
 
   /* Install this LSA into LSDB. */
   /* Given "lsa" will be freed in the next function. */
-  if (ospf_lsa_install (area->ospf, NULL/*oi*/, new) == NULL)
+  if (ospf_lsa_install (NULL/*oi*/, new) == NULL)
     {
       zlog_warn ("ospf_mpls_te_lsa_refresh: ospf_lsa_install() ?");
-      ospf_lsa_unlock (&new);
+      ospf_lsa_free (new);
       goto out;
     }
 
@@ -1064,7 +1072,7 @@ ospf_mpls_te_lsa_refresh (struct ospf_lsa *lsa)
   /* Debug logging. */
   if (IS_DEBUG_OSPF (lsa, LSA_GENERATE))
     {
-      zlog_debug ("LSA[Type%d:%s]: Refresh Opaque-LSA/MPLS-TE",
+      zlog_info ("LSA[Type%d:%s]: Refresh Opaque-LSA/MPLS-TE",
 		 new->data->type, inet_ntoa (new->data->id));
       ospf_lsa_header_dump (new->data);
     }
@@ -1123,7 +1131,7 @@ show_vty_router_addr (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Router-Address: %s%s", inet_ntoa (top->value), VTY_NEWLINE);
   else
-    zlog_debug ("    Router-Address: %s", inet_ntoa (top->value));
+    zlog_info ("    Router-Address: %s", inet_ntoa (top->value));
 
   return TLV_SIZE (tlvh);
 }
@@ -1136,7 +1144,7 @@ show_vty_link_header (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Link: %u octets of data%s", ntohs (top->header.length), VTY_NEWLINE);
   else
-    zlog_debug ("    Link: %u octets of data", ntohs (top->header.length));
+    zlog_info ("    Link: %u octets of data", ntohs (top->header.length));
 
   return TLV_HDR_SIZE;	/* Here is special, not "TLV_SIZE". */
 }
@@ -1163,7 +1171,7 @@ show_vty_link_subtlv_link_type (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Link-Type: %s (%u)%s", cp, top->link_type.value, VTY_NEWLINE);
   else
-    zlog_debug ("    Link-Type: %s (%u)", cp, top->link_type.value);
+    zlog_info ("    Link-Type: %s (%u)", cp, top->link_type.value);
 
   return TLV_SIZE (tlvh);
 }
@@ -1177,7 +1185,7 @@ show_vty_link_subtlv_link_id (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Link-ID: %s%s", inet_ntoa (top->value), VTY_NEWLINE);
   else
-    zlog_debug ("    Link-ID: %s", inet_ntoa (top->value));
+    zlog_info ("    Link-ID: %s", inet_ntoa (top->value));
 
   return TLV_SIZE (tlvh);
 }
@@ -1194,14 +1202,14 @@ show_vty_link_subtlv_lclif_ipaddr (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Local Interface IP Address(es): %d%s", n, VTY_NEWLINE);
   else
-    zlog_debug ("    Local Interface IP Address(es): %d", n);
+    zlog_info ("    Local Interface IP Address(es): %d", n);
 
   for (i = 0; i < n; i++)
     {
       if (vty != NULL)
         vty_out (vty, "    #%d: %s%s", i, inet_ntoa (top->value[i]), VTY_NEWLINE);
       else
-        zlog_debug ("      #%d: %s", i, inet_ntoa (top->value[i]));
+        zlog_info ("      #%d: %s", i, inet_ntoa (top->value[i]));
     }
   return TLV_SIZE (tlvh);
 }
@@ -1217,14 +1225,14 @@ show_vty_link_subtlv_rmtif_ipaddr (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Remote Interface IP Address(es): %d%s", n, VTY_NEWLINE);
   else
-    zlog_debug ("    Remote Interface IP Address(es): %d", n);
+    zlog_info ("    Remote Interface IP Address(es): %d", n);
 
   for (i = 0; i < n; i++)
     {
       if (vty != NULL)
         vty_out (vty, "    #%d: %s%s", i, inet_ntoa (top->value[i]), VTY_NEWLINE);
       else
-        zlog_debug ("      #%d: %s", i, inet_ntoa (top->value[i]));
+        zlog_info ("      #%d: %s", i, inet_ntoa (top->value[i]));
     }
   return TLV_SIZE (tlvh);
 }
@@ -1238,7 +1246,7 @@ show_vty_link_subtlv_te_metric (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Traffic Engineering Metric: %u%s", (u_int32_t) ntohl (top->value), VTY_NEWLINE);
   else
-    zlog_debug ("    Traffic Engineering Metric: %u", (u_int32_t) ntohl (top->value));
+    zlog_info ("    Traffic Engineering Metric: %u", (u_int32_t) ntohl (top->value));
 
   return TLV_SIZE (tlvh);
 }
@@ -1255,7 +1263,7 @@ show_vty_link_subtlv_max_bw (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Maximum Bandwidth: %g (Bytes/sec)%s", fval, VTY_NEWLINE);
   else
-    zlog_debug ("    Maximum Bandwidth: %g (Bytes/sec)", fval);
+    zlog_info ("    Maximum Bandwidth: %g (Bytes/sec)", fval);
 
   return TLV_SIZE (tlvh);
 }
@@ -1272,7 +1280,7 @@ show_vty_link_subtlv_max_rsv_bw (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Maximum Reservable Bandwidth: %g (Bytes/sec)%s", fval, VTY_NEWLINE);
   else
-    zlog_debug ("    Maximum Reservable Bandwidth: %g (Bytes/sec)", fval);
+    zlog_info ("    Maximum Reservable Bandwidth: %g (Bytes/sec)", fval);
 
   return TLV_SIZE (tlvh);
 }
@@ -1291,7 +1299,7 @@ show_vty_link_subtlv_unrsv_bw (struct vty *vty, struct te_tlv_header *tlvh)
       if (vty != NULL)
         vty_out (vty, "  Unreserved Bandwidth (pri %d): %g (Bytes/sec)%s", i, fval, VTY_NEWLINE);
       else
-        zlog_debug ("    Unreserved Bandwidth (pri %d): %g (Bytes/sec)", i, fval);
+        zlog_info ("    Unreserved Bandwidth (pri %d): %g (Bytes/sec)", i, fval);
     }
 
   return TLV_SIZE (tlvh);
@@ -1306,7 +1314,7 @@ show_vty_link_subtlv_rsc_clsclr (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Resource class/color: 0x%x%s", (u_int32_t) ntohl (top->value), VTY_NEWLINE);
   else
-    zlog_debug ("    Resource Class/Color: 0x%x", (u_int32_t) ntohl (top->value));
+    zlog_info ("    Resource Class/Color: 0x%x", (u_int32_t) ntohl (top->value));
 
   return TLV_SIZE (tlvh);
 }
@@ -1317,7 +1325,7 @@ show_vty_unknown_tlv (struct vty *vty, struct te_tlv_header *tlvh)
   if (vty != NULL)
     vty_out (vty, "  Unknown TLV: [type(0x%x), length(0x%x)]%s", ntohs (tlvh->type), ntohs (tlvh->length), VTY_NEWLINE);
   else
-    zlog_debug ("    Unknown TLV: [type(0x%x), length(0x%x)]", ntohs (tlvh->type), ntohs (tlvh->length));
+    zlog_info ("    Unknown TLV: [type(0x%x), length(0x%x)]", ntohs (tlvh->type), ntohs (tlvh->length));
 
   return TLV_SIZE (tlvh);
 }
@@ -1470,14 +1478,14 @@ DEFUN (mpls_te,
        "Configure MPLS-TE parameters\n"
        "Enable the MPLS-TE functionality\n")
 {
-  struct listnode *node, *nnode;
+  listnode node;
   struct mpls_te_link *lp;
 
   if (OspfMplsTE.status == enabled)
     return CMD_SUCCESS;
 
   if (IS_DEBUG_OSPF_EVENT)
-    zlog_debug ("MPLS-TE: OFF -> ON");
+    zlog_info ("MPLS-TE: OFF -> ON");
 
   OspfMplsTE.status = enabled;
 
@@ -1487,8 +1495,9 @@ DEFUN (mpls_te,
    * 1) MPLS-TE was disabled at startup time, but now become enabled.
    * 2) MPLS-TE was once enabled then disabled, and now enabled again.
    */
-  for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
-    initialize_linkparams (lp);
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
+    if ((lp = getdata (node)) != NULL)
+      initialize_linkparams (lp);
 
   ospf_mpls_te_foreach_area (ospf_mpls_te_lsa_schedule, REORIGINATE_PER_AREA);
 
@@ -1508,21 +1517,22 @@ DEFUN (no_mpls_te,
        "Configure MPLS-TE parameters\n"
        "Disable the MPLS-TE functionality\n")
 {
-  struct listnode *node, *nnode;
+  listnode node;
   struct mpls_te_link *lp;
 
   if (OspfMplsTE.status == disabled)
     return CMD_SUCCESS;
 
   if (IS_DEBUG_OSPF_EVENT)
-    zlog_debug ("MPLS-TE: ON -> OFF");
+    zlog_info ("MPLS-TE: ON -> OFF");
 
   OspfMplsTE.status = disabled;
 
-  for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
-    if (lp->area != NULL)
-      if (lp->flags & LPFLG_LSA_ENGAGED)
-        ospf_mpls_te_lsa_schedule (lp, FLUSH_THIS_LSA);
+  for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
+    if ((lp = getdata (node)) != NULL)
+      if (lp->area != NULL)
+        if (lp->flags & LPFLG_LSA_ENGAGED)
+          ospf_mpls_te_lsa_schedule (lp, FLUSH_THIS_LSA);
 
   return CMD_SUCCESS;
 }
@@ -1544,9 +1554,9 @@ DEFUN (mpls_te_router_addr,
     }
 
   if (ntohs (ra->header.type) == 0
-      || ntohl (ra->value.s_addr) != ntohl (value.s_addr))
+  ||  ntohl (ra->value.s_addr) != ntohl (value.s_addr))
     {
-      struct listnode *node, *nnode;
+      listnode node;
       struct mpls_te_link *lp;
       int need_to_reoriginate = 0;
 
@@ -1555,8 +1565,10 @@ DEFUN (mpls_te_router_addr,
       if (OspfMplsTE.status == disabled)
         goto out;
 
-      for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
+      for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
         {
+          if ((lp = getdata (node)) == NULL)
+            continue;
           if (lp->area == NULL)
             continue;
 
@@ -1566,9 +1578,10 @@ DEFUN (mpls_te_router_addr,
               break;
             }
         }
-      
-      for (ALL_LIST_ELEMENTS (OspfMplsTE.iflist, node, nnode, lp))
+      for (node = listhead (OspfMplsTE.iflist); node; nextnode (node))
         {
+          if ((lp = getdata (node)) == NULL)
+            continue;
           if (lp->area == NULL)
             continue;
 
@@ -1644,7 +1657,7 @@ DEFUN (mpls_te_link_maxbw,
   ntohf (&lp->max_bw.value, &f1);
   if (sscanf (argv[0], "%g", &f2) != 1)
     {
-      vty_out (vty, "mpls_te_link_maxbw: fscanf: %s%s", safe_strerror (errno), VTY_NEWLINE);
+      vty_out (vty, "mpls_te_link_maxbw: fscanf: %s%s", strerror (errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
 
@@ -1686,7 +1699,7 @@ DEFUN (mpls_te_link_max_rsv_bw,
   ntohf (&lp->max_rsv_bw.value, &f1);
   if (sscanf (argv[0], "%g", &f2) != 1)
     {
-      vty_out (vty, "mpls_te_link_max_rsv_bw: fscanf: %s%s", safe_strerror (errno), VTY_NEWLINE);
+      vty_out (vty, "mpls_te_link_max_rsv_bw: fscanf: %s%s", strerror (errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
 
@@ -1730,14 +1743,14 @@ DEFUN (mpls_te_link_unrsv_bw,
   /* We don't have to consider about range check here. */
   if (sscanf (argv[0], "%d", &priority) != 1)
     {
-      vty_out (vty, "mpls_te_link_unrsv_bw: fscanf: %s%s", safe_strerror (errno), VTY_NEWLINE);
+      vty_out (vty, "mpls_te_link_unrsv_bw: fscanf: %s%s", strerror (errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
 
   ntohf (&lp->unrsv_bw.value [priority], &f1);
   if (sscanf (argv[1], "%g", &f2) != 1)
     {
-      vty_out (vty, "mpls_te_link_unrsv_bw: fscanf: %s%s", safe_strerror (errno), VTY_NEWLINE);
+      vty_out (vty, "mpls_te_link_unrsv_bw: fscanf: %s%s", strerror (errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
 
@@ -1778,7 +1791,7 @@ DEFUN (mpls_te_link_rsc_clsclr,
 
   if (sscanf (argv[0], "0x%lx", &value) != 1)
     {
-      vty_out (vty, "mpls_te_link_rsc_clsclr: fscanf: %s%s", safe_strerror (errno), VTY_NEWLINE);
+      vty_out (vty, "mpls_te_link_rsc_clsclr: fscanf: %s%s", strerror (errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
 
@@ -1865,14 +1878,12 @@ DEFUN (show_mpls_te_link,
        "Interface name\n")
 {
   struct interface *ifp;
-  struct listnode *node, *nnode;
+  listnode node;
 
   /* Show All Interfaces. */
   if (argc == 0)
-    {
-      for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
-        show_mpls_te_link_sub (vty, ifp);
-    }
+    for (node = listhead (iflist); node; nextnode (node))
+      show_mpls_te_link_sub (vty, node->data);
   /* Interface name is specified. */
   else
     {

@@ -27,7 +27,6 @@
 #include "command.h"
 #include "sockunion.h"
 #include "buffer.h"
-#include "log.h"
 
 struct filter_cisco
 {
@@ -85,10 +84,10 @@ struct access_master
   struct access_list_list str;
 
   /* Hook function which is executed when new access_list is added. */
-  void (*add_hook) (struct access_list *);
+  void (*add_hook) ();
 
   /* Hook function which is executed when access_list is deleted. */
-  void (*delete_hook) (struct access_list *);
+  void (*delete_hook) ();
 };
 
 /* Static structure for IPv4 access_list's master. */
@@ -111,7 +110,7 @@ static struct access_master access_master_ipv6 =
 };
 #endif /* HAVE_IPV6 */
 
-static struct access_master *
+struct access_master *
 access_master_get (afi_t afi)
 {
   if (afi == AFI_IP)
@@ -124,21 +123,21 @@ access_master_get (afi_t afi)
 }
 
 /* Allocate new filter structure. */
-static struct filter *
-filter_new (void)
+struct filter *
+filter_new ()
 {
   return (struct filter *) XCALLOC (MTYPE_ACCESS_FILTER,
 				    sizeof (struct filter));
 }
 
-static void
+void
 filter_free (struct filter *filter)
 {
   XFREE (MTYPE_ACCESS_FILTER, filter);
 }
 
 /* Return string of filter_type. */
-const static char *
+static char *
 filter_type_str (struct filter *filter)
 {
   switch (filter->type)
@@ -210,22 +209,22 @@ filter_match_zebra (struct filter *mfilter, struct prefix *p)
 }
 
 /* Allocate new access list structure. */
-static struct access_list *
-access_list_new (void)
+struct access_list *
+access_list_new ()
 {
   return (struct access_list *) XCALLOC (MTYPE_ACCESS_LIST,
 					 sizeof (struct access_list));
 }
 
 /* Free allocated access_list. */
-static void
+void
 access_list_free (struct access_list *access)
 {
   XFREE (MTYPE_ACCESS_LIST, access);
 }
 
 /* Delete access_list from access_master and free it. */
-static void
+void
 access_list_delete (struct access_list *access)
 {
   struct filter *filter;
@@ -267,10 +266,10 @@ access_list_delete (struct access_list *access)
 
 /* Insert new access list to list of access_list.  Each acceess_list
    is sorted by the name. */
-static struct access_list *
-access_list_insert (afi_t afi, const char *name)
+struct access_list *
+access_list_insert (afi_t afi, char *name)
 {
-  unsigned int i;
+  int i;
   long number;
   struct access_list *access;
   struct access_list *point;
@@ -359,7 +358,7 @@ access_list_insert (afi_t afi, const char *name)
 
 /* Lookup access_list from list of access_list by name. */
 struct access_list *
-access_list_lookup (afi_t afi, const char *name)
+access_list_lookup (afi_t afi, char *name)
 {
   struct access_list *access;
   struct access_master *master;
@@ -384,8 +383,8 @@ access_list_lookup (afi_t afi, const char *name)
 
 /* Get access list from list of access_list.  If there isn't matched
    access_list create new one and return it. */
-static struct access_list *
-access_list_get (afi_t afi, const char *name)
+struct access_list *
+access_list_get (afi_t afi, char *name)
 {
   struct access_list *access;
 
@@ -445,7 +444,7 @@ access_list_delete_hook (void (*func) (struct access_list *access))
 }
 
 /* Add new filter to the end of specified access_list. */
-static void
+void
 access_list_filter_add (struct access_list *access, struct filter *filter)
 {
   filter->next = NULL;
@@ -474,7 +473,7 @@ access_list_empty (struct access_list *access)
 
 /* Delete filter from specified access_list.  If there is hook
    function execute it. */
-static void
+void
 access_list_filter_delete (struct access_list *access, struct filter *filter)
 {
   struct access_master *master;
@@ -514,7 +513,7 @@ access_list_filter_delete (struct access_list *access, struct filter *filter)
   host                 A single host address
 */
 
-static struct filter *
+struct filter *
 filter_lookup_cisco (struct access_list *access, struct filter *mnew)
 {
   struct filter *mfilter;
@@ -548,7 +547,7 @@ filter_lookup_cisco (struct access_list *access, struct filter *mnew)
   return NULL;
 }
 
-static struct filter *
+struct filter *
 filter_lookup_zebra (struct access_list *access, struct filter *mnew)
 {
   struct filter *mfilter;
@@ -569,8 +568,8 @@ filter_lookup_zebra (struct access_list *access, struct filter *mnew)
   return NULL;
 }
 
-static int
-vty_access_list_remark_unset (struct vty *vty, afi_t afi, const char *name)
+int
+vty_access_list_remark_unset (struct vty *vty, afi_t afi, char *name)
 {
   struct access_list *access;
 
@@ -594,10 +593,10 @@ vty_access_list_remark_unset (struct vty *vty, afi_t afi, const char *name)
   return CMD_SUCCESS;
 }
 
-static int
-filter_set_cisco (struct vty *vty, const char *name_str, const char *type_str,
-		  const char *addr_str, const char *addr_mask_str,
-		  const char *mask_str, const char *mask_mask_str,
+int
+filter_set_cisco (struct vty *vty, char *name_str, char *type_str,
+		  char *addr_str, char *addr_mask_str,
+		  char *mask_str, char *mask_mask_str,
 		  int extended, int set)
 {
   int ret;
@@ -1153,9 +1152,9 @@ DEFUN (no_access_list_extended_host_any,
 			   "255.255.255.255", 1, 0);
 }
 
-static int
-filter_set_zebra (struct vty *vty, const char *name_str, const char *type_str,
-		  afi_t afi, const char *prefix_str, int exact, int set)
+int
+filter_set_zebra (struct vty *vty, char *name_str, char *type_str,
+		  afi_t afi, char *prefix_str, int exact, int set)
 {
   int ret;
   enum filter_type type;
@@ -1360,6 +1359,8 @@ DEFUN (access_list_remark,
        "Comment up to 100 characters\n")
 {
   struct access_list *access;
+  struct buffer *b;
+  int i;
 
   access = access_list_get (AFI_IP, argv[0]);
 
@@ -1368,7 +1369,19 @@ DEFUN (access_list_remark,
       XFREE (MTYPE_TMP, access->remark);
       access->remark = NULL;
     }
-  access->remark = argv_concat(argv, argc, 1);
+
+  /* Below is remark get codes. */
+  b = buffer_new (1024);
+  for (i = 1; i < argc; i++)
+    {
+      buffer_putstr (b, (u_char *)argv[i]);
+      buffer_putc (b, ' ');
+    }
+  buffer_putc (b, '\0');
+
+  access->remark = buffer_getstr (b);
+
+  buffer_free (b);
 
   return CMD_SUCCESS;
 }
@@ -1528,6 +1541,8 @@ DEFUN (ipv6_access_list_remark,
        "Comment up to 100 characters\n")
 {
   struct access_list *access;
+  struct buffer *b;
+  int i;
 
   access = access_list_get (AFI_IP6, argv[0]);
 
@@ -1536,7 +1551,19 @@ DEFUN (ipv6_access_list_remark,
       XFREE (MTYPE_TMP, access->remark);
       access->remark = NULL;
     }
-  access->remark = argv_concat(argv, argc, 1);
+
+  /* Below is remark get codes. */
+  b = buffer_new (1024);
+  for (i = 1; i < argc; i++)
+    {
+      buffer_putstr (b, (u_char *)argv[i]);
+      buffer_putc (b, ' ');
+    }
+  buffer_putc (b, '\0');
+
+  access->remark = buffer_getstr (b);
+
+  buffer_free (b);
 
   return CMD_SUCCESS;
 }
@@ -1568,8 +1595,8 @@ void config_write_access_zebra (struct vty *, struct filter *);
 void config_write_access_cisco (struct vty *, struct filter *);
 
 /* show access-list command. */
-static int
-filter_show (struct vty *vty, const char *name, afi_t afi)
+int
+filter_show (struct vty *vty, char *name, afi_t afi)
 {
   struct access_list *access;
   struct access_master *master;
@@ -1580,11 +1607,6 @@ filter_show (struct vty *vty, const char *name, afi_t afi)
   master = access_master_get (afi);
   if (master == NULL)
     return 0;
-
-  /* Print the name of the protocol */
-  if (zlog_default)
-      vty_out (vty, "%s:%s",
-      zlog_proto_names[zlog_default->protocol], VTY_NEWLINE);
 
   for (access = master->num.head; access; access = access->next)
     {
@@ -1788,7 +1810,7 @@ config_write_access_zebra (struct vty *vty, struct filter *mfilter)
   vty_out (vty, "%s", VTY_NEWLINE);
 }
 
-static int
+int
 config_write_access (struct vty *vty, afi_t afi)
 {
   struct access_list *access;
@@ -1864,14 +1886,14 @@ struct cmd_node access_node =
   1
 };
 
-static int
+int
 config_write_access_ipv4 (struct vty *vty)
 {
   return config_write_access (vty, AFI_IP);
 }
 
-static void
-access_list_reset_ipv4 (void)
+void
+access_list_reset_ipv4 ()
 {
   struct access_list *access;
   struct access_list *next;
@@ -1900,8 +1922,8 @@ access_list_reset_ipv4 (void)
 }
 
 /* Install vty related command. */
-static void
-access_list_init_ipv4 (void)
+void
+access_list_init_ipv4 ()
 {
   install_node (&access_node, config_write_access_ipv4);
 
@@ -1960,14 +1982,14 @@ struct cmd_node access_ipv6_node =
   1
 };
 
-static int
+int
 config_write_access_ipv6 (struct vty *vty)
 {
   return config_write_access (vty, AFI_IP6);
 }
 
-static void
-access_list_reset_ipv6 (void)
+void
+access_list_reset_ipv6 ()
 {
   struct access_list *access;
   struct access_list *next;
@@ -1995,8 +2017,8 @@ access_list_reset_ipv6 (void)
   assert (master->str.tail == NULL);
 }
 
-static void
-access_list_init_ipv6 (void)
+void
+access_list_init_ipv6 ()
 {
   install_node (&access_ipv6_node, config_write_access_ipv6);
 

@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_REGEX_H
-#define _QUAGGA_BGP_REGEX_H
-
 #include <zebra.h>
 
 #ifdef HAVE_GNU_REGEX
@@ -29,8 +26,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "regex-gnu.h"
 #endif /* HAVE_GNU_REGEX */
 
-extern void bgp_regex_free (regex_t *regex);
-extern regex_t *bgp_regcomp (const char *str);
-extern int bgp_regexec (regex_t *regex, struct aspath *aspath);
-
-#endif /* _QUAGGA_BGP_REGEX_H */
+void bgp_regex_free (regex_t *regex);
+regex_t *bgp_regcomp (char *str);
+int bgp_regexec (regex_t *regex, struct aspath *aspath);

@@ -21,7 +21,7 @@
 
 #include <zebra.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "getopt.h"
 #include "thread.h"
 #include "command.h"
@@ -30,8 +30,6 @@
 #include "filter.h"
 #include "keychain.h"
 #include "log.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "ripd/ripd.h"
 
@@ -42,40 +40,15 @@ static struct option longopts[] =
   { "config_file", required_argument, NULL, 'f'},
   { "pid_file",    required_argument, NULL, 'i'},
   { "help",        no_argument,       NULL, 'h'},
-  { "dryrun",      no_argument,       NULL, 'C'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
   { "retain",      no_argument,       NULL, 'r'},
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
   { 0 }
 };
 
-/* ripd privileges */
-zebra_capabilities_t _caps_p [] = 
-{
-  ZCAP_NET_RAW,
-  ZCAP_BIND
-};
-
-struct zebra_privs_t ripd_privs =
-{
-#if defined(QUAGGA_USER)
-  .user = QUAGGA_USER,
-#endif
-#if defined QUAGGA_GROUP
-  .group = QUAGGA_GROUP,
-#endif
-#ifdef VTY_GROUP
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = 2,
-  .cap_num_i = 0
-};
-
 /* Configuration file and directory. */
+char config_current[] = RIPD_DEFAULT_CONFIG;
 char config_default[] = SYSCONFDIR RIPD_DEFAULT_CONFIG;
 char *config_file = NULL;
 
@@ -94,7 +67,7 @@ int vty_port = RIP_VTY_PORT;
 struct thread_master *master;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_RIPD_PID;
+char *pid_file = PATH_RIPD_PID;
 
 /* Help information display. */
 static void
@@ -111,10 +84,7 @@ Daemon which manages RIP version 1 and 2.\n\n\
 -i, --pid_file     Set process identifier file name\n\
 -A, --vty_addr     Set vty's bind address\n\
 -P, --vty_port     Set vty's port number\n\
--C, --dryrun       Check configuration for validity and exit\n\
 -r, --retain       When program terminates, retain added route by ripd.\n\
--u, --user         User to run as\n\
--g, --group        Group to run as\n\
 -v, --version      Print program version\n\
 -h, --help         Display this help and exit\n\
 \n\
@@ -124,9 +94,32 @@ Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
   exit (status);
 }
 
+/* Signale wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
+{
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
+
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
 /* SIGHUP handler. */
-static void 
-sighup (void)
+void 
+sighup (int sig)
 {
   zlog_info ("SIGHUP received");
   rip_clean ();
@@ -134,7 +127,7 @@ sighup (void)
   zlog_info ("ripd restarting!");
 
   /* Reload config file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
   /* Create VTY's socket */
   vty_serv_sock (vty_addr, vty_port, RIP_VTYSH_PATH);
@@ -143,10 +136,10 @@ sighup (void)
 }
 
 /* SIGINT handler. */
-static void
-sigint (void)
+void
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal");
+  zlog (NULL, LOG_INFO, "Terminating on signal");
 
   if (! retain_mode)
     rip_clean ();
@@ -155,31 +148,22 @@ sigint (void)
 }
 
 /* SIGUSR1 handler. */
-static void
-sigusr1 (void)
+void
+sigusr1 (int sig)
 {
   zlog_rotate (NULL);
 }
 
-static struct quagga_signal_t ripd_signals[] =
+/* Initialization of signal handles. */
+void
+signal_init ()
 {
-  { 
-    .signal = SIGHUP,
-    .handler = &sighup,
-  },
-  { 
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigint,
-  },
-};  
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigint);
+  signal_set (SIGPIPE, SIG_IGN);
+  signal_set (SIGUSR1, sigusr1);
+}
 
 /* Main routine of ripd. */
 int
@@ -187,7 +171,6 @@ main (int argc, char **argv)
 {
   char *p;
   int daemon_mode = 0;
-  int dryrun = 0;
   char *progname;
   struct thread thread;
 
@@ -198,7 +181,7 @@ main (int argc, char **argv)
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
   /* First of all we need logging init. */
-  zlog_default = openzlog (progname, ZLOG_RIP,
+  zlog_default = openzlog (progname, ZLOG_NOLOG, ZLOG_RIP,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
   /* Command line option parse. */
@@ -206,7 +189,7 @@ main (int argc, char **argv)
     {
       int opt;
 
-      opt = getopt_long (argc, argv, "df:i:hA:P:u:g:rvC", longopts, 0);
+      opt = getopt_long (argc, argv, "df:hA:P:rv", longopts, 0);
     
       if (opt == EOF)
 	break;
@@ -228,27 +211,10 @@ main (int argc, char **argv)
           pid_file = optarg;
           break;
 	case 'P':
-          /* Deal with atoi() returning 0 on failure, and ripd not
-             listening on rip port... */
-          if (strcmp(optarg, "0") == 0) 
-            {
-              vty_port = 0;
-              break;
-            } 
-          vty_port = atoi (optarg);
-          vty_port = (vty_port ? vty_port : RIP_VTY_PORT);
+	  vty_port = atoi (optarg);
 	  break;
 	case 'r':
 	  retain_mode = 1;
-	  break;
-	case 'C':
-	  dryrun = 1;
-	  break;
-	case 'u':
-	  ripd_privs.user = optarg;
-	  break;
-	case 'g':
-	  ripd_privs.group = optarg;
 	  break;
 	case 'v':
 	  print_version (progname);
@@ -267,10 +233,9 @@ main (int argc, char **argv)
   master = thread_master_create ();
 
   /* Library initialization. */
-  zprivs_init (&ripd_privs);
-  signal_init (master, Q_SIGC(ripd_signals), ripd_signals);
+  signal_init ();
   cmd_init (1);
-  vty_init (master);
+  vty_init ();
   memory_init ();
   keychain_init ();
 
@@ -284,12 +249,8 @@ main (int argc, char **argv)
   sort_node ();
 
   /* Get configuration file. */
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Start execution only if not in dry-run mode */
-  if(dryrun)
-    return (0);
-  
   /* Change to the daemon program. */
   if (daemon_mode)
     daemon (0, 0);
@@ -300,13 +261,10 @@ main (int argc, char **argv)
   /* Create VTY's socket */
   vty_serv_sock (vty_addr, vty_port, RIP_VTYSH_PATH);
 
-  /* Print banner. */
-  zlog_notice ("RIPd %s starting: vty@%d", QUAGGA_VERSION, vty_port);
-
   /* Execute each thread. */
   while (thread_fetch (master, &thread))
     thread_call (&thread);
 
   /* Not reached. */
-  return (0);
+  exit (0);
 }

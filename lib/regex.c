@@ -30,10 +30,6 @@
 #ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
-#ifdef _WIN32
-/* Windows does not provide unistd.h, which is required for abort() */
-#include <process.h>
-#endif /* _WIN32 */
 
 #ifndef PARAMS
 # if defined __GNUC__ || (defined __STDC__ && __STDC__)
@@ -188,7 +184,7 @@ init_syntax_once ()
    if (done)
      return;
 
-   memset (re_syntax_table, 0, sizeof re_syntax_table);
+   bzero (re_syntax_table, sizeof re_syntax_table);
 
    for (c = 'a'; c <= 'z'; c++)
      re_syntax_table[c] = Sword;
@@ -617,7 +613,7 @@ extract_number_and_incr (destination, source)
 # include <stdio.h>
 
 /* It is useful to test things that ``must'' be true when debugging.  */
-# include "zassert.h"
+# include <assert.h>
 
 static int debug;
 
@@ -1029,7 +1025,7 @@ static const char re_error_msgid[] =
     gettext_noop ("Invalid regular expression") /* REG_BADPAT */
     "\0"
 #define REG_ECOLLATE_IDX (REG_BADPAT_IDX + sizeof "Invalid regular expression")
-    gettext_noop ("Invalid collation character") /* REG_ECOLLATE */
+    gettext_noop ("Invalid collation character"), /* REG_ECOLLATE */
     "\0"
 #define REG_ECTYPE_IDX	(REG_ECOLLATE_IDX + sizeof "Invalid collation character")
     gettext_noop ("Invalid character class name") /* REG_ECTYPE */
@@ -1674,7 +1670,7 @@ static reg_errcode_t compile_range _RE_ARGS ((const char **p_ptr,
    MSC and drop MAX_BUF_SIZE a bit.  Otherwise you may end up
    reallocating to 0 bytes.  Such thing is not going to work too well.
    You have been warned!!  */
-#if defined _MSC_VER  && !defined _WIN32
+#if defined _MSC_VER  && !defined WIN32
 /* Microsoft C 16-bit versions limit malloc to approx 65512 bytes.
    The REALLOC define eliminates a flurry of conversion warnings,
    but is not required. */
@@ -2198,7 +2194,7 @@ regex_compile (pattern, size, syntax, bufp)
             BUF_PUSH ((1 << BYTEWIDTH) / BYTEWIDTH);
 
             /* Clear the whole map.  */
-            memset (b, 0, (1 << BYTEWIDTH) / BYTEWIDTH);
+            bzero (b, (1 << BYTEWIDTH) / BYTEWIDTH);
 
             /* charset_not matches newline according to a syntax bit.  */
             if ((re_opcode_t) b[-2] == charset_not
@@ -3227,7 +3223,7 @@ re_compile_fastmap (bufp)
   assert (fastmap != NULL && p != NULL);
 
   INIT_FAIL_STACK ();
-  memset (fastmap, 0, 1 << BYTEWIDTH);  /* Assume nothing's valid.  */
+  bzero (fastmap, 1 << BYTEWIDTH);  /* Assume nothing's valid.  */
   bufp->fastmap_accurate = 1;	    /* It will be when we're done.  */
   bufp->can_be_null = 0;
 
@@ -5822,8 +5818,8 @@ weak_alias (__regexec, regexec)
    from either regcomp or regexec.   We don't use PREG here.  */
 
 size_t
-regerror (err, preg, errbuf, errbuf_size)
-    int err;
+regerror (errcode, preg, errbuf, errbuf_size)
+    int errcode;
     const regex_t *preg;
     char *errbuf;
     size_t errbuf_size;
@@ -5831,8 +5827,8 @@ regerror (err, preg, errbuf, errbuf_size)
   const char *msg;
   size_t msg_size;
 
-  if (err < 0
-      || err >= (int) (sizeof (re_error_msgid_idx)
+  if (errcode < 0
+      || errcode >= (int) (sizeof (re_error_msgid_idx)
 			   / sizeof (re_error_msgid_idx[0])))
     /* Only error codes returned by the rest of the code should be passed
        to this routine.  If we are given anything else, or if other regex
@@ -5840,7 +5836,7 @@ regerror (err, preg, errbuf, errbuf_size)
        Dump core so we can fix it.  */
     abort ();
 
-  msg = gettext (re_error_msgid + re_error_msgid_idx[err]);
+  msg = gettext (re_error_msgid + re_error_msgid_idx[errcode]);
 
   msg_size = strlen (msg) + 1; /* Includes the null.  */
 

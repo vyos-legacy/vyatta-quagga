@@ -1,4 +1,5 @@
-/* zebra daemon main routine.
+/*
+ * zebra daemon main routine.
  * Copyright (C) 1997, 98 Kunihiro Ishiguro
  *
  * This file is part of GNU Zebra.
@@ -21,7 +22,7 @@
 
 #include <zebra.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "getopt.h"
 #include "command.h"
 #include "thread.h"
@@ -29,40 +30,24 @@
 #include "memory.h"
 #include "prefix.h"
 #include "log.h"
-#include "plist.h"
-#include "privs.h"
-#include "sigevent.h"
 
 #include "zebra/rib.h"
 #include "zebra/zserv.h"
 #include "zebra/debug.h"
-#include "zebra/router-id.h"
-#include "zebra/irdp.h"
-#include "zebra/rtadv.h"
+#include "zebra/rib.h"
 
-/* Zebra instance */
-struct zebra_t zebrad =
-{
-  .rtm_table_default = 0,
-};
+/* Master of threads. */
+struct thread_master *master;
 
 /* process id. */
 pid_t old_pid;
 pid_t pid;
-
-/* Pacify zclient.o in libzebra, which expects this variable. */
-struct thread_master *master;
 
 /* Route retain mode flag. */
 int retain_mode = 0;
 
 /* Don't delete kernel route. */
 int keep_kernel_mode = 0;
-
-#ifdef HAVE_NETLINK
-/* Receive buffer size for netlink socket */
-u_int32_t nl_rcvbufsize = 0;
-#endif /* HAVE_NETLINK */
 
 /* Command line options. */
 struct option longopts[] = 
@@ -77,43 +62,16 @@ struct option longopts[] =
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
   { "retain",      no_argument,       NULL, 'r'},
-  { "dryrun",      no_argument,       NULL, 'C'},
-#ifdef HAVE_NETLINK
-  { "nl-bufsize",  required_argument, NULL, 's'},
-#endif /* HAVE_NETLINK */
-  { "user",        required_argument, NULL, 'u'},
-  { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
   { 0 }
 };
 
-zebra_capabilities_t _caps_p [] = 
-{
-  ZCAP_NET_ADMIN,
-  ZCAP_SYS_ADMIN,
-  ZCAP_NET_RAW,
-};
-
-/* zebra privileges to run with */
-struct zebra_privs_t zserv_privs =
-{
-#if defined(QUAGGA_USER) && defined(QUAGGA_GROUP)
-  .user = QUAGGA_USER,
-  .group = QUAGGA_GROUP,
-#endif
-#ifdef VTY_GROUP
-  .vty_group = VTY_GROUP,
-#endif
-  .caps_p = _caps_p,
-  .cap_num_p = sizeof(_caps_p)/sizeof(_caps_p[0]),
-  .cap_num_i = 0
-};
-
 /* Default configuration file path. */
+char config_current[] = DEFAULT_CONFIG_FILE;
 char config_default[] = SYSCONFDIR DEFAULT_CONFIG_FILE;
 
 /* Process ID saved for use by init system */
-const char *pid_file = PATH_ZEBRA_PID;
+char *pid_file = PATH_ZEBRA_PID;
 
 /* Help information display. */
 static void
@@ -123,38 +81,30 @@ usage (char *progname, int status)
     fprintf (stderr, "Try `%s --help' for more information.\n", progname);
   else
     {    
-      printf ("Usage : %s [OPTION...]\n\n"\
-	      "Daemon which manages kernel routing table management and "\
-	      "redistribution between different routing protocols.\n\n"\
-	      "-b, --batch        Runs in batch mode\n"\
-	      "-d, --daemon       Runs in daemon mode\n"\
-	      "-f, --config_file  Set configuration file name\n"\
-	      "-i, --pid_file     Set process identifier file name\n"\
-	      "-k, --keep_kernel  Don't delete old routes which installed by "\
-				  "zebra.\n"\
-	      "-l, --log_mode     Set verbose log mode flag\n"\
-	      "-C, --dryrun       Check configuration for validity and exit\n"\
-	      "-A, --vty_addr     Set vty's bind address\n"\
-	      "-P, --vty_port     Set vty's port number\n"\
-	      "-r, --retain       When program terminates, retain added route "\
-				  "by zebra.\n"\
-	      "-u, --user         User to run as\n"\
-	      "-g, --group	  Group to run as\n", progname);
-#ifdef HAVE_NETLINK
-      printf ("-s, --nl-bufsize   Set netlink receive buffer size\n");
-#endif /* HAVE_NETLINK */
-      printf ("-v, --version      Print program version\n"\
-	      "-h, --help         Display this help and exit\n"\
-	      "\n"\
-	      "Report bugs to %s\n", ZEBRA_BUG_ADDRESS);
+      printf ("Usage : %s [OPTION...]\n\n\
+Daemon which manages kernel routing table management and \
+redistribution between different routing protocols.\n\n\
+-b, --batch        Runs in batch mode\n\
+-d, --daemon       Runs in daemon mode\n\
+-f, --config_file  Set configuration file name\n\
+-i, --pid_file     Set process identifier file name\n\
+-k, --keep_kernel  Don't delete old routes which installed by zebra.\n\
+-l, --log_mode     Set verbose log mode flag\n\
+-A, --vty_addr     Set vty's bind address\n\
+-P, --vty_port     Set vty's port number\n\
+-r, --retain       When program terminates, retain added route by zebra.\n\
+-v, --version      Print program version\n\
+-h, --help         Display this help and exit\n\
+\n\
+Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
     }
 
   exit (status);
 }
 
 /* SIGHUP handler. */
-static void 
-sighup (void)
+void 
+sighup (int sig)
 {
   zlog_info ("SIGHUP received");
 
@@ -163,46 +113,60 @@ sighup (void)
 }
 
 /* SIGINT handler. */
-static void
-sigint (void)
+void
+sigint (int sig)
 {
-  zlog_notice ("Terminating on signal");
+  /* Decrared in rib.c */
+  void rib_close ();
+
+  zlog_info ("Terminating on signal");
 
   if (!retain_mode)
     rib_close ();
-#ifdef HAVE_IRDP
-  irdp_finish();
-#endif
 
   exit (0);
 }
 
 /* SIGUSR1 handler. */
-static void
-sigusr1 (void)
+void
+sigusr1 (int sig)
 {
   zlog_rotate (NULL);
 }
 
-struct quagga_signal_t zebra_signals[] =
+/* Signale wrapper. */
+RETSIGTYPE *
+signal_set (int signo, void (*func)(int))
 {
-  { 
-    .signal = SIGHUP, 
-    .handler = &sighup,
-  },
-  {
-    .signal = SIGUSR1,
-    .handler = &sigusr1,
-  },
-  {
-    .signal = SIGINT,
-    .handler = &sigint,
-  },
-  {
-    .signal = SIGTERM,
-    .handler = &sigint,
-  },
-};
+  int ret;
+  struct sigaction sig;
+  struct sigaction osig;
+
+  sig.sa_handler = func;
+  sigemptyset (&sig.sa_mask);
+  sig.sa_flags = 0;
+#ifdef SA_RESTART
+  sig.sa_flags |= SA_RESTART;
+#endif /* SA_RESTART */
+
+  ret = sigaction (signo, &sig, &osig);
+
+  if (ret < 0) 
+    return (SIG_ERR);
+  else
+    return (osig.sa_handler);
+}
+
+/* Initialization of signal handles. */
+void
+signal_init ()
+{
+  signal_set (SIGHUP, sighup);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTERM, sigint);
+  signal_set (SIGPIPE, SIG_IGN);
+  signal_set (SIGUSR1, sigusr1);
+}
 
 /* Main startup routine. */
 int
@@ -210,13 +174,14 @@ main (int argc, char **argv)
 {
   char *p;
   char *vty_addr = NULL;
-  int vty_port = ZEBRA_VTY_PORT;
-  int dryrun = 0;
+  int vty_port = 0;
   int batch_mode = 0;
   int daemon_mode = 0;
   char *config_file = NULL;
   char *progname;
   struct thread thread;
+  void rib_weed_tables ();
+  void zebra_vty_init ();
 
   /* Set umask before anything for security */
   umask (0027);
@@ -224,18 +189,14 @@ main (int argc, char **argv)
   /* preserve my name */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  zlog_default = openzlog (progname, ZLOG_ZEBRA,
+  zlog_default = openzlog (progname, ZLOG_STDOUT, ZLOG_ZEBRA,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
   while (1) 
     {
       int opt;
   
-#ifdef HAVE_NETLINK  
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:C", longopts, 0);
-#else
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vC", longopts, 0);
-#endif /* HAVE_NETLINK */
+      opt = getopt_long (argc, argv, "bdklf:hA:P:rv", longopts, 0);
 
       if (opt == EOF)
 	break;
@@ -252,9 +213,6 @@ main (int argc, char **argv)
 	case 'k':
 	  keep_kernel_mode = 1;
 	  break;
-	case 'C':
-	  dryrun = 1;
-	  break;
 	case 'l':
 	  /* log_mode = 1; */
 	  break;
@@ -268,29 +226,10 @@ main (int argc, char **argv)
           pid_file = optarg;
           break;
 	case 'P':
-	  /* Deal with atoi() returning 0 on failure, and zebra not
-	     listening on zebra port... */
-	  if (strcmp(optarg, "0") == 0) 
-	    {
-	      vty_port = 0;
-	      break;
-	    } 
 	  vty_port = atoi (optarg);
-	  vty_port = (vty_port ? vty_port : ZEBRA_VTY_PORT);
 	  break;
 	case 'r':
 	  retain_mode = 1;
-	  break;
-#ifdef HAVE_NETLINK
-	case 's':
-	  nl_rcvbufsize = atoi (optarg);
-	  break;
-#endif /* HAVE_NETLINK */
-	case 'u':
-	  zserv_privs.user = optarg;
-	  break;
-	case 'g':
-	  zserv_privs.group = optarg;
 	  break;
 	case 'v':
 	  print_version (progname);
@@ -306,15 +245,12 @@ main (int argc, char **argv)
     }
 
   /* Make master thread emulator. */
-  zebrad.master = thread_master_create ();
-
-  /* privs initialise */
-  zprivs_init (&zserv_privs);
+  master = thread_master_create ();
 
   /* Vty related initialize. */
-  signal_init (zebrad.master, Q_SIGC(zebra_signals), zebra_signals);
+  signal_init ();
   cmd_init (1);
-  vty_init (zebrad.master);
+  vty_init ();
   memory_init ();
 
   /* Zebra related initialize. */
@@ -322,14 +258,9 @@ main (int argc, char **argv)
   rib_init ();
   zebra_if_init ();
   zebra_debug_init ();
-  router_id_init();
   zebra_vty_init ();
   access_list_init ();
-  prefix_list_init ();
   rtadv_init ();
-#ifdef HAVE_IRDP
-  irdp_init();
-#endif
 
   /* For debug purpose. */
   /* SET_FLAG (zebra_debug_event, ZEBRA_DEBUG_EVENT); */
@@ -351,12 +282,8 @@ main (int argc, char **argv)
     rib_sweep_route ();
 
   /* Configuration file read*/
-  vty_read_config (config_file, config_default);
+  vty_read_config (config_file, config_current, config_default);
 
-  /* Don't start execution if we are in dry-run mode */
-  if (dryrun)
-    return(0);
-  
   /* Clean up rib. */
   rib_weed_tables ();
 
@@ -378,14 +305,12 @@ main (int argc, char **argv)
   pid = getpid ();
 
   /* Make vty server socket. */
-  vty_serv_sock (vty_addr, vty_port, ZEBRA_VTYSH_PATH);
+  vty_serv_sock (vty_addr,
+		 vty_port ? vty_port : ZEBRA_VTY_PORT, ZEBRA_VTYSH_PATH);
 
-  /* Print banner. */
-  zlog_notice ("Zebra %s starting: vty@%d", QUAGGA_VERSION, vty_port);
-
-  while (thread_fetch (zebrad.master, &thread))
+  while (thread_fetch (master, &thread))
     thread_call (&thread);
 
   /* Not reached... */
-  return 0;
+  exit (0);
 }

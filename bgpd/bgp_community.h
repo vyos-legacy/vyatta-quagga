@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_COMMUNITY_H
-#define _QUAGGA_BGP_COMMUNITY_H
-
 /* Communities attribute.  */
 struct community 
 {
@@ -51,23 +48,21 @@ struct community
 #define com_nthval(X,n)  ((X)->val + (n))
 
 /* Prototypes of communities attribute functions.  */
-extern void community_init (void);
-extern void community_free (struct community *);
-extern struct community *community_uniq_sort (struct community *);
-extern struct community *community_parse (u_int32_t *, u_short);
-extern struct community *community_intern (struct community *);
-extern void community_unintern (struct community *);
-extern char *community_str (struct community *);
-extern unsigned int community_hash_make (struct community *);
-extern struct community *community_str2com (const char *);
-extern int community_match (const struct community *, const struct community *);
-extern int community_cmp (const struct community *, const struct community *);
-extern struct community *community_merge (struct community *, struct community *);
-extern struct community *community_delete (struct community *, struct community *);
-extern struct community *community_dup (struct community *);
-extern int community_include (struct community *, u_int32_t);
-extern void community_del_val (struct community *, u_int32_t *);
-extern unsigned long community_count (void);
-extern struct hash *community_hash (void);
-
-#endif /* _QUAGGA_BGP_COMMUNITY_H */
+void community_init ();
+void community_free (struct community *);
+struct community *community_uniq_sort (struct community *);
+struct community *community_parse (char *, u_short);
+struct community *community_intern (struct community *);
+void community_unintern (struct community *);
+char *community_str (struct community *);
+unsigned int community_hash_make (struct community *);
+struct community *community_str2com (char *);
+int community_match (struct community *, struct community *);
+int community_cmp (struct community *, struct community *);
+struct community *community_merge (struct community *, struct community *);
+struct community *community_delete (struct community *, struct community *);
+struct community *community_dup (struct community *);
+int community_include (struct community *, u_int32_t);
+void community_del_val (struct community *, u_int32_t *);
+unsigned long community_count ();
+struct hash *community_hash ();

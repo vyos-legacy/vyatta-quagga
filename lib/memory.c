@@ -21,19 +21,14 @@
  */
 
 #include <zebra.h>
-/* malloc.h is generally obsolete, however GNU Libc mallinfo wants it. */
-#if !defined(HAVE_STDLIB_H) || (defined(GNU_LINUX) && defined(HAVE_MALLINFO))
-#include <malloc.h>
-#endif /* !HAVE_STDLIB_H || HAVE_MALLINFO */
 
 #include "log.h"
 #include "memory.h"
 
-static void alloc_inc (int);
-static void alloc_dec (int);
-static void log_memstats(int log_priority);
+void alloc_inc (int);
+void alloc_dec (int);
 
-static struct message mstr [] =
+struct message mstr [] =
 {
   { MTYPE_THREAD, "thread" },
   { MTYPE_THREAD_MASTER, "thread_master" },
@@ -44,18 +39,12 @@ static struct message mstr [] =
 };
 
 /* Fatal memory allocation error occured. */
-static void __attribute__ ((noreturn))
+static void
 zerror (const char *fname, int type, size_t size)
 {
-  zlog_err ("%s : can't allocate memory for `%s' size %d: %s\n", 
-	    fname, lookup (mstr, type), (int) size, safe_strerror(errno));
-  log_memstats(LOG_WARNING);
-  /* N.B. It might be preferable to call zlog_backtrace_sigsafe here, since
-     that function should definitely be safe in an OOM condition.  But
-     unfortunately zlog_backtrace_sigsafe does not support syslog logging at
-     this time... */
-  zlog_backtrace(LOG_WARNING);
-  abort();
+  fprintf (stderr, "%s : can't allocate memory for `%s' size %d\n", 
+	   fname, lookup (mstr, type), (int) size);
+  exit (1);
 }
 
 /* Memory allocation. */
@@ -112,7 +101,7 @@ zfree (int type, void *ptr)
 
 /* String duplication. */
 char *
-zstrdup (int type, const char *str)
+zstrdup (int type, char *str)
 {
   void *dup;
 
@@ -124,9 +113,9 @@ zstrdup (int type, const char *str)
 }
 
 #ifdef MEMORY_LOG
-static struct 
+struct 
 {
-  const char *name;
+  char *name;
   unsigned long alloc;
   unsigned long t_malloc;
   unsigned long c_malloc;
@@ -137,10 +126,10 @@ static struct
   unsigned long c_strdup;
 } mstat [MTYPE_MAX];
 
-static void
+void
 mtype_log (char *func, void *memory, const char *file, int line, int type)
 {
-  zlog_debug ("%s: %s %p %s %d", func, lookup (mstr, type), memory, file, line);
+  zlog_info ("%s: %s %p %s %d", func, lookup (mstr, type), memory, file, line);
 }
 
 void *
@@ -198,7 +187,7 @@ mtype_zfree (const char *file, int line, int type, void *ptr)
 }
 
 char *
-mtype_zstrdup (const char *file, int line, int type, const char *str)
+mtype_zstrdup (const char *file, int line, int type, char *str)
 {
   char *memory;
 
@@ -211,7 +200,7 @@ mtype_zstrdup (const char *file, int line, int type, const char *str)
   return memory;
 }
 #else
-static struct 
+struct 
 {
   char *name;
   unsigned long alloc;
@@ -219,14 +208,14 @@ static struct
 #endif /* MTPYE_LOG */
 
 /* Increment allocation counter. */
-static void
+void
 alloc_inc (int type)
 {
   mstat[type].alloc++;
 }
 
 /* Decrement allocation counter. */
-static void
+void
 alloc_dec (int type)
 {
   mstat[type].alloc--;
@@ -237,91 +226,170 @@ alloc_dec (int type)
 #include "vty.h"
 #include "command.h"
 
-static void
-log_memstats(int pri)
+/* For pretty printng of memory allocate information. */
+struct memory_list
 {
-  struct mlist *ml;
+  int index;
+  char *format;
+};
 
-  for (ml = mlists; ml->list; ml++)
-    {
-      struct memory_list *m;
-
-      zlog (NULL, pri, "Memory utilization in module %s:", ml->name);
-      for (m = ml->list; m->index >= 0; m++)
-	if (m->index && mstat[m->index].alloc)
-	  zlog (NULL, pri, "  %-30s: %10ld", m->format, mstat[m->index].alloc);
-    }
-}
-
-static void
-show_separator(struct vty *vty)
+struct memory_list memory_list_lib[] =
 {
-  vty_out (vty, "-----------------------------\r\n");
-}
+  { MTYPE_TMP,                "Temporary memory" },
+  { MTYPE_ROUTE_TABLE,        "Route table     " },
+  { MTYPE_ROUTE_NODE,         "Route node      " },
+  { MTYPE_RIB,                "RIB             " },
+  { MTYPE_NEXTHOP,            "Nexthop         " },
+  { MTYPE_LINK_LIST,          "Link List       " },
+  { MTYPE_LINK_NODE,          "Link Node       " },
+  { MTYPE_HASH,               "Hash            " },
+  { MTYPE_HASH_BACKET,        "Hash Bucket     " },
+  { MTYPE_ACCESS_LIST,        "Access List     " },
+  { MTYPE_ACCESS_LIST_STR,    "Access List Str " },
+  { MTYPE_ACCESS_FILTER,      "Access Filter   " },
+  { MTYPE_PREFIX_LIST,        "Prefix List     " },
+  { MTYPE_PREFIX_LIST_STR,    "Prefix List Str " },
+  { MTYPE_PREFIX_LIST_ENTRY,  "Prefix List Entry "},
+  { MTYPE_ROUTE_MAP,          "Route map       " },
+  { MTYPE_ROUTE_MAP_NAME,     "Route map name  " },
+  { MTYPE_ROUTE_MAP_INDEX,    "Route map index " },
+  { MTYPE_ROUTE_MAP_RULE,     "Route map rule  " },
+  { MTYPE_ROUTE_MAP_RULE_STR, "Route map rule str" },
+  { MTYPE_DESC,               "Command desc    " },
+  { MTYPE_BUFFER,             "Buffer          " },
+  { MTYPE_BUFFER_DATA,        "Buffer data     " },
+  { MTYPE_STREAM,             "Stream          " },
+  { MTYPE_KEYCHAIN,           "Key chain       " },
+  { MTYPE_KEY,                "Key             " },
+  { MTYPE_VTY,                "VTY             " },
+  { -1, NULL }
+};
 
-static int
+struct memory_list memory_list_bgp[] =
+{
+  { MTYPE_BGP_PEER,               "BGP peer" },
+  { MTYPE_ATTR,                   "BGP attribute" },
+  { MTYPE_AS_PATH,                "BGP aspath" },
+  { MTYPE_AS_SEG,                 "BGP aspath seg" },
+  { MTYPE_AS_STR,                 "BGP aspath str" },
+  { 0, NULL },
+  { MTYPE_BGP_TABLE,              "BGP table" },
+  { MTYPE_BGP_NODE,               "BGP node" },
+  { MTYPE_BGP_ADVERTISE_ATTR,     "BGP adv attr" },
+  { MTYPE_BGP_ADVERTISE,          "BGP adv" },
+  { MTYPE_BGP_ADJ_IN,             "BGP adj in" },
+  { MTYPE_BGP_ADJ_OUT,            "BGP adj out" },
+  { 0, NULL },
+  { MTYPE_AS_LIST,                "BGP AS list" },
+  { MTYPE_AS_FILTER,              "BGP AS filter" },
+  { MTYPE_AS_FILTER_STR,          "BGP AS filter str" },
+  { 0, NULL },
+  { MTYPE_COMMUNITY,              "community" },
+  { MTYPE_COMMUNITY_VAL,          "community val" },
+  { MTYPE_COMMUNITY_STR,          "community str" },
+  { 0, NULL },
+  { MTYPE_ECOMMUNITY,             "extcommunity" },
+  { MTYPE_ECOMMUNITY_VAL,         "extcommunity val" },
+  { MTYPE_ECOMMUNITY_STR,         "extcommunity str" },
+  { 0, NULL },
+  { MTYPE_COMMUNITY_LIST,         "community-list" },
+  { MTYPE_COMMUNITY_LIST_NAME,    "community-list name" },
+  { MTYPE_COMMUNITY_LIST_ENTRY,   "community-list entry" },
+  { MTYPE_COMMUNITY_LIST_CONFIG,  "community-list config" },
+  { 0, NULL },
+  { MTYPE_CLUSTER,                "Cluster list" },
+  { MTYPE_CLUSTER_VAL,            "Cluster list val" },
+  { 0, NULL },
+  { MTYPE_TRANSIT,                "BGP transit attr" },
+  { MTYPE_TRANSIT_VAL,            "BGP transit val" },
+  { 0, NULL },
+  { MTYPE_BGP_DISTANCE,           "BGP distance" },
+  { MTYPE_BGP_NEXTHOP_CACHE,      "BGP nexthop" },
+  { MTYPE_BGP_CONFED_LIST,        "BGP confed list" },
+  { MTYPE_PEER_UPDATE_SOURCE,     "peer update if" },
+  { MTYPE_BGP_DAMP_INFO,          "Dampening info" },
+  { MTYPE_BGP_REGEXP,             "BGP regexp" },
+  { -1, NULL }
+};
+
+struct memory_list memory_list_rip[] =
+{
+  { MTYPE_RIP,                "RIP structure   " },
+  { MTYPE_RIP_INFO,           "RIP route info  " },
+  { MTYPE_RIP_INTERFACE,      "RIP interface   " },
+  { MTYPE_RIP_PEER,           "RIP peer        " },
+  { MTYPE_RIP_OFFSET_LIST,    "RIP offset list " },
+  { MTYPE_RIP_DISTANCE,       "RIP distance    " },
+  { -1, NULL }
+};
+
+struct memory_list memory_list_ospf[] =
+{
+  { MTYPE_OSPF_TOP,           "OSPF top        " },
+  { MTYPE_OSPF_AREA,          "OSPF area       " },
+  { MTYPE_OSPF_AREA_RANGE,    "OSPF area range " },
+  { MTYPE_OSPF_NETWORK,       "OSPF network    " },
+#ifdef NBMA_ENABLE
+  { MTYPE_OSPF_NEIGHBOR_STATIC,"OSPF static nbr " },
+#endif  /* NBMA_ENABLE */
+  { MTYPE_OSPF_IF,            "OSPF interface  " },
+  { MTYPE_OSPF_NEIGHBOR,      "OSPF neighbor   " },
+  { MTYPE_OSPF_ROUTE,         "OSPF route      " },
+  { MTYPE_OSPF_TMP,           "OSPF tmp mem    " },
+  { MTYPE_OSPF_LSA,           "OSPF LSA        " },
+  { MTYPE_OSPF_LSA_DATA,      "OSPF LSA data   " },
+  { MTYPE_OSPF_LSDB,          "OSPF LSDB       " },
+  { MTYPE_OSPF_PACKET,        "OSPF packet     " },
+  { MTYPE_OSPF_FIFO,          "OSPF FIFO queue " },
+  { MTYPE_OSPF_VERTEX,        "OSPF vertex     " },
+  { MTYPE_OSPF_NEXTHOP,       "OSPF nexthop    " },
+  { MTYPE_OSPF_PATH,	      "OSPF path       " },
+  { MTYPE_OSPF_VL_DATA,       "OSPF VL data    " },
+  { MTYPE_OSPF_CRYPT_KEY,     "OSPF crypt key  " },
+  { MTYPE_OSPF_EXTERNAL_INFO, "OSPF ext. info  " },
+  { MTYPE_OSPF_DISTANCE,      "OSPF distance   " },
+  { MTYPE_OSPF_IF_INFO,       "OSPF if info    " },
+  { MTYPE_OSPF_IF_PARAMS,     "OSPF if params  " },
+  { -1, NULL },
+};
+
+struct memory_list memory_list_ospf6[] =
+{
+  { MTYPE_OSPF6_TOP,          "OSPF6 top         " },
+  { MTYPE_OSPF6_AREA,         "OSPF6 area        " },
+  { MTYPE_OSPF6_IF,           "OSPF6 interface   " },
+  { MTYPE_OSPF6_NEIGHBOR,     "OSPF6 neighbor    " },
+  { MTYPE_OSPF6_ROUTE,        "OSPF6 route       " },
+  { MTYPE_OSPF6_PREFIX,       "OSPF6 prefix      " },
+  { MTYPE_OSPF6_MESSAGE,      "OSPF6 message     " },
+  { MTYPE_OSPF6_LSA,          "OSPF6 LSA         " },
+  { MTYPE_OSPF6_LSA_SUMMARY,  "OSPF6 LSA summary " },
+  { MTYPE_OSPF6_LSDB,         "OSPF6 LSA database" },
+  { MTYPE_OSPF6_VERTEX,       "OSPF6 vertex      " },
+  { MTYPE_OSPF6_SPFTREE,      "OSPF6 SPF tree    " },
+  { MTYPE_OSPF6_NEXTHOP,      "OSPF6 nexthop     " },
+  { MTYPE_OSPF6_EXTERNAL_INFO,"OSPF6 ext. info   " },
+  { MTYPE_OSPF6_OTHER,        "OSPF6 other       " },
+  { -1, NULL },
+};
+
+struct memory_list memory_list_separator[] =
+{
+  { 0, NULL},
+  {-1, NULL}
+};
+
+void
 show_memory_vty (struct vty *vty, struct memory_list *list)
 {
   struct memory_list *m;
-  int needsep = 0;
 
   for (m = list; m->index >= 0; m++)
     if (m->index == 0)
-      {
-	if (needsep)
-	  {
-	    show_separator (vty);
-	    needsep = 0;
-	  }
-      }
-    else if (mstat[m->index].alloc)
-      {
-	vty_out (vty, "%-30s: %10ld\r\n", m->format, mstat[m->index].alloc);
-	needsep = 1;
-      }
-  return needsep;
+      vty_out (vty, "-----------------------------\r\n");
+    else
+      vty_out (vty, "%-22s: %5ld\r\n", m->format, mstat[m->index].alloc);
 }
-
-#ifdef HAVE_MALLINFO
-static int
-show_memory_mallinfo (struct vty *vty)
-{
-  struct mallinfo minfo = mallinfo();
-  char buf[MTYPE_MEMSTR_LEN];
-  
-  vty_out (vty, "System allocator statistics:%s", VTY_NEWLINE);
-  vty_out (vty, "  Total heap allocated:  %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.arena),
-           VTY_NEWLINE);
-  vty_out (vty, "  Holding block headers: %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.hblkhd),
-           VTY_NEWLINE);
-  vty_out (vty, "  Used small blocks:     %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.usmblks),
-           VTY_NEWLINE);
-  vty_out (vty, "  Used ordinary blocks:  %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.uordblks),
-           VTY_NEWLINE);
-  vty_out (vty, "  Free small blocks:     %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.fsmblks),
-           VTY_NEWLINE);
-  vty_out (vty, "  Free ordinary blocks:  %s%s",
-           mtype_memstr (buf, MTYPE_MEMSTR_LEN, minfo.fordblks),
-           VTY_NEWLINE);
-  vty_out (vty, "  Ordinary blocks:       %ld%s",
-           (unsigned long)minfo.ordblks,
-           VTY_NEWLINE);
-  vty_out (vty, "  Small blocks:          %ld%s",
-           (unsigned long)minfo.smblks,
-           VTY_NEWLINE);
-  vty_out (vty, "  Holding blocks:        %ld%s",
-           (unsigned long)minfo.hblks,
-           VTY_NEWLINE);
-  vty_out (vty, "(see system documentation for 'mallinfo' for meaning)%s",
-           VTY_NEWLINE);
-  return 1;
-}
-#endif /* HAVE_MALLINFO */
 
 DEFUN (show_memory_all,
        show_memory_all_cmd,
@@ -330,19 +398,15 @@ DEFUN (show_memory_all,
        "Memory statistics\n"
        "All memory statistics\n")
 {
-  struct mlist *ml;
-  int needsep = 0;
-  
-#ifdef HAVE_MALLINFO
-  needsep = show_memory_mallinfo (vty);
-#endif /* HAVE_MALLINFO */
-  
-  for (ml = mlists; ml->list; ml++)
-    {
-      if (needsep)
-	show_separator (vty);
-      needsep = show_memory_vty (vty, ml->list);
-    }
+  show_memory_vty (vty, memory_list_lib);
+  show_memory_vty (vty, memory_list_separator);
+  show_memory_vty (vty, memory_list_rip);
+  show_memory_vty (vty, memory_list_separator);
+  show_memory_vty (vty, memory_list_ospf);
+  show_memory_vty (vty, memory_list_separator);
+  show_memory_vty (vty, memory_list_ospf6);
+  show_memory_vty (vty, memory_list_separator);
+  show_memory_vty (vty, memory_list_bgp);
 
   return CMD_SUCCESS;
 }
@@ -364,17 +428,6 @@ DEFUN (show_memory_lib,
   return CMD_SUCCESS;
 }
 
-DEFUN (show_memory_zebra,
-       show_memory_zebra_cmd,
-       "show memory zebra",
-       SHOW_STR
-       "Memory statistics\n"
-       "Zebra memory\n")
-{
-  show_memory_vty (vty, memory_list_zebra);
-  return CMD_SUCCESS;
-}
-
 DEFUN (show_memory_rip,
        show_memory_rip_cmd,
        "show memory rip",
@@ -383,17 +436,6 @@ DEFUN (show_memory_rip,
        "RIP memory\n")
 {
   show_memory_vty (vty, memory_list_rip);
-  return CMD_SUCCESS;
-}
-
-DEFUN (show_memory_ripng,
-       show_memory_ripng_cmd,
-       "show memory ripng",
-       SHOW_STR
-       "Memory statistics\n"
-       "RIPng memory\n")
-{
-  show_memory_vty (vty, memory_list_ripng);
   return CMD_SUCCESS;
 }
 
@@ -430,107 +472,22 @@ DEFUN (show_memory_ospf6,
   return CMD_SUCCESS;
 }
 
-DEFUN (show_memory_isis,
-       show_memory_isis_cmd,
-       "show memory isis",
-       SHOW_STR
-       "Memory statistics\n"
-       "ISIS memory\n")
-{
-  show_memory_vty (vty, memory_list_isis);
-  return CMD_SUCCESS;
-}
-
 void
-memory_init (void)
+memory_init ()
 {
   install_element (VIEW_NODE, &show_memory_cmd);
   install_element (VIEW_NODE, &show_memory_all_cmd);
   install_element (VIEW_NODE, &show_memory_lib_cmd);
   install_element (VIEW_NODE, &show_memory_rip_cmd);
-  install_element (VIEW_NODE, &show_memory_ripng_cmd);
   install_element (VIEW_NODE, &show_memory_bgp_cmd);
   install_element (VIEW_NODE, &show_memory_ospf_cmd);
   install_element (VIEW_NODE, &show_memory_ospf6_cmd);
-  install_element (VIEW_NODE, &show_memory_isis_cmd);
 
   install_element (ENABLE_NODE, &show_memory_cmd);
   install_element (ENABLE_NODE, &show_memory_all_cmd);
   install_element (ENABLE_NODE, &show_memory_lib_cmd);
-  install_element (ENABLE_NODE, &show_memory_zebra_cmd);
   install_element (ENABLE_NODE, &show_memory_rip_cmd);
-  install_element (ENABLE_NODE, &show_memory_ripng_cmd);
   install_element (ENABLE_NODE, &show_memory_bgp_cmd);
   install_element (ENABLE_NODE, &show_memory_ospf_cmd);
   install_element (ENABLE_NODE, &show_memory_ospf6_cmd);
-  install_element (ENABLE_NODE, &show_memory_isis_cmd);
-}
-
-/* Stats querying from users */
-/* Return a pointer to a human friendly string describing
- * the byte count passed in. E.g:
- * "0 bytes", "2048 bytes", "110kB", "500MiB", "11GiB", etc.
- * Up to 4 significant figures will be given.
- * The pointer returned may be NULL (indicating an error)
- * or point to the given buffer, or point to static storage.
- */
-const char *
-mtype_memstr (char *buf, size_t len, unsigned long bytes)
-{
-  unsigned int t, g, m, k;
-  
-  /* easy cases */
-  if (!bytes)
-    return "0 bytes";
-  if (bytes == 1)
-    return "1 byte";
-    
-  if (sizeof (unsigned long) >= 8)
-    /* Hacked to make it not warn on ILP32 machines
-     * Shift will always be 40 at runtime. See below too */
-    t = bytes >> (sizeof (unsigned long) >= 8 ? 40 : 0);
-  else
-    t = 0;
-  g = bytes >> 30;
-  m = bytes >> 20;
-  k = bytes >> 10;
-  
-  if (t > 10)
-    {
-      /* The shift will always be 39 at runtime.
-       * Just hacked to make it not warn on 'smaller' machines. 
-       * Static compiler analysis should mean no extra code
-       */
-      if (bytes & (1 << (sizeof (unsigned long) >= 8 ? 39 : 0)))
-        t++;
-      snprintf (buf, len, "%4d TiB", t);
-    }
-  else if (g > 10)
-    {
-      if (bytes & (1 << 29))
-        g++;
-      snprintf (buf, len, "%d GiB", g);
-    }
-  else if (m > 10)
-    {
-      if (bytes & (1 << 19))
-        m++;
-      snprintf (buf, len, "%d MiB", m);
-    }
-  else if (k > 10)
-    {
-      if (bytes & (1 << 9))
-        k++;
-      snprintf (buf, len, "%d KiB", k);
-    }
-  else
-    snprintf (buf, len, "%ld bytes", bytes);
-  
-  return buf;
-}
-
-unsigned long
-mtype_stats_alloc (int type)
-{
-  return mstat[type].alloc;
 }

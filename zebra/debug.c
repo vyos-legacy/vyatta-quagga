@@ -28,7 +28,6 @@
 unsigned long zebra_debug_event;
 unsigned long zebra_debug_packet;
 unsigned long zebra_debug_kernel;
-unsigned long zebra_debug_rib;
 
 DEFUN (show_debugging_zebra,
        show_debugging_zebra_cmd,
@@ -65,11 +64,6 @@ DEFUN (show_debugging_zebra,
 
   if (IS_ZEBRA_DEBUG_KERNEL)
     vty_out (vty, "  Zebra kernel debugging is on%s", VTY_NEWLINE);
-
-  if (IS_ZEBRA_DEBUG_RIB)
-    vty_out (vty, "  Zebra RIB debugging is on%s", VTY_NEWLINE);
-  if (IS_ZEBRA_DEBUG_RIB_Q)
-    vty_out (vty, "  Zebra RIB queue debugging is on%s", VTY_NEWLINE);
 
   return CMD_SUCCESS;
 }
@@ -146,29 +140,6 @@ DEFUN (debug_zebra_kernel,
   return CMD_SUCCESS;
 }
 
-DEFUN (debug_zebra_rib,
-       debug_zebra_rib_cmd,
-       "debug zebra rib",
-       DEBUG_STR
-       "Zebra configuration\n"
-       "Debug RIB events\n")
-{
-  SET_FLAG (zebra_debug_rib, ZEBRA_DEBUG_RIB);
-  return CMD_SUCCESS;
-}
-
-DEFUN (debug_zebra_rib_q,
-       debug_zebra_rib_q_cmd,
-       "debug zebra rib queue",
-       DEBUG_STR
-       "Zebra configuration\n"
-       "Debug RIB events\n"
-       "Debug RIB queueing\n")
-{
-  SET_FLAG (zebra_debug_rib, ZEBRA_DEBUG_RIB_Q);
-  return CMD_SUCCESS;
-}
-
 DEFUN (no_debug_zebra_events,
        no_debug_zebra_events_cmd,
        "no debug zebra events",
@@ -222,31 +193,6 @@ DEFUN (no_debug_zebra_kernel,
   return CMD_SUCCESS;
 }
 
-DEFUN (no_debug_zebra_rib,
-       no_debug_zebra_rib_cmd,
-       "no debug zebra rib",
-       NO_STR
-       DEBUG_STR
-       "Zebra configuration\n"
-       "Debug zebra RIB\n")
-{
-  zebra_debug_rib = 0;
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_debug_zebra_rib_q,
-       no_debug_zebra_rib_q_cmd,
-       "no debug zebra rib queueu",
-       NO_STR
-       DEBUG_STR
-       "Zebra configuration\n"
-       "Debug zebra RIB\n"
-       "Debug RIB queueing\n")
-{
-  UNSET_FLAG (zebra_debug_rib, ZEBRA_DEBUG_RIB_Q);
-  return CMD_SUCCESS;
-}
-
 /* Debug node. */
 struct cmd_node debug_node =
 {
@@ -255,7 +201,7 @@ struct cmd_node debug_node =
   1
 };
 
-static int
+int
 config_write_debug (struct vty *vty)
 {
   int write = 0;
@@ -292,26 +238,14 @@ config_write_debug (struct vty *vty)
       vty_out (vty, "debug zebra kernel%s", VTY_NEWLINE);
       write++;
     }
-  if (IS_ZEBRA_DEBUG_RIB)
-    {
-      vty_out (vty, "debug zebra rib%s", VTY_NEWLINE);
-      write++;
-    }
-  if (IS_ZEBRA_DEBUG_RIB_Q)
-    {
-      vty_out (vty, "debug zebra rib queue%s", VTY_NEWLINE);
-      write++;
-    }
   return write;
 }
 
 void
-zebra_debug_init (void)
+zebra_debug_init ()
 {
   zebra_debug_event = 0;
   zebra_debug_packet = 0;
-  zebra_debug_kernel = 0;
-  zebra_debug_rib = 0;
 
   install_node (&debug_node, config_write_debug);
 
@@ -323,24 +257,16 @@ zebra_debug_init (void)
   install_element (ENABLE_NODE, &debug_zebra_packet_direct_cmd);
   install_element (ENABLE_NODE, &debug_zebra_packet_detail_cmd);
   install_element (ENABLE_NODE, &debug_zebra_kernel_cmd);
-  install_element (ENABLE_NODE, &debug_zebra_rib_cmd);
-  install_element (ENABLE_NODE, &debug_zebra_rib_q_cmd);
   install_element (ENABLE_NODE, &no_debug_zebra_events_cmd);
   install_element (ENABLE_NODE, &no_debug_zebra_packet_cmd);
   install_element (ENABLE_NODE, &no_debug_zebra_kernel_cmd);
-  install_element (ENABLE_NODE, &no_debug_zebra_rib_cmd);
-  install_element (ENABLE_NODE, &no_debug_zebra_rib_q_cmd);
 
   install_element (CONFIG_NODE, &debug_zebra_events_cmd);
   install_element (CONFIG_NODE, &debug_zebra_packet_cmd);
   install_element (CONFIG_NODE, &debug_zebra_packet_direct_cmd);
   install_element (CONFIG_NODE, &debug_zebra_packet_detail_cmd);
   install_element (CONFIG_NODE, &debug_zebra_kernel_cmd);
-  install_element (CONFIG_NODE, &debug_zebra_rib_cmd);
-  install_element (CONFIG_NODE, &debug_zebra_rib_q_cmd);
   install_element (CONFIG_NODE, &no_debug_zebra_events_cmd);
   install_element (CONFIG_NODE, &no_debug_zebra_packet_cmd);
   install_element (CONFIG_NODE, &no_debug_zebra_kernel_cmd);
-  install_element (CONFIG_NODE, &no_debug_zebra_rib_cmd);
-  install_element (CONFIG_NODE, &no_debug_zebra_rib_q_cmd);
 }

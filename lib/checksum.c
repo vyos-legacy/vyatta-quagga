@@ -7,12 +7,12 @@
  */
 
 #include <zebra.h>
-#include "checksum.h"
 
-int			/* return checksum in low-order 16 bits */
-in_cksum(void *parg, int nbytes)
+int				/* return checksum in low-order 16 bits */
+in_cksum(ptr, nbytes)
+register u_short	*ptr;
+register int		nbytes;
 {
-	u_short *ptr = parg;
 	register long		sum;		/* assumes long == 32 bits */
 	u_short			oddbyte;
 	register u_short	answer;		/* assumes u_short == 16 bits */

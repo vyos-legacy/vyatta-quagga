@@ -23,16 +23,16 @@
 #ifndef _ZEBRA_OSPF_PACKET_H
 #define _ZEBRA_OSPF_PACKET_H
 
-#define OSPF_HEADER_SIZE         24U
-#define OSPF_AUTH_SIMPLE_SIZE     8U
-#define OSPF_AUTH_MD5_SIZE       16U
+#define OSPF_HEADER_SIZE         24
+#define OSPF_AUTH_SIMPLE_SIZE     8
+#define OSPF_AUTH_MD5_SIZE       16
 
-#define OSPF_MAX_PACKET_SIZE  65535U   /* includes IP Header size. */
-#define OSPF_HELLO_MIN_SIZE      20U   /* not including neighbors */
-#define OSPF_DB_DESC_MIN_SIZE     8U
-#define OSPF_LS_REQ_MIN_SIZE      0U
-#define OSPF_LS_UPD_MIN_SIZE      4U
-#define OSPF_LS_ACK_MIN_SIZE      0U
+#define OSPF_MAX_PACKET_SIZE  65535   /* includes IP Header size. */
+#define OSPF_HELLO_MIN_SIZE      20   /* not including neighbors */
+#define OSPF_DB_DESC_MIN_SIZE     8
+#define OSPF_LS_REQ_MIN_SIZE      0
+#define OSPF_LS_UPD_MIN_SIZE      4
+#define OSPF_LS_ACK_MIN_SIZE      0
 
 #define OSPF_MSG_HELLO         1  /* OSPF Hello Message. */
 #define OSPF_MSG_DB_DESC       2  /* OSPF Database Descriptoin Message. */
@@ -42,7 +42,10 @@
 
 #define OSPF_SEND_PACKET_DIRECT         1
 #define OSPF_SEND_PACKET_INDIRECT       2
+
+#ifdef HAVE_NSSA
 #define OSPF_SEND_PACKET_LOOP           3
+#endif /* HAVE_NSSA */
 
 #define OSPF_HELLO_REPLY_DELAY          1
 
@@ -119,8 +122,10 @@ struct ospf_db_desc
 
 
 /* Macros. */
-/* XXX Perhaps obsolete; function in ospf_packet.c */
 #define OSPF_PACKET_MAX(oi)     ospf_packet_max (oi)
+/*
+#define OSPF_PACKET_MAX(oi)     (((oi)->ifp->mtu - ((oi)->auth_md5 ? OSPF_AUTH_MD5_SIZE : 0)) - 88)
+*/
 
 #define OSPF_OUTPUT_PNT(S)      ((S)->data + (S)->putp)
 #define OSPF_OUTPUT_LENGTH(S)   ((S)->endp)
@@ -131,37 +136,36 @@ struct ospf_db_desc
 #define IS_SET_DD_ALL(X)        ((X) & OSPF_DD_FLAG_ALL)
 
 /* Prototypes. */
-extern void ospf_output_forward (struct stream *, int);
-extern struct ospf_packet *ospf_packet_new (size_t);
-extern void ospf_packet_free (struct ospf_packet *);
-extern struct ospf_fifo *ospf_fifo_new (void);
-extern void ospf_fifo_push (struct ospf_fifo *, struct ospf_packet *);
-extern struct ospf_packet *ospf_fifo_pop (struct ospf_fifo *);
-extern struct ospf_packet *ospf_fifo_head (struct ospf_fifo *);
-extern void ospf_fifo_flush (struct ospf_fifo *);
-extern void ospf_fifo_free (struct ospf_fifo *);
-extern void ospf_packet_add (struct ospf_interface *, struct ospf_packet *);
-extern void ospf_packet_delete (struct ospf_interface *);
-extern struct stream *ospf_stream_dup (struct stream *);
-extern struct ospf_packet *ospf_packet_dup (struct ospf_packet *);
+void ospf_output_forward (struct stream *, int);
+struct ospf_packet *ospf_packet_new (size_t);
+void ospf_packet_free (struct ospf_packet *);
+struct ospf_fifo *ospf_fifo_new ();
+void ospf_fifo_push (struct ospf_fifo *, struct ospf_packet *);
+struct ospf_packet *ospf_fifo_pop (struct ospf_fifo *);
+struct ospf_packet *ospf_fifo_head (struct ospf_fifo *);
+void ospf_fifo_flush (struct ospf_fifo *);
+void ospf_fifo_free (struct ospf_fifo *);
+void ospf_packet_add (struct ospf_interface *, struct ospf_packet *);
+void ospf_packet_delete (struct ospf_interface *);
+struct stream *ospf_stream_dup (struct stream *);
+struct ospf_packet *ospf_packet_dup (struct ospf_packet *);
 
-extern int ospf_read (struct thread *);
-extern void ospf_hello_send (struct ospf_interface *);
-extern void ospf_db_desc_send (struct ospf_neighbor *);
-extern void ospf_db_desc_resend (struct ospf_neighbor *);
-extern void ospf_ls_req_send (struct ospf_neighbor *);
-extern void ospf_ls_upd_send_lsa (struct ospf_neighbor *, struct ospf_lsa *,
-				  int);
-extern void ospf_ls_upd_send (struct ospf_neighbor *, struct list *, int);
-extern void ospf_ls_ack_send (struct ospf_neighbor *, struct ospf_lsa *);
-extern void ospf_ls_ack_send_delayed (struct ospf_interface *);
-extern void ospf_ls_retransmit (struct ospf_interface *, struct ospf_lsa *);
-extern void ospf_ls_req_event (struct ospf_neighbor *);
+int ospf_read (struct thread *);
+void ospf_hello_send (struct ospf_interface *);
+void ospf_db_desc_send (struct ospf_neighbor *);
+void ospf_db_desc_resend (struct ospf_neighbor *);
+void ospf_ls_req_send (struct ospf_neighbor *);
+void ospf_ls_upd_send_lsa (struct ospf_neighbor *, struct ospf_lsa *, int);
+void ospf_ls_upd_send (struct ospf_neighbor *, list, int);
+void ospf_ls_ack_send (struct ospf_neighbor *, struct ospf_lsa *);
+void ospf_ls_ack_send_delayed (struct ospf_interface *);
+void ospf_ls_retransmit (struct ospf_interface *, struct ospf_lsa *);
+void ospf_ls_req_event (struct ospf_neighbor *);
 
-extern int ospf_ls_upd_timer (struct thread *);
-extern int ospf_ls_ack_timer (struct thread *);
-extern int ospf_poll_timer (struct thread *);
-extern int ospf_hello_reply_timer (struct thread *);
-extern void ospf_hello_send_sub (struct ospf_interface *, struct in_addr *);
+int ospf_ls_upd_timer (struct thread *);
+int ospf_ls_ack_timer (struct thread *);
+int ospf_poll_timer (struct thread *);
+int ospf_hello_reply_timer (struct thread *);
+void ospf_hello_send_sub (struct ospf_interface *, struct in_addr *);
 
 #endif /* _ZEBRA_OSPF_PACKET_H */

@@ -35,7 +35,7 @@ DEFUN (show_debugging_rip,
        DEBUG_STR
        RIP_STR)
 {
-  vty_out (vty, "RIP debugging status:%s", VTY_NEWLINE);
+  vty_out (vty, "Zebra debugging status:%s", VTY_NEWLINE);
 
   if (IS_RIP_DEBUG_EVENT)
     vty_out (vty, "  RIP event debugging is on%s", VTY_NEWLINE);
@@ -210,7 +210,7 @@ struct cmd_node debug_node =
   1
 };
 
-static int
+int
 config_write_debug (struct vty *vty)
 {
   int write = 0;
@@ -251,7 +251,7 @@ config_write_debug (struct vty *vty)
 }
 
 void
-rip_debug_reset (void)
+rip_debug_reset ()
 {
   rip_debug_event = 0;
   rip_debug_packet = 0;
@@ -259,7 +259,7 @@ rip_debug_reset (void)
 }
 
 void
-rip_debug_init (void)
+rip_debug_init ()
 {
   rip_debug_event = 0;
   rip_debug_packet = 0;

@@ -30,11 +30,8 @@
 #include "ioctl.h"
 #include "log.h"
 
-#include "zebra/rt.h"
-#include "zebra/kernel_socket.h"
-
-void
-ifstat_update_sysctl (void)
+int
+ifstat_update_sysctl ()
 {
   caddr_t ref, buf, end;
   size_t bufsiz;
@@ -55,8 +52,8 @@ ifstat_update_sysctl (void)
   /* Query buffer size. */
   if (sysctl (mib, MIBSIZ, NULL, &bufsiz, NULL, 0) < 0) 
     {
-      zlog_warn ("sysctl() error by %s", safe_strerror (errno));
-      return;
+      zlog_warn ("sysctl() error by %s", strerror (errno));
+      return -1;
     }
 
   /* We free this memory at the end of this function. */
@@ -65,8 +62,8 @@ ifstat_update_sysctl (void)
   /* Fetch interface informations into allocated buffer. */
   if (sysctl (mib, MIBSIZ, buf, &bufsiz, NULL, 0) < 0) 
     {
-      zlog (NULL, LOG_WARNING, "sysctl error by %s", safe_strerror (errno));
-      return;
+      zlog (NULL, LOG_WARNING, "sysctl error by %s", strerror (errno));
+      return -1;
     }
 
   /* Parse both interfaces and addresses. */
@@ -84,7 +81,7 @@ ifstat_update_sysctl (void)
   /* Free sysctl buffer. */
   XFREE (MTYPE_TMP, ref);
 
-  return;
+  return 0;
 }
 
 /* Interface listing up function using sysctl(). */
@@ -94,6 +91,8 @@ interface_list ()
   caddr_t ref, buf, end;
   size_t bufsiz;
   struct if_msghdr *ifm;
+  int ifm_read (struct if_msghdr *);
+  int ifam_read (struct ifa_msghdr *);
 
 #define MIBSIZ 6
   int mib[MIBSIZ] =
@@ -109,7 +108,7 @@ interface_list ()
   /* Query buffer size. */
   if (sysctl (mib, MIBSIZ, NULL, &bufsiz, NULL, 0) < 0) 
     {
-      zlog (NULL, LOG_WARNING, "sysctl() error by %s", safe_strerror (errno));
+      zlog (NULL, LOG_WARNING, "sysctl() error by %s", strerror (errno));
       return;
     }
 
@@ -119,7 +118,7 @@ interface_list ()
   /* Fetch interface informations into allocated buffer. */
   if (sysctl (mib, MIBSIZ, buf, &bufsiz, NULL, 0) < 0) 
     {
-      zlog (NULL, LOG_WARNING, "sysctl error by %s", safe_strerror (errno));
+      zlog (NULL, LOG_WARNING, "sysctl error by %s", strerror (errno));
       return;
     }
 

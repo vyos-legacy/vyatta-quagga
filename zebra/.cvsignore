@@ -1,5 +1,4 @@
 Makefile
-Makefile.in
 *.o
 zebra
 zebra.conf
@@ -7,7 +6,3 @@ client
 tags
 TAGS
 .deps
-.nfs*
-.libs
-.arch-inventory
-.arch-ids

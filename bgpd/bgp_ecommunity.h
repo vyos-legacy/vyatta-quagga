@@ -18,9 +18,6 @@ along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 02111-1307, USA.  */
 
-#ifndef _QUAGGA_BGP_ECOMMUNITY_H
-#define _QUAGGA_BGP_ECOMMUNITY_H
-
 /* High-order octet of the Extended Communities type field.  */
 #define ECOMMUNITY_ENCODE_AS                0x00
 #define ECOMMUNITY_ENCODE_IP                0x01
@@ -37,9 +34,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 /* Extended Communities value is eight octet long.  */
 #define ECOMMUNITY_SIZE                        8
 
-/* Extended Communities type flag.  */
-#define ECOMMUNITY_FLAG_NON_TRANSITIVE      0x40  
-
 /* Extended Communities attribute.  */
 struct ecommunity
 {
@@ -50,7 +44,7 @@ struct ecommunity
   int size;
 
   /* Extended Communities value.  */
-  u_int8_t *val;
+  u_char *val;
 
   /* Human readable format string.  */
   char *str;
@@ -64,19 +58,15 @@ struct ecommunity_val
 
 #define ecom_length(X)    ((X)->size * ECOMMUNITY_SIZE)
 
-extern void ecommunity_init (void);
-extern void ecommunity_free (struct ecommunity *);
-extern struct ecommunity *ecommunity_new (void);
-extern struct ecommunity *ecommunity_parse (u_int8_t *, u_short);
-extern struct ecommunity *ecommunity_dup (struct ecommunity *);
-extern struct ecommunity *ecommunity_merge (struct ecommunity *, struct ecommunity *);
-extern struct ecommunity *ecommunity_intern (struct ecommunity *);
-extern int ecommunity_cmp (const struct ecommunity *, const struct ecommunity *);
-extern void ecommunity_unintern (struct ecommunity *);
-extern unsigned int ecommunity_hash_make (struct ecommunity *);
-extern struct ecommunity *ecommunity_str2com (const char *, int, int);
-extern char *ecommunity_ecom2str (struct ecommunity *, int);
-extern int ecommunity_match (const struct ecommunity *, const struct ecommunity *);
-extern char *ecommunity_str (struct ecommunity *);
-
-#endif /* _QUAGGA_BGP_ECOMMUNITY_H */
+void ecommunity_init (void);
+void ecommunity_free (struct ecommunity *);
+struct ecommunity *ecommunity_new (void);
+struct ecommunity *ecommunity_parse (char *, u_short);
+struct ecommunity *ecommunity_dup (struct ecommunity *);
+struct ecommunity *ecommunity_merge (struct ecommunity *, struct ecommunity *);
+struct ecommunity *ecommunity_intern (struct ecommunity *);
+int ecommunity_cmp (struct ecommunity *, struct ecommunity *);
+void ecommunity_unintern (struct ecommunity *);
+unsigned int ecommunity_hash_make (struct ecommunity *);
+struct ecommunity *ecommunity_str2com (char *, int, int);
+char *ecommunity_ecom2str (struct ecommunity *, int);

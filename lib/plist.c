@@ -27,8 +27,6 @@
 #include "plist.h"
 #include "sockunion.h"
 #include "buffer.h"
-#include "stream.h"
-#include "log.h"
 
 /* Each prefix-list's entry. */
 struct prefix_list_entry
@@ -73,10 +71,10 @@ struct prefix_master
   struct prefix_list *recent;
 
   /* Hook function which is executed when new prefix_list is added. */
-  void (*add_hook) (struct prefix_list *);
+  void (*add_hook) ();
 
   /* Hook function which is executed when prefix_list is deleted. */
-  void (*delete_hook) (struct prefix_list *);
+  void (*delete_hook) ();
 };
 
 /* Static structure of IPv4 prefix_list's master. */
@@ -111,7 +109,7 @@ static struct prefix_master prefix_master_orf =
   NULL,
 };
 
-static struct prefix_master *
+struct prefix_master *
 prefix_master_get (afi_t afi)
 {
   if (afi == AFI_IP)
@@ -127,7 +125,7 @@ prefix_master_get (afi_t afi)
 
 /* Lookup prefix_list from list of prefix_list by name. */
 struct prefix_list *
-prefix_list_lookup (afi_t afi, const char *name)
+prefix_list_lookup (afi_t afi, char *name)
 {
   struct prefix_list *plist;
   struct prefix_master *master;
@@ -150,8 +148,8 @@ prefix_list_lookup (afi_t afi, const char *name)
   return NULL;
 }
 
-static struct prefix_list *
-prefix_list_new (void)
+struct prefix_list *
+prefix_list_new ()
 {
   struct prefix_list *new;
 
@@ -159,14 +157,14 @@ prefix_list_new (void)
   return new;
 }
 
-static void
+void
 prefix_list_free (struct prefix_list *plist)
 {
   XFREE (MTYPE_PREFIX_LIST, plist);
 }
 
-static struct prefix_list_entry *
-prefix_list_entry_new (void)
+struct prefix_list_entry *
+prefix_list_entry_new ()
 {
   struct prefix_list_entry *new;
 
@@ -174,7 +172,7 @@ prefix_list_entry_new (void)
   return new;
 }
 
-static void
+void
 prefix_list_entry_free (struct prefix_list_entry *pentry)
 {
   XFREE (MTYPE_PREFIX_LIST_ENTRY, pentry);
@@ -182,10 +180,10 @@ prefix_list_entry_free (struct prefix_list_entry *pentry)
 
 /* Insert new prefix list to list of prefix_list.  Each prefix_list
    is sorted by the name. */
-static struct prefix_list *
-prefix_list_insert (afi_t afi, const char *name)
+struct prefix_list *
+prefix_list_insert (afi_t afi, char *name)
 {
-  unsigned int i;
+  int i;
   long number;
   struct prefix_list *plist;
   struct prefix_list *point;
@@ -272,8 +270,8 @@ prefix_list_insert (afi_t afi, const char *name)
   return plist;
 }
 
-static struct prefix_list *
-prefix_list_get (afi_t afi, const char *name)
+struct prefix_list *
+prefix_list_get (afi_t afi, char *name)
 {
   struct prefix_list *plist;
 
@@ -285,7 +283,7 @@ prefix_list_get (afi_t afi, const char *name)
 }
 
 /* Delete prefix-list from prefix_list_master and free it. */
-static void
+void
 prefix_list_delete (struct prefix_list *plist)
 {
   struct prefix_list_list *list;
@@ -327,14 +325,14 @@ prefix_list_delete (struct prefix_list *plist)
 
   if (plist->name)
     XFREE (MTYPE_PREFIX_LIST_STR, plist->name);
-  
+
   prefix_list_free (plist);
-  
+
   if (master->delete_hook)
-    (*master->delete_hook) (NULL);
+    (*master->delete_hook) ();
 }
 
-static struct prefix_list_entry *
+struct prefix_list_entry *
 prefix_list_entry_make (struct prefix *prefix, enum prefix_list_type type,
 			int seq, int le, int ge, int any)
 {
@@ -375,7 +373,7 @@ prefix_list_delete_hook (void (*func) (struct prefix_list *plist))
 }
 
 /* Calculate new sequential number. */
-static int
+int
 prefix_new_seq_get (struct prefix_list *plist)
 {
   int maxseq;
@@ -396,7 +394,7 @@ prefix_new_seq_get (struct prefix_list *plist)
 }
 
 /* Return prefix list entry which has same seq number. */
-static struct prefix_list_entry *
+struct prefix_list_entry *
 prefix_seq_check (struct prefix_list *plist, int seq)
 {
   struct prefix_list_entry *pentry;
@@ -407,7 +405,7 @@ prefix_seq_check (struct prefix_list *plist, int seq)
   return NULL;
 }
 
-static struct prefix_list_entry *
+struct prefix_list_entry *
 prefix_list_entry_lookup (struct prefix_list *plist, struct prefix *prefix,
 			  enum prefix_list_type type, int seq, int le, int ge)
 {
@@ -430,7 +428,7 @@ prefix_list_entry_lookup (struct prefix_list *plist, struct prefix *prefix,
   return NULL;
 }
 
-static void
+void
 prefix_list_entry_delete (struct prefix_list *plist, 
 			  struct prefix_list_entry *pentry,
 			  int update_list)
@@ -462,7 +460,7 @@ prefix_list_entry_delete (struct prefix_list *plist,
     }
 }
 
-static void
+void
 prefix_list_entry_add (struct prefix_list *plist,
 		       struct prefix_list_entry *pentry)
 {
@@ -518,21 +516,24 @@ prefix_list_entry_add (struct prefix_list *plist,
 }
 
 /* Return string of prefix_list_type. */
-const static char *
+static char *
 prefix_list_type_str (struct prefix_list_entry *pentry)
 {
   switch (pentry->type)
     {
     case PREFIX_PERMIT:
       return "permit";
+      break;
     case PREFIX_DENY:
       return "deny";
+      break;
     default:
       return "";
+      break;
     }
 }
 
-static int
+int
 prefix_list_entry_match (struct prefix_list_entry *pentry, struct prefix *p)
 {
   int ret;
@@ -587,7 +588,7 @@ prefix_list_apply (struct prefix_list *plist, void *object)
   return PREFIX_DENY;
 }
 
-static void __attribute__ ((unused))
+void
 prefix_list_print (struct prefix_list *plist)
 {
   struct prefix_list_entry *pentry;
@@ -623,7 +624,7 @@ prefix_list_print (struct prefix_list *plist)
 }
 
 /* Retrun 1 when plist already include pentry policy. */
-static struct prefix_list_entry *
+struct prefix_list_entry *
 prefix_entry_dup_check (struct prefix_list *plist,
 			struct prefix_list_entry *new)
 {
@@ -647,18 +648,18 @@ prefix_entry_dup_check (struct prefix_list *plist,
   return NULL;
 }
 
-static int
-vty_invalid_prefix_range (struct vty *vty, const char *prefix)
+int
+vty_invalid_prefix_range (struct vty *vty, char *prefix)
 {
   vty_out (vty, "%% Invalid prefix range for %s, make sure: len < ge-value <= le-value%s",
            prefix, VTY_NEWLINE);
   return CMD_WARNING;
 }
 
-static int
-vty_prefix_list_install (struct vty *vty, afi_t afi, const char *name, 
-                         const char *seq, const char *typestr,
-			 const char *prefix, const char *ge, const char *le)
+int
+vty_prefix_list_install (struct vty *vty, afi_t afi,
+			 char *name, char *seq, char *typestr,
+			 char *prefix, char *ge, char *le)
 {
   int ret;
   enum prefix_list_type type;
@@ -774,10 +775,10 @@ vty_prefix_list_install (struct vty *vty, afi_t afi, const char *name,
   return CMD_SUCCESS;
 }
 
-static int
-vty_prefix_list_uninstall (struct vty *vty, afi_t afi, const char *name, 
-                           const char *seq, const char *typestr,
-			   const char *prefix, const char *ge, const char *le)
+int
+vty_prefix_list_uninstall (struct vty *vty, afi_t afi,
+			   char *name, char *seq, char *typestr,
+			   char *prefix, char *ge, char *le)
 {
   int ret;
   enum prefix_list_type type;
@@ -802,13 +803,6 @@ vty_prefix_list_uninstall (struct vty *vty, afi_t afi, const char *name,
     {
       prefix_list_delete (plist);
       return CMD_SUCCESS;
-    }
-
-  /* We must have, at a minimum, both the type and prefix here */
-  if ((typestr == NULL) || (prefix == NULL))
-    {
-      vty_out (vty, "%% Both prefix and type required%s", VTY_NEWLINE);
-      return CMD_WARNING;
     }
 
   /* Check sequence number. */
@@ -885,8 +879,8 @@ vty_prefix_list_uninstall (struct vty *vty, afi_t afi, const char *name,
   return CMD_SUCCESS;
 }
 
-static int
-vty_prefix_list_desc_unset (struct vty *vty, afi_t afi, const char *name)
+int
+vty_prefix_list_desc_unset (struct vty *vty, afi_t afi, char *name)
 {
   struct prefix_list *plist;
 
@@ -919,17 +913,13 @@ enum display_type
   first_match_display
 };
 
-static void
+void
 vty_show_prefix_entry (struct vty *vty, afi_t afi, struct prefix_list *plist,
 		       struct prefix_master *master, enum display_type dtype,
 		       int seqnum)
 {
   struct prefix_list_entry *pentry;
 
-  /* Print the name of the protocol */
-  if (zlog_default)
-      vty_out (vty, "%s: ", zlog_proto_names[zlog_default->protocol]);
-                                                                           
   if (dtype == normal_display)
     {
       vty_out (vty, "ip%s prefix-list %s: %d entries%s",
@@ -993,9 +983,9 @@ vty_show_prefix_entry (struct vty *vty, afi_t afi, struct prefix_list *plist,
     }
 }
 
-static int
-vty_show_prefix_list (struct vty *vty, afi_t afi, const char *name,
-		      const char *seq, enum display_type dtype)
+int
+vty_show_prefix_list (struct vty *vty, afi_t afi, char *name,
+		      char *seq, enum display_type dtype)
 {
   struct prefix_list *plist;
   struct prefix_master *master;
@@ -1037,9 +1027,9 @@ vty_show_prefix_list (struct vty *vty, afi_t afi, const char *name,
   return CMD_SUCCESS;
 }
 
-static int
-vty_show_prefix_list_prefix (struct vty *vty, afi_t afi, const char *name, 
-			     const char *prefix, enum display_type type)
+int
+vty_show_prefix_list_prefix (struct vty *vty, afi_t afi, char *name, 
+			     char *prefix, enum display_type type)
 {
   struct prefix_list *plist;
   struct prefix_list_entry *pentry;
@@ -1109,9 +1099,8 @@ vty_show_prefix_list_prefix (struct vty *vty, afi_t afi, const char *name,
   return CMD_SUCCESS;
 }
 
-static int
-vty_clear_prefix_list (struct vty *vty, afi_t afi, const char *name, 
-                       const char *prefix)
+int
+vty_clear_prefix_list (struct vty *vty, afi_t afi, char *name, char *prefix)
 {
   struct prefix_master *master;
   struct prefix_list *plist;
@@ -1573,6 +1562,8 @@ DEFUN (ip_prefix_list_description,
        "Up to 80 characters describing this prefix-list\n")
 {
   struct prefix_list *plist;
+  struct buffer *b;
+  int i;
 
   plist = prefix_list_get (AFI_IP, argv[0]);
   
@@ -1581,7 +1572,19 @@ DEFUN (ip_prefix_list_description,
       XFREE (MTYPE_TMP, plist->desc);
       plist->desc = NULL;
     }
-  plist->desc = argv_concat(argv, argc, 1);
+
+  /* Below is description get codes. */
+  b = buffer_new (1024);
+  for (i = 1; i < argc; i++)
+    {
+      buffer_putstr (b, (u_char *)argv[i]);
+      buffer_putc (b, ' ');
+    }
+  buffer_putc (b, '\0');
+
+  plist->desc = buffer_getstr (b);
+
+  buffer_free (b);
 
   return CMD_SUCCESS;
 }       
@@ -2169,6 +2172,8 @@ DEFUN (ipv6_prefix_list_description,
        "Up to 80 characters describing this prefix-list\n")
 {
   struct prefix_list *plist;
+  struct buffer *b;
+  int i;
 
   plist = prefix_list_get (AFI_IP6, argv[0]);
   
@@ -2177,7 +2182,19 @@ DEFUN (ipv6_prefix_list_description,
       XFREE (MTYPE_TMP, plist->desc);
       plist->desc = NULL;
     }
-  plist->desc = argv_concat(argv, argc, 1);
+
+  /* Below is description get codes. */
+  b = buffer_new (1024);
+  for (i = 1; i < argc; i++)
+    {
+      buffer_putstr (b, (u_char *)argv[i]);
+      buffer_putc (b, ' ');
+    }
+  buffer_putc (b, '\0');
+
+  plist->desc = buffer_getstr (b);
+
+  buffer_free (b);
 
   return CMD_SUCCESS;
 }       
@@ -2357,7 +2374,7 @@ DEFUN (clear_ipv6_prefix_list_name_prefix,
 #endif /* HAVE_IPV6 */
 
 /* Configuration write function. */
-static int
+int
 config_write_prefix_afi (afi_t afi, struct vty *vty)
 {
   struct prefix_list *plist;
@@ -2463,6 +2480,10 @@ config_write_prefix_afi (afi_t afi, struct vty *vty)
   
   return write;
 }
+
+int stream_putc (struct stream *, u_char);
+int stream_putl (struct stream *, u_int32_t);
+int stream_put_prefix (struct stream *, struct prefix *);
 
 struct stream *
 prefix_bgp_orf_entry (struct stream *s, struct prefix_list *plist,
@@ -2589,8 +2610,8 @@ prefix_bgp_show_prefix_list (struct vty *vty, afi_t afi, char *name)
   return plist->count;
 }
 
-static void
-prefix_list_reset_orf (void)
+void
+prefix_list_reset_orf ()
 {
   struct prefix_list *plist;
   struct prefix_list *next;
@@ -2630,14 +2651,14 @@ struct cmd_node prefix_node =
   1
 };
 
-static int
+int
 config_write_prefix_ipv4 (struct vty *vty)
 {
   return config_write_prefix_afi (AFI_IP, vty);
 }
 
-static void
-prefix_list_reset_ipv4 (void)
+void
+prefix_list_reset_ipv4 ()
 {
   struct prefix_list *plist;
   struct prefix_list *next;
@@ -2668,8 +2689,8 @@ prefix_list_reset_ipv4 (void)
   master->recent = NULL;
 }
 
-static void
-prefix_list_init_ipv4 (void)
+void
+prefix_list_init_ipv4 ()
 {
   install_node (&prefix_node, config_write_prefix_ipv4);
 
@@ -2739,14 +2760,14 @@ struct cmd_node prefix_ipv6_node =
   1
 };
 
-static int
+int
 config_write_prefix_ipv6 (struct vty *vty)
 {
   return config_write_prefix_afi (AFI_IP6, vty);
 }
 
-static void
-prefix_list_reset_ipv6 (void)
+void
+prefix_list_reset_ipv6 ()
 {
   struct prefix_list *plist;
   struct prefix_list *next;
@@ -2777,8 +2798,8 @@ prefix_list_reset_ipv6 (void)
   master->recent = NULL;
 }
 
-static void
-prefix_list_init_ipv6 (void)
+void
+prefix_list_init_ipv6 ()
 {
   install_node (&prefix_ipv6_node, config_write_prefix_ipv6);
 

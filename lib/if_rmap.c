@@ -30,11 +30,11 @@
 struct hash *ifrmaphash;
 
 /* Hook functions. */
-static void (*if_rmap_add_hook) (struct if_rmap *) = NULL;
-static void (*if_rmap_delete_hook) (struct if_rmap *) = NULL;
+void (*if_rmap_add_hook) (struct if_rmap *) = NULL;
+void (*if_rmap_delete_hook) (struct if_rmap *) = NULL;
 
-static struct if_rmap *
-if_rmap_new (void)
+struct if_rmap *
+if_rmap_new ()
 {
   struct if_rmap *new;
 
@@ -43,28 +43,27 @@ if_rmap_new (void)
   return new;
 }
 
-static void
+void
 if_rmap_free (struct if_rmap *if_rmap)
 {
   if (if_rmap->ifname)
-    XFREE (MTYPE_IF_RMAP_NAME, if_rmap->ifname);
+    free (if_rmap->ifname);
 
   if (if_rmap->routemap[IF_RMAP_IN])
-    XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_IN]);
+    free (if_rmap->routemap[IF_RMAP_IN]);
   if (if_rmap->routemap[IF_RMAP_OUT])
-    XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_OUT]);
+    free (if_rmap->routemap[IF_RMAP_OUT]);
 
   XFREE (MTYPE_IF_RMAP, if_rmap);
 }
 
 struct if_rmap *
-if_rmap_lookup (const char *ifname)
+if_rmap_lookup (char *ifname)
 {
   struct if_rmap key;
   struct if_rmap *if_rmap;
 
-  /* temporary copy */
-  key.ifname = (char *)ifname;
+  key.ifname = ifname;
 
   if_rmap = hash_lookup (ifrmaphash, &key);
   
@@ -83,34 +82,32 @@ if_rmap_hook_delete (void (*func) (struct if_rmap *))
   if_rmap_delete_hook = func;
 }
 
-static void *
-if_rmap_hash_alloc (void *arg)
+void *
+if_rmap_hash_alloc (struct if_rmap *arg)
 {
-  struct if_rmap *ifarg = arg;
   struct if_rmap *if_rmap;
 
   if_rmap = if_rmap_new ();
-  if_rmap->ifname = XSTRDUP (MTYPE_IF_RMAP_NAME, ifarg->ifname);
+  if_rmap->ifname = strdup (arg->ifname);
 
   return if_rmap;
 }
 
-static struct if_rmap *
-if_rmap_get (const char *ifname)
+struct if_rmap *
+if_rmap_get (char *ifname)
 {
   struct if_rmap key;
 
-  /* temporary copy */
-  key.ifname = (char *)ifname;
+  key.ifname = ifname;
 
   return (struct if_rmap *) hash_get (ifrmaphash, &key, if_rmap_hash_alloc);
 }
 
-static unsigned int
-if_rmap_hash_make (void *data)
+unsigned int
+if_rmap_hash_make (struct if_rmap *if_rmap)
 {
-  struct if_rmap *if_rmap = data;
-  unsigned int i, key;
+  unsigned int key;
+  int i;
 
   key = 0;
   for (i = 0; i < strlen (if_rmap->ifname); i++)
@@ -119,19 +116,16 @@ if_rmap_hash_make (void *data)
   return key;
 }
 
-static int
-if_rmap_hash_cmp (void *arg1, void* arg2)
+int
+if_rmap_hash_cmp (struct if_rmap *if_rmap1, struct if_rmap *if_rmap2)
 {
-  struct if_rmap *if_rmap1 = arg1;
-  struct if_rmap *if_rmap2 = arg2;
   if (strcmp (if_rmap1->ifname, if_rmap2->ifname) == 0)
     return 1;
   return 0;
 }
 
-static struct if_rmap *
-if_rmap_set (const char *ifname, enum if_rmap_type type, 
-             const char *routemap_name)
+struct if_rmap *
+if_rmap_set (char *ifname, enum if_rmap_type type, char *routemap_name)
 {
   struct if_rmap *if_rmap;
 
@@ -140,16 +134,14 @@ if_rmap_set (const char *ifname, enum if_rmap_type type,
   if (type == IF_RMAP_IN)
     {
       if (if_rmap->routemap[IF_RMAP_IN])
-	XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_IN]);
-      if_rmap->routemap[IF_RMAP_IN] 
-        = XSTRDUP (MTYPE_IF_RMAP_NAME, routemap_name);
+	free (if_rmap->routemap[IF_RMAP_IN]);
+      if_rmap->routemap[IF_RMAP_IN] = strdup (routemap_name);
     }
   if (type == IF_RMAP_OUT)
     {
       if (if_rmap->routemap[IF_RMAP_OUT])
-	XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_OUT]);
-      if_rmap->routemap[IF_RMAP_OUT] 
-        = XSTRDUP (MTYPE_IF_RMAP_NAME, routemap_name);
+	free (if_rmap->routemap[IF_RMAP_OUT]);
+      if_rmap->routemap[IF_RMAP_OUT] = strdup (routemap_name);
     }
 
   if (if_rmap_add_hook)
@@ -158,9 +150,8 @@ if_rmap_set (const char *ifname, enum if_rmap_type type,
   return if_rmap;
 }
 
-static int
-if_rmap_unset (const char *ifname, enum if_rmap_type type, 
-               const char *routemap_name)
+int
+if_rmap_unset (char *ifname, enum if_rmap_type type, char *routemap_name)
 {
   struct if_rmap *if_rmap;
 
@@ -175,7 +166,7 @@ if_rmap_unset (const char *ifname, enum if_rmap_type type,
       if (strcmp (if_rmap->routemap[IF_RMAP_IN], routemap_name) != 0)
 	return 0;
 
-      XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_IN]);
+      free (if_rmap->routemap[IF_RMAP_IN]);
       if_rmap->routemap[IF_RMAP_IN] = NULL;      
     }
 
@@ -186,7 +177,7 @@ if_rmap_unset (const char *ifname, enum if_rmap_type type,
       if (strcmp (if_rmap->routemap[IF_RMAP_OUT], routemap_name) != 0)
 	return 0;
 
-      XFREE (MTYPE_IF_RMAP_NAME, if_rmap->routemap[IF_RMAP_OUT]);
+      free (if_rmap->routemap[IF_RMAP_OUT]);
       if_rmap->routemap[IF_RMAP_OUT] = NULL;      
     }
 
@@ -228,16 +219,7 @@ DEFUN (if_rmap,
   if_rmap = if_rmap_set (argv[2], type, argv[0]);
 
   return CMD_SUCCESS;
-}      
-
-ALIAS (if_rmap,
-       if_ipv6_rmap_cmd,
-       "route-map RMAP_NAME (in|out) IFNAME",
-       "Route map set\n"
-       "Route map name\n"
-       "Route map set for input filtering\n"
-       "Route map set for output filtering\n"
-       "Route map interface name\n")
+}       
 
 DEFUN (no_if_rmap,
        no_if_rmap_cmd,
@@ -269,23 +251,13 @@ DEFUN (no_if_rmap,
       return CMD_WARNING;
     }
   return CMD_SUCCESS;
-}      
-
-ALIAS (no_if_rmap,
-       no_if_ipv6_rmap_cmd,
-       "no route-map ROUTEMAP_NAME (in|out) IFNAME",
-       NO_STR
-       "Route map unset\n"
-       "Route map name\n"
-       "Route map for input filtering\n"
-       "Route map for output filtering\n"
-       "Route map interface name\n")
+}       
 
 /* Configuration write function. */
 int
 config_write_if_rmap (struct vty *vty)
 {
-  unsigned int i;
+  int i;
   struct hash_backet *mp;
   int write = 0;
 
@@ -327,11 +299,7 @@ void
 if_rmap_init (int node)
 {
   ifrmaphash = hash_create (if_rmap_hash_make, if_rmap_hash_cmp);
-  if (node == RIPNG_NODE) {
-    install_element (RIPNG_NODE, &if_ipv6_rmap_cmd);
-    install_element (RIPNG_NODE, &no_if_ipv6_rmap_cmd);
-  } else if (node == RIP_NODE) {
-    install_element (RIP_NODE, &if_rmap_cmd);
-    install_element (RIP_NODE, &no_if_rmap_cmd);
-  }
+
+  install_element (node, &if_rmap_cmd);
+  install_element (node, &no_if_rmap_cmd);
 }

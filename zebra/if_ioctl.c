@@ -33,8 +33,8 @@
 #include "zebra/interface.h"
 
 /* Interface looking up using infamous SIOCGIFCONF. */
-static int
-interface_list_ioctl (void)
+int
+interface_list_ioctl ()
 {
   int ret;
   int sock;
@@ -50,7 +50,7 @@ interface_list_ioctl (void)
   sock = socket (AF_INET, SOCK_DGRAM, 0);
   if (sock < 0) 
     {
-      zlog_warn ("Can't make AF_INET socket stream: %s", safe_strerror (errno));
+      zlog_warn ("Can't make AF_INET socket stream: %s", strerror (errno));
       return -1;
     }
 
@@ -79,7 +79,7 @@ interface_list_ioctl (void)
 
       if (ret < 0) 
 	{
-	  zlog_warn ("SIOCGIFCONF: %s", safe_strerror(errno));
+	  zlog_warn ("SIOCGIFCONF: %s", strerror(errno));
 	  goto end;
 	}
       /* Repeatedly get info til buffer fails to grow. */
@@ -102,9 +102,7 @@ interface_list_ioctl (void)
       int size;
 
       ifreq = (struct ifreq *)((caddr_t) ifconf.ifc_req + n);
-      ifp = if_get_by_name_len(ifreq->ifr_name,
-			       strnlen(ifreq->ifr_name,
-				       sizeof(ifreq->ifr_name)));
+      ifp = if_get_by_name (ifreq->ifr_name);
       if_add_update (ifp);
       size = ifreq->ifr_addr.sa_len;
       if (size < sizeof (ifreq->ifr_addr))
@@ -115,9 +113,7 @@ interface_list_ioctl (void)
 #else
   for (n = 0; n < ifconf.ifc_len; n += sizeof(struct ifreq))
     {
-      ifp = if_get_by_name_len(ifreq->ifr_name,
-			       strnlen(ifreq->ifr_name,
-				       sizeof(ifreq->ifr_name)));
+      ifp = if_get_by_name (ifreq->ifr_name);
       if_add_update (ifp);
       ifreq++;
     }
@@ -131,17 +127,19 @@ interface_list_ioctl (void)
 }
 
 /* Get interface's index by ioctl. */
-static int
+int
 if_get_index (struct interface *ifp)
 {
-#if defined(HAVE_IF_NAMETOINDEX)
-  /* Modern systems should have if_nametoindex(3). */
-  ifp->ifindex = if_nametoindex(ifp->name);
-#elif defined(SIOCGIFINDEX) && !defined(HAVE_BROKEN_ALIASES)
-  /* Fall-back for older linuxes. */
+  static int if_fake_index = 1;
+
+#ifdef HAVE_BROKEN_ALIASES
+  /* Linux 2.2.X does not provide individual interface index for aliases. */
+  ifp->ifindex = if_fake_index++;
+  return ifp->ifindex;
+#else
+#ifdef SIOCGIFINDEX
   int ret;
   struct ifreq ifreq;
-  static int if_fake_index;
 
   ifreq_set_name (&ifreq, ifp);
 
@@ -159,24 +157,17 @@ if_get_index (struct interface *ifp)
 #else
   ifp->ifindex = ifreq.ifr_index;
 #endif
+  return ifp->ifindex;
 
 #else
-/* Linux 2.2.X does not provide individual interface index 
-   for aliases and we know it. For others issue a warning. */
-#if !defined(HAVE_BROKEN_ALIASES)
-#warning "Using if_fake_index. You may want to add appropriate"
-#warning "mapping from ifname to ifindex for your system..."
-#endif
-  /* This branch probably won't provide usable results, but anyway... */
-  static int if_fake_index = 1;
   ifp->ifindex = if_fake_index++;
-#endif
-
   return ifp->ifindex;
+#endif /* SIOCGIFINDEX */
+#endif /* HAVE_BROKEN_ALIASES */
 }
 
 #ifdef SIOCGIFHWADDR
-static int
+int
 if_get_hwaddr (struct interface *ifp)
 {
   int ret;
@@ -210,8 +201,8 @@ if_get_hwaddr (struct interface *ifp)
 #ifdef HAVE_GETIFADDRS
 #include <ifaddrs.h>
 
-static int
-if_getaddrs (void)
+int
+if_getaddrs ()
 {
   int ret;
   struct ifaddrs *ifap;
@@ -222,19 +213,12 @@ if_getaddrs (void)
   ret = getifaddrs (&ifap); 
   if (ret != 0)
     {
-      zlog_err ("getifaddrs(): %s", safe_strerror (errno));
+      zlog_err ("getifaddrs(): %s", strerror (errno));
       return -1;
     }
 
   for (ifapfree = ifap; ifap; ifap = ifap->ifa_next)
     {
-      if (ifap->ifa_addr == NULL)
-        {
-          zlog_err ("%s: nonsensical ifaddr with NULL ifa_addr, ifname %s",
-                    __func__, (ifap->ifa_name ? ifap->ifa_name : "(null)"));
-          continue;
-        }
-       
       ifp = if_lookup_by_name (ifap->ifa_name);
       if (ifp == NULL)
 	{
@@ -249,7 +233,6 @@ if_getaddrs (void)
 	  struct sockaddr_in *mask;
 	  struct sockaddr_in *dest;
 	  struct in_addr *dest_pnt;
-	  int flags = 0;
 
 	  addr = (struct sockaddr_in *) ifap->ifa_addr;
 	  mask = (struct sockaddr_in *) ifap->ifa_netmask;
@@ -257,25 +240,19 @@ if_getaddrs (void)
 
 	  dest_pnt = NULL;
 
-	  if (ifap->ifa_dstaddr &&
-	      !IPV4_ADDR_SAME(&addr->sin_addr,
-			      &((struct sockaddr_in *)
-			      	ifap->ifa_dstaddr)->sin_addr))
+	  if (ifap->ifa_flags & IFF_POINTOPOINT) 
 	    {
 	      dest = (struct sockaddr_in *) ifap->ifa_dstaddr;
 	      dest_pnt = &dest->sin_addr;
-	      flags = ZEBRA_IFA_PEER;
 	    }
-	  else if (ifap->ifa_broadaddr &&
-		   !IPV4_ADDR_SAME(&addr->sin_addr,
-				   &((struct sockaddr_in *)
-				     ifap->ifa_broadaddr)->sin_addr))
+
+	  if (ifap->ifa_flags & IFF_BROADCAST)
 	    {
 	      dest = (struct sockaddr_in *) ifap->ifa_broadaddr;
 	      dest_pnt = &dest->sin_addr;
 	    }
 
-	  connected_add_ipv4 (ifp, flags, &addr->sin_addr,
+	  connected_add_ipv4 (ifp, 0, &addr->sin_addr,
 			      prefixlen, dest_pnt, NULL);
 	}
 #ifdef HAVE_IPV6
@@ -285,7 +262,6 @@ if_getaddrs (void)
 	  struct sockaddr_in6 *mask;
 	  struct sockaddr_in6 *dest;
 	  struct in6_addr *dest_pnt;
-	  int flags = 0;
 
 	  addr = (struct sockaddr_in6 *) ifap->ifa_addr;
 	  mask = (struct sockaddr_in6 *) ifap->ifa_netmask;
@@ -293,35 +269,25 @@ if_getaddrs (void)
 
 	  dest_pnt = NULL;
 
-	  if (ifap->ifa_dstaddr &&
-	      !IPV6_ADDR_SAME(&addr->sin6_addr,
-			      &((struct sockaddr_in6 *)
-			      	ifap->ifa_dstaddr)->sin6_addr))
+	  if (ifap->ifa_flags & IFF_POINTOPOINT) 
 	    {
-	      dest = (struct sockaddr_in6 *) ifap->ifa_dstaddr;
-	      dest_pnt = &dest->sin6_addr;
-	      flags = ZEBRA_IFA_PEER;
-	    }
-	  else if (ifap->ifa_broadaddr &&
-		   !IPV6_ADDR_SAME(&addr->sin6_addr,
-				   &((struct sockaddr_in6 *)
-				     ifap->ifa_broadaddr)->sin6_addr))
-	    {
-	      dest = (struct sockaddr_in6 *) ifap->ifa_broadaddr;
-	      dest_pnt = &dest->sin6_addr;
+	      if (ifap->ifa_dstaddr)
+		{
+		  dest = (struct sockaddr_in6 *) ifap->ifa_dstaddr;
+		  dest_pnt = &dest->sin6_addr;
+		}
 	    }
 
-#if defined(KAME)
-	  if (IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr)) 
+	  if (ifap->ifa_flags & IFF_BROADCAST)
 	    {
-	      addr->sin6_scope_id =
-			ntohs(*(u_int16_t *)&addr->sin6_addr.s6_addr[2]);
-	      addr->sin6_addr.s6_addr[2] = addr->sin6_addr.s6_addr[3] = 0;
-	    }	
-#endif          
+	      if (ifap->ifa_broadaddr)
+		{
+		  dest = (struct sockaddr_in6 *) ifap->ifa_broadaddr;
+		  dest_pnt = &dest->sin6_addr;
+		}
+	    }
 
-	  connected_add_ipv6 (ifp, flags, &addr->sin6_addr, prefixlen, 
-	                      dest_pnt, NULL);
+	  connected_add_ipv6 (ifp, &addr->sin6_addr, prefixlen, dest_pnt);
 	}
 #endif /* HAVE_IPV6 */
     }
@@ -343,7 +309,6 @@ if_get_addr (struct interface *ifp)
   struct sockaddr_in dest;
   struct in_addr *dest_pnt;
   u_char prefixlen;
-  int flags = 0;
 
   /* Interface's name and address family. */
   strncpy (ifreq.ifr_name, ifp->name, IFNAMSIZ);
@@ -355,7 +320,7 @@ if_get_addr (struct interface *ifp)
     {
       if (errno != EADDRNOTAVAIL)
 	{
-	  zlog_warn ("SIOCGIFADDR fail: %s", safe_strerror (errno));
+	  zlog_warn ("SIOCGIFADDR fail: %s", strerror (errno));
 	  return ret;
 	}
       return 0;
@@ -368,7 +333,7 @@ if_get_addr (struct interface *ifp)
     {
       if (errno != EADDRNOTAVAIL) 
 	{
-	  zlog_warn ("SIOCGIFNETMASK fail: %s", safe_strerror (errno));
+	  zlog_warn ("SIOCGIFNETMASK fail: %s", strerror (errno));
 	  return ret;
 	}
       return 0;
@@ -383,36 +348,40 @@ if_get_addr (struct interface *ifp)
   /* Point to point or borad cast address pointer init. */
   dest_pnt = NULL;
 
-  ret = if_ioctl (SIOCGIFDSTADDR, (caddr_t) &ifreq);
-  if (ret < 0) 
+  if (ifp->flags & IFF_POINTOPOINT) 
     {
-      if (errno != EADDRNOTAVAIL) 
-	zlog_warn ("SIOCGIFDSTADDR fail: %s", safe_strerror (errno));
-    }
-  else if (!IPV4_ADDR_SAME(&addr.sin_addr, &ifreq.ifr_dstaddr.sin_addr))
-    {
+      ret = if_ioctl (SIOCGIFDSTADDR, (caddr_t) &ifreq);
+      if (ret < 0) 
+	{
+	  if (errno != EADDRNOTAVAIL) 
+	    {
+	      zlog_warn ("SIOCGIFDSTADDR fail: %s", strerror (errno));
+	      return ret;
+	    }
+	  return 0;
+	}
       memcpy (&dest, &ifreq.ifr_dstaddr, sizeof (struct sockaddr_in));
       dest_pnt = &dest.sin_addr;
-      flags = ZEBRA_IFA_PEER;
     }
-  if (!dest_pnt)
+  if (ifp->flags & IFF_BROADCAST)
     {
       ret = if_ioctl (SIOCGIFBRDADDR, (caddr_t) &ifreq);
       if (ret < 0) 
 	{
 	  if (errno != EADDRNOTAVAIL) 
-	    zlog_warn ("SIOCGIFBRDADDR fail: %s", safe_strerror (errno));
+	    {
+	      zlog_warn ("SIOCGIFBRDADDR fail: %s", strerror (errno));
+	      return ret;
+	    }
+	  return 0;
 	}
-      else if (!IPV4_ADDR_SAME(&addr.sin_addr, &ifreq.ifr_broadaddr.sin_addr))
-        {
-	  memcpy (&dest, &ifreq.ifr_broadaddr, sizeof (struct sockaddr_in));
-	  dest_pnt = &dest.sin_addr;
-        }
+      memcpy (&dest, &ifreq.ifr_broadaddr, sizeof (struct sockaddr_in));
+      dest_pnt = &dest.sin_addr;
     }
 
 
   /* Set address to the interface. */
-  connected_add_ipv4 (ifp, flags, &addr.sin_addr, prefixlen, dest_pnt, NULL);
+  connected_add_ipv4 (ifp, 0, &addr.sin_addr, prefixlen, dest_pnt, NULL);
 
   return 0;
 }
@@ -422,11 +391,13 @@ if_get_addr (struct interface *ifp)
 static void
 interface_info_ioctl ()
 {
-  struct listnode *node, *nnode;
+  listnode node;
   struct interface *ifp;
   
-  for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
+  for (node = listhead (iflist); node; node = nextnode (node))
     {
+      ifp = getdata (node);
+
       if_get_index (ifp);
 #ifdef SIOCGIFHWADDR
       if_get_hwaddr (ifp);

@@ -66,14 +66,14 @@ family2afi (int family)
 
 /* If n includes p prefix then return 1 else return 0. */
 int
-prefix_match (const struct prefix *n, const struct prefix *p)
+prefix_match (struct prefix *n, struct prefix *p)
 {
   int offset;
   int shift;
 
   /* Set both prefix's head pointer. */
-  const u_char *np = (const u_char *)&n->u.prefix;
-  const u_char *pp = (const u_char *)&p->u.prefix;
+  u_char *np = (u_char *)&n->u.prefix;
+  u_char *pp = (u_char *)&p->u.prefix;
 
   /* If n's prefix is longer than p's one return 0. */
   if (n->prefixlen > p->prefixlen)
@@ -94,7 +94,7 @@ prefix_match (const struct prefix *n, const struct prefix *p)
 
 /* Copy prefix from src to dest. */
 void
-prefix_copy (struct prefix *dest, const struct prefix *src)
+prefix_copy (struct prefix *dest, struct prefix *src)
 {
   dest->family = src->family;
   dest->prefixlen = src->prefixlen;
@@ -112,22 +112,15 @@ prefix_copy (struct prefix *dest, const struct prefix *src)
     }
   else
     {
-      zlog (NULL, LOG_ERR, "prefix_copy(): Unknown address family %d",
+      zlog (NULL, LOG_INFO, "prefix_copy(): Unknown address family %d",
 	      src->family);
       assert (0);
     }
 }
 
-/* 
- * Return 1 if the address/netmask contained in the prefix structure
- * is the same, and else return 0.  For this routine, 'same' requires
- * that not only the prefix length and the network part be the same,
- * but also the host part.  Thus, 10.0.0.1/8 and 10.0.0.2/8 are not
- * the same.  Note that this routine has the same return value sense
- * as '==' (which is different from prefix_cmp).
- */
+/* If both prefix structure is same then return 1 else return 0. */
 int
-prefix_same (const struct prefix *p1, const struct prefix *p2)
+prefix_same (struct prefix *p1, struct prefix *p2)
 {
   if (p1->family == p2->family && p1->prefixlen == p2->prefixlen)
     {
@@ -143,25 +136,17 @@ prefix_same (const struct prefix *p1, const struct prefix *p2)
   return 0;
 }
 
-/*
- * Return 0 if the network prefixes represented by the struct prefix
- * arguments are the same prefix, and 1 otherwise.  Network prefixes
- * are considered the same if the prefix lengths are equal and the
- * network parts are the same.  Host bits (which are considered masked
- * by the prefix length) are not significant.  Thus, 10.0.0.1/8 and
- * 10.0.0.2/8 are considered equivalent by this routine.  Note that
- * this routine has the same return sense as strcmp (which is different
- * from prefix_same).
- */
+/* When both prefix structure is not same, but will be same after
+   applying mask, return 0. otherwise, return 1 */
 int
-prefix_cmp (const struct prefix *p1, const struct prefix *p2)
+prefix_cmp (struct prefix *p1, struct prefix *p2)
 {
   int offset;
   int shift;
 
   /* Set both prefix's head pointer. */
-  const u_char *pp1 = (const u_char *)&p1->u.prefix;
-  const u_char *pp2 = (const u_char *)&p2->u.prefix;
+  u_char *pp1 = (u_char *)&p1->u.prefix;
+  u_char *pp2 = (u_char *)&p2->u.prefix;
 
   if (p1->family != p2->family || p1->prefixlen != p2->prefixlen)
     return 1;
@@ -181,8 +166,8 @@ prefix_cmp (const struct prefix *p1, const struct prefix *p2)
 }
 
 /* Return prefix family type string. */
-const char *
-prefix_family_str (const struct prefix *p)
+char *
+prefix_family_str (struct prefix *p)
 {
   if (p->family == AF_INET)
     return "inet";
@@ -199,10 +184,7 @@ prefix_ipv4_new ()
 {
   struct prefix_ipv4 *p;
 
-  /* Call prefix_new to allocate a full-size struct prefix to avoid problems
-     where the struct prefix_ipv4 is cast to struct prefix and unallocated
-     bytes were being referenced (e.g. in structure assignments). */
-  p = (struct prefix_ipv4 *)prefix_new();
+  p = XCALLOC (MTYPE_PREFIX_IPV4, sizeof *p);
   p->family = AF_INET;
   return p;
 }
@@ -211,12 +193,12 @@ prefix_ipv4_new ()
 void
 prefix_ipv4_free (struct prefix_ipv4 *p)
 {
-  prefix_free((struct prefix *)p);
+  XFREE (MTYPE_PREFIX_IPV4, p);
 }
 
 /* When string format is invalid return 0. */
 int
-str2prefix_ipv4 (const char *str, struct prefix_ipv4 *p)
+str2prefix_ipv4 (char *str, struct prefix_ipv4 *p)
 {
   int ret;
   int plen;
@@ -250,7 +232,7 @@ str2prefix_ipv4 (const char *str, struct prefix_ipv4 *p)
 
       /* Get prefix length. */
       plen = (u_char) atoi (++pnt);
-      if (plen > IPV4_MAX_PREFIXLEN)
+      if (plen > 32)
 	return 0;
 
       p->family = AF_INET;
@@ -295,7 +277,7 @@ ip_masklen (struct in_addr netmask)
   pnt = (u_char *) &netmask;
   end = pnt + 4;
 
-  while ((pnt < end) && (*pnt == 0xff))
+  while ((*pnt == 0xff) && pnt < end)
     {
       len+= 8;
       pnt++;
@@ -338,7 +320,7 @@ apply_mask_ipv4 (struct prefix_ipv4 *p)
 
 /* If prefix is 0.0.0.0/0 then return 1 else return 0. */
 int
-prefix_ipv4_any (const struct prefix_ipv4 *p)
+prefix_ipv4_any (struct prefix_ipv4 *p)
 {
   return (p->prefix.s_addr == 0 && p->prefixlen == 0);
 }
@@ -347,13 +329,11 @@ prefix_ipv4_any (const struct prefix_ipv4 *p)
 
 /* Allocate a new ip version 6 route */
 struct prefix_ipv6 *
-prefix_ipv6_new (void)
+prefix_ipv6_new ()
 {
   struct prefix_ipv6 *p;
 
-  /* Allocate a full-size struct prefix to avoid problems with structure
-     size mismatches. */
-  p = (struct prefix_ipv6 *)prefix_new();
+  p = XCALLOC (MTYPE_PREFIX_IPV6, sizeof (struct prefix_ipv6));
   p->family = AF_INET6;
   return p;
 }
@@ -362,12 +342,12 @@ prefix_ipv6_new (void)
 void
 prefix_ipv6_free (struct prefix_ipv6 *p)
 {
-  prefix_free((struct prefix *)p);
+  XFREE (MTYPE_PREFIX_IPV6, p);
 }
 
 /* If given string is valid return pin6 else return NULL */
 int
-str2prefix_ipv6 (const char *str, struct prefix_ipv6 *p)
+str2prefix_ipv6 (char *str, struct prefix_ipv6 *p)
 {
   char *pnt;
   char *cp;
@@ -404,8 +384,7 @@ str2prefix_ipv6 (const char *str, struct prefix_ipv6 *p)
   return ret;
 }
 
-/* Convert struct in6_addr netmask into integer.
- * FIXME return u_char as ip_maskleni() does. */
+/* Convert struct in6_addr netmask into integer. */
 int
 ip6_masklen (struct in6_addr netmask)
 {
@@ -476,7 +455,7 @@ apply_mask_ipv6 (struct prefix_ipv6 *p)
 }
 
 void
-str2in6_addr (const char *str, struct in6_addr *addr)
+str2in6_addr (char *str, struct in6_addr *addr)
 {
   int i;
   unsigned int x;
@@ -509,11 +488,10 @@ apply_mask (struct prefix *p)
   return;
 }
 
-/* Utility function of convert between struct prefix <=> union sockunion.
- * FIXME This function isn't used anywhere. */
+/* Utility function of convert between struct prefix <=> union sockunion */
 struct prefix *
-sockunion2prefix (const union sockunion *dest,
-		  const union sockunion *mask)
+sockunion2prefix (union sockunion *dest,
+		  union sockunion *mask)
 {
   if (dest->sa.sa_family == AF_INET)
     {
@@ -540,9 +518,9 @@ sockunion2prefix (const union sockunion *dest,
   return NULL;
 }
 
-/* Utility function of convert between struct prefix <=> union sockunion. */
+/* Utility function of convert between struct prefix <=> union sockunion */
 struct prefix *
-sockunion2hostprefix (const union sockunion *su)
+sockunion2hostprefix (union sockunion *su)
 {
   if (su->sa.sa_family == AF_INET)
     {
@@ -570,7 +548,7 @@ sockunion2hostprefix (const union sockunion *su)
 }
 
 int
-prefix_blen (const struct prefix *p)
+prefix_blen (struct prefix *p)
 {
   switch (p->family) 
     {
@@ -588,7 +566,7 @@ prefix_blen (const struct prefix *p)
 
 /* Generic function for conversion string to struct prefix. */
 int
-str2prefix (const char *str, struct prefix *p)
+str2prefix (char *str, struct prefix *p)
 {
   int ret;
 
@@ -608,7 +586,7 @@ str2prefix (const char *str, struct prefix *p)
 }
 
 int
-prefix2str (const struct prefix *p, char *str, int size)
+prefix2str (struct prefix *p, char *str, int size)
 {
   char buf[BUFSIZ];
 
@@ -634,10 +612,9 @@ prefix_free (struct prefix *p)
 }
 
 /* Utility function.  Check the string only contains digit
- * character.
- * FIXME str.[c|h] would be better place for this function. */
+   character. */
 int
-all_digit (const char *str)
+all_digit (char *str)
 {
   for (; *str != '\0'; str++)
     if (!isdigit ((int) *str))
@@ -653,7 +630,7 @@ void apply_classful_mask_ipv4 (struct prefix_ipv4 *p)
   
   destination = ntohl (p->prefix.s_addr);
   
-  if (p->prefixlen == IPV4_MAX_PREFIXLEN);
+  if (p->prefixlen == 32);
   /* do nothing for host routes */
   else if (IN_CLASSC (destination)) 
     {
@@ -672,34 +649,11 @@ void apply_classful_mask_ipv4 (struct prefix_ipv4 *p)
     }
 }
 
-in_addr_t
-ipv4_network_addr (in_addr_t hostaddr, int masklen)
-{
-  struct in_addr mask;
-
-  masklen2ip (masklen, &mask);
-  return hostaddr & mask.s_addr;
-}
-
-in_addr_t
-ipv4_broadcast_addr (in_addr_t hostaddr, int masklen)
-{
-  struct in_addr mask;
-
-  masklen2ip (masklen, &mask);
-  return (masklen != IPV4_MAX_PREFIXLEN-1) ?
-	 /* normal case */
-         (hostaddr | ~mask.s_addr) :
-	 /* special case for /31 */
-         (hostaddr ^ ~mask.s_addr);
-}
-
 /* Utility function to convert ipv4 netmask to prefixes 
    ex.) "1.1.0.0" "255.255.0.0" => "1.1.0.0/16"
    ex.) "1.0.0.0" NULL => "1.0.0.0/8"                   */
 int
-netmask_str2prefix_str (const char *net_str, const char *mask_str,
-			char *prefix_str)
+netmask_str2prefix_str (char *net_str, char *mask_str, char *prefix_str)
 {
   struct in_addr network;
   struct in_addr mask;
@@ -740,14 +694,3 @@ netmask_str2prefix_str (const char *net_str, const char *mask_str,
   return 1;
 }
 
-#ifdef HAVE_IPV6
-/* Utility function for making IPv6 address string. */
-const char *
-inet6_ntoa (struct in6_addr addr)
-{
-  static char buf[INET6_ADDRSTRLEN];
-
-  inet_ntop (AF_INET6, &addr, buf, INET6_ADDRSTRLEN);
-  return buf;
-}
-#endif /* HAVE_IPV6 */

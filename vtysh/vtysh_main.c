@@ -29,19 +29,30 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
-#include <lib/version.h>
+#include "version.h"
 #include "getopt.h"
 #include "command.h"
-#include "memory.h"
 
 #include "vtysh/vtysh.h"
 #include "vtysh/vtysh_user.h"
-
+
 /* VTY shell program name. */
 char *progname;
 
-/* Configuration file name and directory. */
+/* Configuration file name.  Usually this is configurable, but vtysh
+   has static configuration file only.  */
+char *config_file = NULL;
+
+/* Configuration file and directory. */
+char *config_current = NULL;
 char config_default[] = SYSCONFDIR VTYSH_DEFAULT_CONFIG;
+
+/* Integrated configuration file. */
+char *integrate_file = NULL;
+char *integrate_current = NULL;
+#if 0
+char integrate_default[] = SYSCONFDIR INTEGRATE_DEFAULT_CONFIG;
+#endif
 
 /* Flag for indicate executing child command. */
 int execute_flag = 0;
@@ -57,7 +68,7 @@ static char *line_read;
 
 /* Master of threads. */
 struct thread_master *master;
-
+
 /* SIGTSTP handler.  This function care user's ^Z input. */
 void
 sigtstp (int sig)
@@ -92,10 +103,9 @@ sigint (int sig)
     }
 }
 
-/* Signale wrapper for vtysh. We don't use sigevent because
- * vtysh doesn't use threads. TODO */
+/* Signale wrapper. */
 RETSIGTYPE *
-vtysh_signal_set (int signo, void (*func)(int))
+signal_set (int signo, void (*func)(int))
 {
   int ret;
   struct sigaction sig;
@@ -118,13 +128,13 @@ vtysh_signal_set (int signo, void (*func)(int))
 
 /* Initialization of signal handles. */
 void
-vtysh_signal_init ()
+signal_init ()
 {
-  vtysh_signal_set (SIGINT, sigint);
-  vtysh_signal_set (SIGTSTP, sigtstp);
-  vtysh_signal_set (SIGPIPE, SIG_IGN);
+  signal_set (SIGINT, sigint);
+  signal_set (SIGTSTP, sigtstp);
+  signal_set (SIGPIPE, SIG_IGN);
 }
-
+
 /* Help information display. */
 static void
 usage (int status)
@@ -132,43 +142,34 @@ usage (int status)
   if (status != 0)
     fprintf (stderr, "Try `%s --help' for more information.\n", progname);
   else
-    printf ("Usage : %s [OPTION...]\n\n" \
-	    "Integrated shell for Quagga routing software suite. \n\n" \
-	    "-b, --boot               Execute boot startup configuration\n" \
-	    "-c, --command            Execute argument as command\n" \
-	    "-d, --daemon             Connect only to the specified daemon\n" \
-	    "-E, --echo               Echo prompt and command in -c mode\n" \
-	    "-C, --dryrun             Check configuration for validity and exit\n" \
-	    "-h, --help               Display this help and exit\n\n" \
-	    "Note that multiple commands may be executed from the command\n" \
-	    "line by passing multiple -c args, or by embedding linefeed\n" \
-	    "characters in one or more of the commands.\n\n" \
-	    "Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
-
+    {    
+      printf ("Usage : %s [OPTION...]\n\n\
+Daemon which manages kernel routing table management and \
+redistribution between different routing protocols.\n\n\
+-b, --boot               Execute boot startup configuration\n\
+-e, --eval               Execute argument as command\n\
+-h, --help               Display this help and exit\n\
+\n\
+Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
+    }
   exit (status);
 }
 
 /* VTY shell options, we use GNU getopt library. */
 struct option longopts[] = 
 {
-  { "boot",                 no_argument,             NULL, 'b'},
-  /* For compatibility with older zebra/quagga versions */
+  { "boot",                no_argument,             NULL, 'b'},
   { "eval",                 required_argument,       NULL, 'e'},
-  { "command",              required_argument,       NULL, 'c'},
-  { "daemon",               required_argument,       NULL, 'd'},
-  { "echo",                 no_argument,             NULL, 'E'},
-  { "dryrun",		    no_argument,	     NULL, 'C'},
   { "help",                 no_argument,             NULL, 'h'},
   { 0 }
 };
-
+
 /* Read a string, and return a pointer to it.  Returns NULL on EOF. */
 char *
 vtysh_rl_gets ()
 {
-  HIST_ENTRY *last;
   /* If the buffer has already been allocated, return the memory
-   * to the free pool. */
+     to the free pool. */
   if (line_read)
     {
       free (line_read);
@@ -178,34 +179,23 @@ vtysh_rl_gets ()
   /* Get a line from the user.  Change prompt according to node.  XXX. */
   line_read = readline (vtysh_prompt ());
      
-  /* If the line has any text in it, save it on the history. But only if
-   * last command in history isn't the same one. */
+  /* If the line has any text in it, save it on the history. */
   if (line_read && *line_read)
-    {
-      using_history();
-      last = previous_history();
-      if (!last || strcmp (last->line, line_read) != 0)
-	add_history (line_read);
-    }
+    add_history (line_read);
      
   return (line_read);
 }
-
+
 /* VTY shell main routine. */
 int
 main (int argc, char **argv, char **env)
 {
   char *p;
   int opt;
-  int dryrun = 0;
+  int eval_flag = 0;
   int boot_flag = 0;
-  const char *daemon_name = NULL;
-  struct cmd_rec {
-    const char *line;
-    struct cmd_rec *next;
-  } *cmd = NULL;
-  struct cmd_rec *tail = NULL;
-  int echo_command = 0;
+  char *eval_line = NULL;
+  char *integrated_file = NULL;
 
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
@@ -213,7 +203,7 @@ main (int argc, char **argv, char **env)
   /* Option handling. */
   while (1) 
     {
-      opt = getopt_long (argc, argv, "be:c:d:EhC", longopts, 0);
+      opt = getopt_long (argc, argv, "be:h", longopts, 0);
     
       if (opt == EOF)
 	break;
@@ -226,31 +216,14 @@ main (int argc, char **argv, char **env)
 	  boot_flag = 1;
 	  break;
 	case 'e':
-	case 'c':
-	  {
-	    struct cmd_rec *cr;
-	    cr = XMALLOC(0, sizeof(*cr));
-	    cr->line = optarg;
-	    cr->next = NULL;
-	    if (tail)
-	      tail->next = cr;
-	    else
-	      cmd = cr;
-	    tail = cr;
-	  }
-	  break;
-	case 'd':
-	  daemon_name = optarg;
-	  break;
-	case 'E':
-	  echo_command = 1;
-	  break;
-	case 'C':
-	  dryrun = 1;
+	  eval_flag = 1;
+	  eval_line = optarg;
 	  break;
 	case 'h':
 	  usage (0);
 	  break;
+	case 'i':
+	  integrated_file = strdup (optarg);
 	default:
 	  usage (1);
 	  break;
@@ -261,7 +234,7 @@ main (int argc, char **argv, char **env)
   line_read = NULL;
 
   /* Signal and others. */
-  vtysh_signal_init ();
+  signal_init ();
 
   /* Make vty structure and register commands. */
   vtysh_init_vty ();
@@ -273,66 +246,23 @@ main (int argc, char **argv, char **env)
 
   sort_node ();
 
-  /* Read vtysh configuration file before connecting to daemons. */
-  vtysh_read_config (config_default);
+  vtysh_connect_all ();
 
-  /* Start execution only if not in dry-run mode */
-  if(dryrun)
-    return(0);
-  
-  /* Make sure we pass authentication before proceeding. */
-  vtysh_auth ();
+  /* Read vtysh configuration file. */
+  vtysh_read_config (config_file, config_current, config_default);
 
-  /* Do not connect until we have passed authentication. */
-  if (vtysh_connect_all (daemon_name) <= 0)
+  /* If eval mode */
+  if (eval_flag)
     {
-      fprintf(stderr, "Exiting: failed to connect to any daemons.\n");
-      exit(1);
-    }
-
-  /* If eval mode. */
-  if (cmd)
-    {
-      /* Enter into enable node. */
-      vtysh_execute ("enable");
-
-      while (cmd != NULL)
-        {
-	  char *eol;
-
-	  while ((eol = strchr(cmd->line, '\n')) != NULL)
-	    {
-	      *eol = '\0';
-	      if (echo_command)
-	        printf("%s%s\n", vtysh_prompt(), cmd->line);
-	      vtysh_execute_no_pager(cmd->line);
-	      cmd->line = eol+1;
-	    }
-	  if (echo_command)
-	    printf("%s%s\n", vtysh_prompt(), cmd->line);
-	  vtysh_execute_no_pager (cmd->line);
-
-	  {
-	    struct cmd_rec *cr;
-	    cr = cmd;
-	    cmd = cmd->next;
-	    XFREE(0, cr);
-	  }
-        }
+      vtysh_execute_no_pager (eval_line);
       exit (0);
     }
   
   /* Boot startup configuration file. */
   if (boot_flag)
     {
-      if (vtysh_read_config (integrate_default))
-	{
-	  fprintf (stderr, "Can't open configuration file [%s]\n",
-		   integrate_default);
-	  exit (1);
-	}
-      else
-	exit (0);
+      vtysh_read_config (integrate_file, integrate_current, integrate_default);
+      exit (0);
     }
 
   vtysh_pager_init ();
@@ -341,8 +271,7 @@ main (int argc, char **argv, char **env)
 
   vty_hello (vty);
 
-  /* Enter into enable node. */
-  vtysh_execute ("enable");
+  vtysh_auth ();
 
   /* Preparation for longjmp() in sigtstp(). */
   sigsetjmp (jmpbuf, 1);

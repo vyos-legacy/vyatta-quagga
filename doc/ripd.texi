@@ -1,8 +1,9 @@
 @c -*-texinfo-*-
-@c This is part of the Quagga Manual.
-@c @value{COPYRIGHT_STR}
-@c See file quagga.texi for copying conditions.
+@c This is part of the GNU Zebra Manual.
+@c Copyright (C) 1999, 2000 Kunihiro Ishiguro
+@c See file zebra.texi for copying conditions.
 @node RIP
+@comment  node-name,  next,  previous,  up
 @chapter RIP
 
 RIP -- Routing Information Protocol is widely deployed interior gateway
@@ -20,7 +21,6 @@ version 1 as described in RFC1058.
 @menu
 * Starting and Stopping ripd::  
 * RIP Configuration::           
-* RIP Version Control::
 * How to Announce RIP route::   
 * Filtering RIP Routes::        
 * RIP Metric Manipulation::     
@@ -32,7 +32,8 @@ version 1 as described in RFC1058.
 * RIP Debug Commands::          
 @end menu
 
-@node Starting and Stopping ripd
+@node Starting and Stopping ripd, RIP Configuration, RIP, RIP
+@comment  node-name,  next,  previous,  up
 @section Starting and Stopping ripd
 
 The default configuration file name of @command{ripd}'s is
@@ -40,7 +41,7 @@ The default configuration file name of @command{ripd}'s is
 @value{INSTALL_PREFIX_ETC}.  If @file{ripd.conf} is not there next
 search current directory.
 
-RIP uses UDP port 520 to send and receive RIP packets.  So the user must have
+RIP uses UDP port 521 to send and receive RIP packets.  So the user must have
 the capability to bind the port, generally this means that the user must
 have superuser privileges.  RIP protocol requires interface information
 maintained by @command{zebra} daemon.  So running @command{zebra}
@@ -84,7 +85,8 @@ When the program terminates, retain routes added by @command{ripd}.
 * RIP netmask::                 
 @end menu
 
-@node RIP netmask
+@node RIP netmask,  , Starting and Stopping ripd, Starting and Stopping ripd
+@comment  node-name,  next,  previous,  up
 @subsection RIP netmask
 
 The netmask features of @command{ripd} support both version 1 and version 2 of
@@ -97,7 +99,7 @@ to the packet on the basis of the interface that received the packet.
 Version 2 of RIP supports a variable length subnet mask (VLSM).  By
 extending the subnet mask, the mask can be divided and reused.  Each
 subnet can be used for different purposes such as large to middle size
-LANs and WAN links.  Quagga @command{ripd} does not support the non-sequential
+LANs and WAN links.  Zebra @command{ripd} does not support the non-sequential
 netmasks that are included in RIP Version 2.
 
 In a case of similar information with the same prefix and metric, the
@@ -105,7 +107,8 @@ old information will be suppressed.  Ripd does not currently support
 equal cost multipath routing.
 
 
-@node RIP Configuration
+@node RIP Configuration, How to Announce RIP route, Starting and Stopping ripd, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP Configuration
 
 @deffn Command {router rip} {}
@@ -114,9 +117,16 @@ RIP, use the @code{no router rip} command.  RIP must be enabled before
 carrying out any of the RIP commands.
 @end deffn
 
-@deffn Command {no router rip} {}
+@deffn Command {no rouer rip} {}
 Disable RIP.
 @end deffn
+
+RIP can be configured to process either Version 1 or Version 2 packets,
+the default mode is Version 2.  If no version is specified, then the RIP
+daemon will default to Version 2.  If RIP is set to Version
+1, the setting "Version 1" will be displayed, but the setting "Version
+2" will not be displayed whether or not Version 2 is set explicitly as
+the version of RIP being used.
 
 @deffn {RIP Command} {network @var{network}} {}
 @deffnx {RIP Command} {no network @var{network}} {}
@@ -165,15 +175,32 @@ router rip
 
 Passive interface
 
-@deffn {RIP command} {passive-interface (@var{IFNAME}|default)} {}
+@deffn {RIP command} {passive-interface @var{IFNAME}} {}
 @deffnx {RIP command} {no passive-interface @var{IFNAME}} {}
 This command sets the specified interface to passive mode.  On passive mode
 interface, all receiving packets are processed as normal and ripd does
 not send either multicast or unicast RIP packets except to RIP neighbors
-specified with @code{neighbor} command. The interface may be specified
-as @var{default} to make ripd default to passive on all interfaces. 
+specified with @code{neighbor} command.
+@end deffn
 
-The default is to be passive on all interfaces.
+RIP version handling
+
+@deffn {RIP Command} {version @var{version}} {}
+Set RIP process's version.  @var{version} can be ``1'' or ``2''.
+@end deffn
+
+@deffn {Interface command} {ip rip send version @var{version}} {}
+@var{version} can be `1', `2', `1 2'.  This configuration command
+overrides the router's rip version setting.  The command will enable the
+selected interface to send packets with RIP Version 1, RIP Version 2, or
+both.  In the case of '1 2', packets will be both broadcast and
+multicast.
+@end deffn
+
+@deffn {Interface command} {ip rip receive version @var{version}} {}
+Version setting for incoming RIP packets.  This command will enable the
+selected interface to receive packets in RIP Version 1, RIP Version 2,
+or both.
 @end deffn
 
 RIP split-horizon
@@ -185,60 +212,8 @@ split-horizon}.  If you don't perform split-horizon on the interface,
 please specify @code{no ip split-horizon}.
 @end deffn
 
-@node RIP Version Control
-@section RIP Version Control
-
-RIP can be configured to send either Version 1 or Version 2 packets.
-The default is to send RIPv2 while accepting both RIPv1 and RIPv2 (and
-replying with packets of the appropriate version for REQUESTS /
-triggered updates). The version to receive and send can be specified
-globally, and further overriden on a per-interface basis if needs be
-for send and receive seperately (see below).
-
-It is important to note that RIPv1 can not be authenticated. Further,
-if RIPv1 is enabled then RIP will reply to REQUEST packets, sending the
-state of its RIP routing table to any remote routers that ask on
-demand. For a more detailed discussion on the security implications of
-RIPv1 see @ref{RIP Authentication}.
-
-@deffn {RIP Command} {version @var{version}} {}
-Set RIP version to accept for reads and send.  @var{version}
-can be either `1'' or `2''. 
-
-Disabling RIPv1 by specifying version 2 is STRONGLY encouraged,
-@xref{RIP Authentication}. This may become the default in a future
-release.
-
-Default: Send Version 2, and accept either version.
-@end deffn
-
-@deffn {RIP Command} {no version} {}
-Reset the global version setting back to the default.
-@end deffn
-
-@deffn {Interface command} {ip rip send version @var{version}} {}
-@var{version} can be `1', `2' or `1 2'.
-
-This interface command overrides the global rip version setting, and
-selects which version of RIP to send packets with, for this interface
-specifically. Choice of RIP Version 1, RIP Version 2, or both versions. 
-In the latter case, where `1 2' is specified, packets will be both
-broadcast and multicast.
-
-Default: Send packets according to the global version (version 2)
-@end deffn
-
-@deffn {Interface command} {ip rip receive version @var{version}} {}
-@var{version} can be `1', `2' or `1 2'.
-
-This interface command overrides the global rip version setting, and
-selects which versions of RIP packets will be accepted on this
-interface. Choice of RIP Version 1, RIP Version 2, or both.
-
-Default: Accept packets according to the global setting (both 1 and 2).
-@end deffn
-
-@node How to Announce RIP route
+@node How to Announce RIP route, Filtering RIP Routes, RIP Configuration, RIP
+@comment  node-name,  next,  previous,  up
 @section How to Announce RIP route
 
 @deffn {RIP command} {redistribute kernel} {}
@@ -294,14 +269,16 @@ If you want to specify RIP only static routes:
 
 @deffn {RIP command} {route @var{a.b.c.d/m}} {}
 @deffnx {RIP command} {no route @var{a.b.c.d/m}} {}
-This command is specific to Quagga.  The @code{route} command makes a static
+This command is specific to Zebra.  The @code{route} command makes a static
 route only inside RIP. This command should be used only by advanced
 users who are particularly knowledgeable about the RIP protocol.  In
-most cases, we recommend creating a static route in Quagga and
+most cases, we recommend creating a static route in Zebra and
 redistributing it in RIP using @code{redistribute static}.
 @end deffn
 
-@node  Filtering RIP Routes
+
+@node  Filtering RIP Routes, RIP Metric Manipulation, How to Announce RIP route, RIP
+@comment  node-name,  next,  previous,  up
 @section Filtering RIP Routes
 
 RIP routes can be filtered by a distribute-list.
@@ -341,7 +318,8 @@ name.  Next is the direction of @samp{in} or @samp{out}.  If
 @var{direct} is @samp{in} the access list is applied to input packets.
 @end deffn
 
-@node RIP Metric Manipulation
+@node RIP Metric Manipulation, RIP distance, Filtering RIP Routes, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP Metric Manipulation
 
 RIP metric is a value for distance for the network.  Usually
@@ -362,7 +340,8 @@ affects connected routes.
 @deffnx {RIP command} {offset-list @var{access-list} (in|out) @var{ifname}} {}
 @end deffn
 
-@node RIP distance
+@node RIP distance, RIP route-map, RIP Metric Manipulation, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP distance
 
 Distance value is used in zebra daemon.  Default RIP distance is 120.
@@ -384,7 +363,8 @@ Set default RIP distance to specified value when the route's source IP
 address matches the specified prefix and the specified access-list.
 @end deffn
 
-@node RIP route-map
+@node RIP route-map, RIP Authentication, RIP distance, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP route-map
 
 Usage of @command{ripd}'s route-map support.
@@ -398,11 +378,11 @@ redistribute connected [route-map MAP_NAME]
 .....
 @end example
 
-Cisco applies route-map _before_ routes will exported to rip route table. 
-In current Quagga's test implementation, @command{ripd} applies route-map
-after routes are listed in the route table and before routes will be
-announced to an interface (something like output filter). I think it is not
-so clear, but it is draft and it may be changed at future.
+Cisco applies route-map _before_ routes will exported to rip route
+table.  In current Zebra's test implementation, @command{ripd} applies route-map
+after routes are listed in the route table and before routes will be announced
+to an interface (something like output filter). I think it is not so clear,
+but it is draft and it may be changed at future.
 
 Route-map statement (@pxref{Route Map}) is needed to use route-map
 functionality.
@@ -447,31 +427,9 @@ value range is very large for compatibility with other protocols.  For
 RIP, valid metric values are from 1 to 16.
 @end deffn
 
-@node RIP Authentication
+@node RIP Authentication, RIP Timers, RIP route-map, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP Authentication
-
-RIPv2 allows packets to be authenticated via either an insecure plain
-text password, included with the packet, or via a more secure MD5 based
-@acronym{HMAC, keyed-Hashing for Message AuthentiCation},
-RIPv1 can not be authenticated at all, thus when authentication is
-configured @code{ripd} will discard routing updates received via RIPv1
-packets.
-
-However, unless RIPv1 reception is disabled entirely, 
-@xref{RIP Version Control}, RIPv1 REQUEST packets which are received,
-which query the router for routing information, will still be honoured
-by @code{ripd}, and @code{ripd} WILL reply to such packets. This allows 
-@code{ripd} to honour such REQUESTs (which sometimes is used by old
-equipment and very simple devices to bootstrap their default route),
-while still providing security for route updates which are received.
-
-In short: Enabling authentication prevents routes being updated by
-unauthenticated remote routers, but still can allow routes (I.e. the
-entire RIP routing table) to be queried remotely, potentially by anyone
-on the internet, via RIPv1.
-
-To prevent such unauthenticated querying of routes disable RIPv1,
-@xref{RIP Version Control}.
 
 @deffn {Interface command} {ip rip authentication mode md5} {}
 @deffnx {Interface command} {no ip rip authentication mode md5} {}
@@ -506,7 +464,8 @@ interface eth1
 !
 @end example
 
-@node RIP Timers
+@node RIP Timers, Show RIP Information, RIP Authentication, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP Timers
 
 @deffn {RIP command} {timers basic @var{update} @var{timeout} @var{garbage}} {}
@@ -544,7 +503,8 @@ The @code{no timers basic} command will reset the timers to the default
 settings listed above.
 @end deffn
 
-@node Show RIP Information
+@node Show RIP Information, RIP Debug Commands, RIP Timers, RIP
+@comment  node-name,  next,  previous,  up
 @section Show RIP Information
 
 To display RIP routes.
@@ -587,7 +547,8 @@ Routing Protocol is "rip"
 @end group
 @end example
 
-@node RIP Debug Commands
+@node RIP Debug Commands,  , Show RIP Information, RIP
+@comment  node-name,  next,  previous,  up
 @section RIP Debug Commands
 
 Debug for RIP protocol.
@@ -611,9 +572,9 @@ dump is shown.
 Debug rip between zebra communication.
 @end deffn
 
-This command will show the communication between @command{ripd} and
-@command{zebra}.  The main information will include addition and deletion of
-paths to the kernel and the sending and receiving of interface information.
+This command will show the communication between @command{ripd} and @command{zebra}.  The
+main information will include addition and deletion of paths to the
+kernel and the sending and receiving of interface information.
 
 @deffn Command {show debugging rip} {}
 Display @command{ripd}'s debugging option.

@@ -25,7 +25,6 @@
 
 #include "vector.h"
 #include "vty.h"
-#include "lib/route_types.h"
 
 /* Host configuration variable */
 struct host
@@ -47,6 +46,12 @@ struct host
   /* Log filename. */
   char *logfile;
 
+  /* Log stdout. */
+  u_char log_stdout;
+
+  /* Log syslog. */
+  u_char log_syslog;
+  
   /* config file name of this host */
   char *config;
 
@@ -55,8 +60,7 @@ struct host
   int encrypt;
 
   /* Banner configuration. */
-  const char *motd;
-  char *motdfile;
+  char *motd;
 };
 
 /* There are some command levels which called from command node. */
@@ -67,7 +71,6 @@ enum node_type
   AUTH_ENABLE_NODE,		/* Authentication mode for change enable. */
   ENABLE_NODE,			/* Enable node. */
   CONFIG_NODE,			/* Config node. Default mode of config file. */
-  SERVICE_NODE, 		/* Service node. */
   DEBUG_NODE,			/* Debug node. */
   AAA_NODE,			/* AAA node. */
   KEYCHAIN_NODE,		/* Key-chain node. */
@@ -82,10 +85,8 @@ enum node_type
   BGP_IPV4_NODE,		/* BGP IPv4 unicast address family.  */
   BGP_IPV4M_NODE,		/* BGP IPv4 multicast address family.  */
   BGP_IPV6_NODE,		/* BGP IPv6 address family */
-  BGP_IPV6M_NODE,		/* BGP IPv6 multicast address family. */
   OSPF_NODE,			/* OSPF protocol mode */
   OSPF6_NODE,			/* OSPF protocol for IPv6 mode */
-  ISIS_NODE,			/* ISIS protocol mode */
   MASC_NODE,			/* MASC for multicast.  */
   IRDP_NODE,			/* ICMP Router Discovery Protocol mode. */ 
   IP_NODE,			/* Static ip route node. */
@@ -99,7 +100,6 @@ enum node_type
   SMUX_NODE,			/* SNMP configuration node. */
   DUMP_NODE,			/* Packet dump node. */
   FORWARDING_NODE,		/* IP forwarding node. */
-  PROTOCOL_NODE,                /* protocol filtering node */
   VTY_NODE			/* Vty node. */
 };
 
@@ -111,7 +111,7 @@ struct cmd_node
   enum node_type node;		
 
   /* Prompt character at vty interface. */
-  const char *prompt;			
+  char *prompt;			
 
   /* Is this node's configuration goes to vtysh ? */
   int vtysh;
@@ -123,31 +123,24 @@ struct cmd_node
   vector cmd_vector;	
 };
 
-enum
-{
-  CMD_ATTR_DEPRECATED = 1,
-  CMD_ATTR_HIDDEN,
-};
-
 /* Structure of command element. */
 struct cmd_element 
 {
-  const char *string;			/* Command specification by string. */
-  int (*func) (struct cmd_element *, struct vty *, int, const char *[]);
-  const char *doc;			/* Documentation of this command. */
+  char *string;			/* Command specification by string. */
+  int (*func) (struct cmd_element *, struct vty *, int, char **);
+  char *doc;			/* Documentation of this command. */
   int daemon;                   /* Daemon to which this command belong. */
   vector strvec;		/* Pointing out each description vector. */
-  unsigned int cmdsize;		/* Command index count. */
+  int cmdsize;			/* Command index count. */
   char *config;			/* Configuration string */
   vector subconfig;		/* Sub configuration string */
-  u_char attr;			/* Command attributes */
 };
 
 /* Command description structure. */
 struct desc
 {
-  const char *cmd;			/* Command string. */
-  const char *str;			/* Command's description. */
+  char *cmd;			/* Command string. */
+  char *str;			/* Command's description. */
 };
 
 /* Return value of the commands. */
@@ -169,43 +162,17 @@ struct desc
 /* Turn off these macros when uisng cpp with extract.pl */
 #ifndef VTYSH_EXTRACT_PL  
 
-/* helper defines for end-user DEFUN* macros */
-#define DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, attrs, dnum) \
-  struct cmd_element cmdname = \
-  { \
-    .string = cmdstr, \
-    .func = funcname, \
-    .doc = helpstr, \
-    .attr = attrs, \
-    .daemon = dnum, \
-  };
-
-#define DEFUN_CMD_FUNC_DECL(funcname) \
-  static int funcname (struct cmd_element *, struct vty *, int, const char *[]);
-
-#define DEFUN_CMD_FUNC_TEXT(funcname) \
-  static int funcname \
-    (struct cmd_element *self __attribute__ ((unused)), \
-     struct vty *vty __attribute__ ((unused)), \
-     int argc __attribute__ ((unused)), \
-     const char *argv[] __attribute__ ((unused)) )
-
 /* DEFUN for vty command interafce. Little bit hacky ;-). */
 #define DEFUN(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_FUNC_DECL(funcname) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, 0) \
-  DEFUN_CMD_FUNC_TEXT(funcname)
-
-#define DEFUN_ATTR(funcname, cmdname, cmdstr, helpstr, attr) \
-  DEFUN_CMD_FUNC_DECL(funcname) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, attr, 0) \
-  DEFUN_CMD_FUNC_TEXT(funcname)
-
-#define DEFUN_HIDDEN(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_HIDDEN)
-
-#define DEFUN_DEPRECATED(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED) \
+  int funcname (struct cmd_element *, struct vty *, int, char **); \
+  struct cmd_element cmdname = \
+  { \
+    cmdstr, \
+    funcname, \
+    helpstr \
+  }; \
+  int funcname \
+  (struct cmd_element *self, struct vty *vty, int argc, char **argv)
 
 /* DEFUN_NOSH for commands that vtysh should ignore */
 #define DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr) \
@@ -213,47 +180,35 @@ struct desc
 
 /* DEFSH for vtysh. */
 #define DEFSH(daemon, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(NULL, cmdname, cmdstr, helpstr, 0, daemon) \
+  struct cmd_element cmdname = \
+  { \
+    cmdstr, \
+    NULL, \
+    helpstr, \
+    daemon \
+  }; \
 
 /* DEFUN + DEFSH */
 #define DEFUNSH(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_FUNC_DECL(funcname) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, daemon) \
-  DEFUN_CMD_FUNC_TEXT(funcname)
-
-/* DEFUN + DEFSH with attributes */
-#define DEFUNSH_ATTR(daemon, funcname, cmdname, cmdstr, helpstr, attr) \
-  DEFUN_CMD_FUNC_DECL(funcname) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, attr, daemon) \
-  DEFUN_CMD_FUNC_TEXT(funcname)
-
-#define DEFUNSH_HIDDEN(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUNSH_ATTR (daemon, funcname, cmdname, cmdstr, helpstr, CMD_ATTR_HIDDEN)
-
-#define DEFUNSH_DEPRECATED(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUNSH_ATTR (daemon, funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED)
+  int funcname (struct cmd_element *, struct vty *, int, char **); \
+  struct cmd_element cmdname = \
+  { \
+    cmdstr, \
+    funcname, \
+    helpstr, \
+    daemon \
+  }; \
+  int funcname \
+  (struct cmd_element *self, struct vty *vty, int argc, char **argv)
 
 /* ALIAS macro which define existing command's alias. */
 #define ALIAS(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, 0)
-
-#define ALIAS_ATTR(funcname, cmdname, cmdstr, helpstr, attr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, attr, 0)
-
-#define ALIAS_HIDDEN(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_HIDDEN, 0)
-
-#define ALIAS_DEPRECATED(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED, 0)
-
-#define ALIAS_SH(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, daemon)
-
-#define ALIAS_SH_HIDDEN(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_HIDDEN, daemon)
-
-#define ALIAS_SH_DEPRECATED(daemon, funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED, daemon)
+  struct cmd_element cmdname = \
+  { \
+    cmdstr, \
+    funcname, \
+    helpstr \
+  };
 
 #endif /* VTYSH_EXTRACT_PL */
 
@@ -273,7 +228,6 @@ struct desc
 #define IP_STR "IP information\n"
 #define IPV6_STR "IPv6 information\n"
 #define NO_STR "Negate a command or set its defaults\n"
-#define REDIST_STR "Redistribute information from another routing protocol\n"
 #define CLEAR_STR "Reset functions\n"
 #define RIP_STR "RIP information\n"
 #define BGP_STR "BGP information\n"
@@ -301,8 +255,6 @@ struct desc
 #define PREFIX_LIST_STR "Build a prefix list\n"
 #define OSPF6_DUMP_TYPE_LIST \
 "(neighbor|interface|area|lsa|zebra|config|dbex|spf|route|lsdb|redistribute|hook|asbr|prefix|abr)"
-#define ISIS_STR "IS-IS information\n"
-#define AREA_TAG_STR "[area tag]\n"
 
 #define CONF_BACKUP_EXT ".sav"
 
@@ -325,27 +277,22 @@ struct desc
 #endif /* HAVE_IPV6 */
 
 /* Prototypes. */
-extern void install_node (struct cmd_node *, int (*) (struct vty *));
-extern void install_default (enum node_type);
-extern void install_element (enum node_type, struct cmd_element *);
-extern void sort_node (void);
+void install_node (struct cmd_node *, int (*) (struct vty *));
+void install_default (enum node_type);
+void install_element (enum node_type, struct cmd_element *);
+void sort_node ();
 
-/* Concatenates argv[shift] through argv[argc-1] into a single NUL-terminated
-   string with a space between each element (allocated using
-   XMALLOC(MTYPE_TMP)).  Returns NULL if shift >= argc. */
-extern char *argv_concat (const char **argv, int argc, int shift);
-
-extern vector cmd_make_strvec (const char *);
-extern void cmd_free_strvec (vector);
-extern vector cmd_describe_command (vector, struct vty *, int *status);
-extern char **cmd_complete_command (vector, struct vty *, int *status);
-extern const char *cmd_prompt (enum node_type);
-extern int config_from_file (struct vty *, FILE *);
-extern enum node_type node_parent (enum node_type);
-extern int cmd_execute_command (vector, struct vty *, struct cmd_element **, int);
-extern int cmd_execute_command_strict (vector, struct vty *, struct cmd_element **);
-extern void config_replace_string (struct cmd_element *, char *, ...);
-extern void cmd_init (int);
+char *argv_concat (char **, int, int);
+vector cmd_make_strvec (char *);
+void cmd_free_strvec (vector);
+vector cmd_describe_command ();
+char **cmd_complete_command ();
+char *cmd_prompt (enum node_type);
+int config_from_file (struct vty *, FILE *);
+int cmd_execute_command (vector, struct vty *, struct cmd_element **);
+int cmd_execute_command_strict (vector, struct vty *, struct cmd_element **);
+void config_replace_string (struct cmd_element *, char *, ...);
+void cmd_init (int);
 
 /* Export typical functions. */
 extern struct cmd_element config_end_cmd;
@@ -353,11 +300,9 @@ extern struct cmd_element config_exit_cmd;
 extern struct cmd_element config_quit_cmd;
 extern struct cmd_element config_help_cmd;
 extern struct cmd_element config_list_cmd;
-extern char *host_config_file (void);
-extern void host_config_set (char *);
+int config_exit (struct cmd_element *, struct vty *, int, char **);
+int config_help (struct cmd_element *, struct vty *, int, char **);
+char *host_config_file ();
+void host_config_set (char *);
 
-extern void print_version (const char *);
-
-/* struct host global, ick */
-extern struct host host; 
 #endif /* _ZEBRA_COMMAND_H */
