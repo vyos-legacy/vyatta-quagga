@@ -46,7 +46,7 @@
 #endif
 
 #ifdef RTADV
-/* Router advertisement parameter.  From RFC2461 and RFC3775. */
+/* Router advertisement parameter.  From RFC2461. */
 struct rtadvconf
 {
   /* A flag indicating whether or not the router sends periodic Router
@@ -55,18 +55,16 @@ struct rtadvconf
   int AdvSendAdvertisements;
 
   /* The maximum time allowed between sending unsolicited multicast
-     Router Advertisements from the interface, in milliseconds.
-     MUST be no less than 70 ms (RFC3775, section 7.4) and no greater 
-     than 1800000 ms (See RFC2461).
+     Router Advertisements from the interface, in seconds.  MUST be no
+     less than 4 seconds and no greater than 1800 seconds. 
 
-     Default: 600000 milliseconds */
+     Default: 600 seconds */
   int MaxRtrAdvInterval;
-#define RTADV_MAX_RTR_ADV_INTERVAL 600000
+#define RTADV_MAX_RTR_ADV_INTERVAL 600
 
   /* The minimum time allowed between sending unsolicited multicast
-     Router Advertisements from the interface, in milliseconds.
-     MUST be no less than 30 ms (See RFC3775, section 7.4). 
-     MUST be no greater than .75 * MaxRtrAdvInterval.
+     Router Advertisements from the interface, in seconds.  MUST be no
+     less than 3 seconds and no greater than .75 * MaxRtrAdvInterval.
 
      Default: 0.33 * MaxRtrAdvInterval */
   int MinRtrAdvInterval;
@@ -142,35 +140,6 @@ struct rtadvconf
      advertisement is sent. The link-local prefix SHOULD NOT be
      included in the list of advertised prefixes. */
   struct list *AdvPrefixList;
-
-  /* The TRUE/FALSE value to be placed in the "Home agent"
-     flag field in the Router Advertisement.  See [RFC3775 7.1].
-
-     Default: FALSE */
-  int AdvHomeAgentFlag;
-#ifndef ND_RA_FLAG_HOME_AGENT
-#define ND_RA_FLAG_HOME_AGENT 	0x20
-#endif
-
-  /* The value to be placed in Home Agent Information option if Home 
-     Flag is set.
-     Default: 0 */
-  int HomeAgentPreference;
-
-  /* The value to be placed in Home Agent Information option if Home 
-     Flag is set. Lifetime (seconds) MUST not be greater than 18.2 
-     hours. 
-     The value 0 has special meaning: use of AdvDefaultLifetime value.
-     
-     Default: 0 */
-  int HomeAgentLifetime;
-#define RTADV_MAX_HALIFETIME 65520 /* 18.2 hours */
-
-  /* The TRUE/FALSE value to insert or not an Advertisement Interval
-     option. See [RFC 3775 7.3]
-
-     Default: FALSE */
-  int AdvIntervalOption;
 };
 
 #endif /* RTADV */
@@ -190,9 +159,6 @@ struct zebra_if
   /* Interface's address. */
   struct list *address;
 
-  /* Installed addresses chains tree. */
-  struct route_table *ipv4_subnets;
-
 #ifdef RTADV
   struct rtadvconf rtadv;
 #endif /* RTADV */
@@ -201,41 +167,30 @@ struct zebra_if
   struct irdp_interface irdp;
 #endif
 
-#ifdef SUNOS_5
-  /* the real IFF_UP state of the primary interface.
-   * need this to differentiate between all interfaces being
-   * down (but primary still plumbed) and primary having gone
-   * ~IFF_UP, and all addresses gone.
-   */
-  u_char primary_state;
-#endif /* SUNOS_5 */
 };
 
-extern void if_delete_update (struct interface *ifp);
-extern void if_add_update (struct interface *ifp);
-extern void if_up (struct interface *);
-extern void if_down (struct interface *);
-extern void if_refresh (struct interface *);
-extern void if_flags_update (struct interface *, uint64_t);
-extern int if_subnet_add (struct interface *, struct connected *);
-extern int if_subnet_delete (struct interface *, struct connected *);
+void if_delete_update (struct interface *ifp);
+void if_add_update (struct interface *ifp);
+void if_up (struct interface *);
+void if_down (struct interface *);
+void if_refresh (struct interface *);
 
 #ifdef HAVE_PROC_NET_DEV
-extern void ifstat_update_proc (void);
+int ifstat_update_proc ();
 #endif /* HAVE_PROC_NET_DEV */
 #ifdef HAVE_NET_RT_IFLIST
-extern void ifstat_update_sysctl (void);
+void ifstat_update_sysctl ();
 
 #endif /* HAVE_NET_RT_IFLIST */
 #ifdef HAVE_PROC_NET_DEV
-extern int interface_list_proc (void);
+int interface_list_proc ();
 #endif /* HAVE_PROC_NET_DEV */
 #ifdef HAVE_PROC_NET_IF_INET6
-extern int ifaddr_proc_ipv6 (void);
+int ifaddr_proc_ipv6 ();
 #endif /* HAVE_PROC_NET_IF_INET6 */
 
 #ifdef BSDI
-extern int if_kvm_get_mtu (struct interface *);
+int if_kvm_get_mtu (struct interface *);
 #endif /* BSDI */
 
 #endif /* _ZEBRA_INTERFACE_H */
