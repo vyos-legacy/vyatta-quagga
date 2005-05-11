@@ -40,16 +40,15 @@
 
 #include "ripd/ripd.h"
 #include "ripd/rip_debug.h"
-#include "ripd/rip_interface.h"
-
-/* static prototypes */
-static void rip_enable_apply (struct interface *);
-static void rip_passive_interface_apply (struct interface *);
-static int rip_if_down(struct interface *ifp);
-static int rip_enable_if_lookup (const char *ifname);
-static int rip_enable_network_lookup2 (struct connected *connected);
-static void rip_enable_apply_all (void);
-
+
+void rip_enable_apply (struct interface *);
+void rip_passive_interface_apply (struct interface *);
+int rip_if_down(struct interface *ifp);
+int rip_enable_if_lookup (const char *ifname);
+int rip_enable_network_lookup2 (struct connected *connected);
+void rip_enable_apply_all ();
+
+
 struct message ri_version_msg[] = 
 {
   {RI_RIP_VERSION_1,       "1"},
@@ -71,7 +70,7 @@ static int passive_default;	/* are we in passive-interface default mode? */
 vector Vrip_passive_nondefault;
 
 /* Join to the RIP version 2 multicast group. */
-static int
+int
 ipv4_multicast_join (int sock, 
 		     struct in_addr group, 
 		     struct in_addr ifa,
@@ -93,7 +92,7 @@ ipv4_multicast_join (int sock,
 }
 
 /* Leave from the RIP version 2 multicast group. */
-static int
+int
 ipv4_multicast_leave (int sock, 
 		      struct in_addr group, 
 		      struct in_addr ifa,
@@ -114,8 +113,8 @@ ipv4_multicast_leave (int sock,
 }
 
 /* Allocate new RIP's interface configuration. */
-static struct rip_interface *
-rip_interface_new (void)
+struct rip_interface *
+rip_interface_new ()
 {
   struct rip_interface *ri;
 
@@ -124,7 +123,8 @@ rip_interface_new (void)
 
   /* Default authentication type is simple password for Cisco
      compatibility. */
-  ri->auth_type = RIP_NO_AUTH;
+  /* ri->auth_type = RIP_NO_AUTH; */
+  ri->auth_type = RIP_AUTH_SIMPLE_PASSWORD;
   ri->md5_auth_len = RIP_AUTH_MD5_COMPAT_SIZE;
 
   /* Set default split-horizon behavior.  If the interface is Frame
@@ -140,11 +140,20 @@ rip_interface_new (void)
 void
 rip_interface_multicast_set (int sock, struct connected *connected)
 {
+  int ret;
+  struct servent *sp;
+  struct sockaddr_in from;
   struct in_addr addr;
+  struct prefix_ipv4 *p;
   
   assert (connected != NULL);
   
-  addr = CONNECTED_ID(connected)->u.prefix4;
+  if (if_is_pointopoint(connected->ifp) && CONNECTED_DEST_HOST(connected))
+    p = (struct prefix_ipv4 *) connected->destination;
+  else
+    p = (struct prefix_ipv4 *) connected->address;
+  
+  addr = p->prefix;
 
   if (setsockopt_multicast_ipv4 (sock, IP_MULTICAST_IF, addr, 0, 
                                  connected->ifp->ifindex) < 0) 
@@ -153,13 +162,48 @@ rip_interface_multicast_set (int sock, struct connected *connected)
 		 "source address %s for interface %s",
 		 sock, inet_ntoa(addr),
 		 connected->ifp->name);
+      return;
     }
-  
+
+  /* Bind myself. */
+  memset (&from, 0, sizeof (struct sockaddr_in));
+
+  /* Set RIP port. */
+  sp = getservbyname ("router", "udp");
+  if (sp) 
+    from.sin_port = sp->s_port;
+  else 
+    from.sin_port = htons (RIP_PORT_DEFAULT);
+
+  /* Address should be any address. */
+  from.sin_family = AF_INET;
+  from.sin_addr = connected->address->u.prefix4;
+#ifdef HAVE_SIN_LEN
+  from.sin_len = sizeof (struct sockaddr_in);
+#endif /* HAVE_SIN_LEN */
+
+  if (ripd_privs.change (ZPRIVS_RAISE))
+    zlog_err ("rip_interface_multicast_set: could not raise privs");
+      
+  ret = bind (sock, (struct sockaddr *) & from, sizeof (struct sockaddr_in));
+  if (ret < 0)
+    {
+      zlog_warn ("Can't bind socket fd %d to %s port %d for "
+		 "interface %s: %s",
+	      	 sock,inet_ntoa(from.sin_addr),
+		 (int)ntohs(from.sin_port),
+		 connected->ifp->name,
+		  safe_strerror (errno));
+    }
+
+  if (ripd_privs.change (ZPRIVS_LOWER))
+    zlog_err ("rip_interface_multicast_set: could not lower privs");
+
   return;
 }
 
 /* Send RIP request packet to specified interface. */
-static void
+void
 rip_request_interface_send (struct interface *ifp, u_char version)
 {
   struct sockaddr_in to;
@@ -178,29 +222,29 @@ rip_request_interface_send (struct interface *ifp, u_char version)
   /* RIPv1 and non multicast interface. */
   if (if_is_pointopoint (ifp) || if_is_broadcast (ifp))
     {
-      struct listnode *cnode, *cnnode;
-      struct connected *connected;
+      struct listnode *cnode;
 
       if (IS_RIP_DEBUG_EVENT)
 	zlog_debug ("broadcast request to %s", ifp->name);
 
-      for (ALL_LIST_ELEMENTS (ifp->connected, cnode, cnnode, connected))
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  struct connected *connected;
+
+	  connected = getdata (cnode);
+
 	  if (connected->address->family == AF_INET)
 	    {
 	      memset (&to, 0, sizeof (struct sockaddr_in));
 	      to.sin_port = htons (RIP_PORT_DEFAULT);
               if (connected->destination)
-                /* use specified broadcast or peer destination addr */
+                /* use specified broadcast or point-to-point destination addr */
                 to.sin_addr = connected->destination->u.prefix4;
-              else if (connected->address->prefixlen < IPV4_MAX_PREFIXLEN)
+              else
 	        /* calculate the appropriate broadcast address */
                 to.sin_addr.s_addr =
 		  ipv4_broadcast_addr(connected->address->u.prefix4.s_addr,
 				      connected->address->prefixlen);
-	      else
-		/* do not know where to send the packet */
-	        continue;
 
 	      if (IS_RIP_DEBUG_EVENT)
 		zlog_debug ("SEND request to %s", inet_ntoa (to.sin_addr));
@@ -212,7 +256,7 @@ rip_request_interface_send (struct interface *ifp, u_char version)
 }
 
 /* This will be executed when interface goes up. */
-static void
+void
 rip_request_interface (struct interface *ifp)
 {
   struct rip_interface *ri;
@@ -242,7 +286,7 @@ rip_request_interface (struct interface *ifp)
 }
 
 /* Send RIP request to the neighbor. */
-static void
+void
 rip_request_neighbor (struct in_addr addr)
 {
   struct sockaddr_in to;
@@ -255,8 +299,8 @@ rip_request_neighbor (struct in_addr addr)
 }
 
 /* Request routes at all interfaces. */
-static void
-rip_request_neighbor_all (void)
+void
+rip_request_neighbor_all ()
 {
   struct route_node *rp;
 
@@ -273,23 +317,24 @@ rip_request_neighbor_all (void)
 }
 
 /* Multicast packet receive socket. */
-static int
+int
 rip_multicast_join (struct interface *ifp, int sock)
 {
   struct listnode *cnode;
-  struct connected *ifc;
 
   if (if_is_operative (ifp) && if_is_multicast (ifp))
     {
       if (IS_RIP_DEBUG_EVENT)
 	zlog_debug ("multicast join at %s", ifp->name);
 
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, ifc))
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
 	  struct prefix_ipv4 *p;
+	  struct connected *connected;
 	  struct in_addr group;
 	      
-	  p = (struct prefix_ipv4 *) ifc->address;
+	  connected = getdata (cnode);
+	  p = (struct prefix_ipv4 *) connected->address;
       
 	  if (p->family != AF_INET)
 	    continue;
@@ -305,24 +350,25 @@ rip_multicast_join (struct interface *ifp, int sock)
 }
 
 /* Leave from multicast group. */
-static void
+void
 rip_multicast_leave (struct interface *ifp, int sock)
 {
   struct listnode *cnode;
-  struct connected *connected;
 
   if (if_is_up (ifp) && if_is_multicast (ifp))
     {
       if (IS_RIP_DEBUG_EVENT)
 	zlog_debug ("multicast leave from %s", ifp->name);
 
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
 	  struct prefix_ipv4 *p;
+	  struct connected *connected;
 	  struct in_addr group;
-          
+	      
+	  connected = getdata (cnode);
 	  p = (struct prefix_ipv4 *) connected->address;
-	  
+      
 	  if (p->family != AF_INET)
 	    continue;
       
@@ -334,22 +380,25 @@ rip_multicast_leave (struct interface *ifp, int sock)
 }
 
 /* Is there and address on interface that I could use ? */
-static int
+int
 rip_if_ipv4_address_check (struct interface *ifp)
 {
   struct listnode *nn;
   struct connected *connected;
   int count = 0;
 
-  for (ALL_LIST_ELEMENTS_RO (ifp->connected, nn, connected))
-    {
-      struct prefix *p;
+  for (nn = listhead (ifp->connected); nn; nextnode (nn))
+    if ((connected = getdata (nn)) != NULL)
+      {
+	struct prefix *p;
 
-      p = connected->address;
+	p = connected->address;
 
-      if (p->family == AF_INET)
-        count++;
-    }
+	if (p->family == AF_INET)
+          {
+	    count++;
+	  }
+      }
 						
   return count;
 }
@@ -362,17 +411,20 @@ int
 if_check_address (struct in_addr addr)
 {
   struct listnode *node;
-  struct interface *ifp;
-  
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+
+  for (node = listhead (iflist); node; nextnode (node))
     {
       struct listnode *cnode;
-      struct connected *connected;
+      struct interface *ifp;
 
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, connected))
+      ifp = getdata (node);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
 	{
+	  struct connected *connected;
 	  struct prefix_ipv4 *p;
 
+	  connected = getdata (cnode);
 	  p = (struct prefix_ipv4 *) connected->address;
 
 	  if (p->family != AF_INET)
@@ -380,6 +432,63 @@ if_check_address (struct in_addr addr)
 
 	  if (IPV4_ADDR_CMP (&p->prefix, &addr) == 0)
 	    return 1;
+	}
+    }
+  return 0;
+}
+
+/* is this address from a valid neighbor? (RFC2453 - Sec. 3.9.2) */
+int
+if_valid_neighbor (struct in_addr addr)
+{
+  struct listnode *node;
+  struct connected *connected = NULL;
+  struct prefix_ipv4 *p;
+  struct prefix_ipv4 pa;
+
+  pa.family = AF_INET;
+  pa.prefix = addr;
+  pa.prefixlen = IPV4_MAX_PREFIXLEN;
+
+  for (node = listhead (iflist); node; nextnode (node))
+    {
+      struct listnode *cnode;
+      struct interface *ifp;
+
+      ifp = getdata (node);
+
+      for (cnode = listhead (ifp->connected); cnode; nextnode (cnode))
+	{
+	  connected = getdata (cnode);
+
+	  if (if_is_pointopoint (ifp))
+	    {
+	      p = (struct prefix_ipv4 *) connected->address;
+
+	      if (p && p->family == AF_INET)
+		{
+		  if (IPV4_ADDR_SAME (&p->prefix, &addr))
+		    return 1;
+
+		  p = (struct prefix_ipv4 *) connected->destination;
+		  if (p)
+		    {
+		      if (IPV4_ADDR_SAME (&p->prefix, &addr))
+			return 1;
+		    }
+		  else
+		    {
+		      if (prefix_match(connected->address,(struct prefix *)&pa))
+			return 1;
+		    }
+		}
+	    }
+	  else
+	    {
+	      if ((connected->address->family == AF_INET) &&
+		  prefix_match(connected->address,(struct prefix *)&pa))
+		return 1;
+	    }
 	}
     }
   return 0;
@@ -492,20 +601,20 @@ rip_interface_delete (int command, struct zclient *zclient,
   
   /* To support pseudo interface do not free interface structure.  */
   /* if_delete(ifp); */
-  ifp->ifindex = IFINDEX_INTERNAL;
 
   return 0;
 }
 
 void
-rip_interface_clean (void)
+rip_interface_clean ()
 {
   struct listnode *node;
   struct interface *ifp;
   struct rip_interface *ri;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+  for (node = listhead (iflist); node; nextnode (node))
     {
+      ifp = getdata (node);
       ri = ifp->info;
 
       ri->enable_network = 0;
@@ -521,14 +630,15 @@ rip_interface_clean (void)
 }
 
 void
-rip_interface_reset (void)
+rip_interface_reset ()
 {
   struct listnode *node;
   struct interface *ifp;
   struct rip_interface *ri;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+  for (node = listhead (iflist); node; nextnode (node))
     {
+      ifp = getdata (node);
       ri = ifp->info;
 
       ri->enable_network = 0;
@@ -538,7 +648,8 @@ rip_interface_reset (void)
       ri->ri_send = RI_RIP_UNSPEC;
       ri->ri_receive = RI_RIP_UNSPEC;
 
-      ri->auth_type = RIP_NO_AUTH;
+      /* ri->auth_type = RIP_NO_AUTH; */
+      ri->auth_type = RIP_AUTH_SIMPLE_PASSWORD;
 
       if (ri->auth_str)
 	{
@@ -632,15 +743,17 @@ void
 rip_if_down_all ()
 {
   struct interface *ifp;
-  struct listnode *node, *nnode;
+  struct listnode *node;
 
-  for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
-    rip_if_down (ifp);
+  for (node = listhead (iflist); node; nextnode (node))
+    {
+      ifp = getdata (node);
+      rip_if_down (ifp);
+    }
 }
 
 static void
-rip_apply_address_add (struct connected *ifc)
-{
+rip_apply_address_add (struct connected *ifc) {
   struct prefix_ipv4 address;
   struct prefix *p;
 
@@ -663,7 +776,7 @@ rip_apply_address_add (struct connected *ifc)
   if ((rip_enable_if_lookup(ifc->ifp->name) >= 0) ||
       (rip_enable_network_lookup2(ifc) >= 0))
     rip_redistribute_add(ZEBRA_ROUTE_CONNECT, RIP_ROUTE_INTERFACE,
-                         &address, ifc->ifp->ifindex, NULL, 0, 0);
+                         &address, ifc->ifp->ifindex, NULL);
 
 }
 
@@ -761,35 +874,36 @@ rip_interface_address_delete (int command, struct zclient *zclient,
 /* Check interface is enabled by network statement. */
 /* Check wether the interface has at least a connected prefix that
  * is within the ripng_enable_network table. */
-static int
+int
 rip_enable_network_lookup_if (struct interface *ifp)
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct connected *connected;
   struct prefix_ipv4 address;
 
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, connected))
-    {
-      struct prefix *p; 
-      struct route_node *node;
+  for (nn = listhead (ifp->connected); nn; nextnode (nn))
+    if ((connected = getdata (nn)) != NULL)
+      {
+	struct prefix *p; 
+	struct route_node *node;
 
-      p = connected->address;
+	p = connected->address;
 
-      if (p->family == AF_INET)
-        {
-          address.family = AF_INET;
-          address.prefix = p->u.prefix4;
-          address.prefixlen = IPV4_MAX_BITLEN;
-          
-          node = route_node_match (rip_enable_network,
-                                   (struct prefix *)&address);
-          if (node)
-            {
-              route_unlock_node (node);
-              return 1;
-            }
-        }
-    }
+	if (p->family == AF_INET)
+	  {
+	    address.family = AF_INET;
+	    address.prefix = p->u.prefix4;
+	    address.prefixlen = IPV4_MAX_BITLEN;
+	    
+	    node = route_node_match (rip_enable_network,
+				     (struct prefix *)&address);
+	    if (node)
+	      {
+		route_unlock_node (node);
+		return 1;
+	      }
+	  }
+      }
   return -1;
 }
 
@@ -822,7 +936,7 @@ rip_enable_network_lookup2 (struct connected *connected)
   return -1;
 }
 /* Add RIP enable network. */
-static int
+int
 rip_enable_network_add (struct prefix *p)
 {
   struct route_node *node;
@@ -844,7 +958,7 @@ rip_enable_network_add (struct prefix *p)
 }
 
 /* Delete RIP enable network. */
-static int
+int
 rip_enable_network_delete (struct prefix *p)
 {
   struct route_node *node;
@@ -869,13 +983,13 @@ rip_enable_network_delete (struct prefix *p)
 }
 
 /* Check interface is enabled by ifname statement. */
-static int
+int
 rip_enable_if_lookup (const char *ifname)
 {
   unsigned int i;
   char *str;
 
-  for (i = 0; i < vector_active (rip_enable_interface); i++)
+  for (i = 0; i < vector_max (rip_enable_interface); i++)
     if ((str = vector_slot (rip_enable_interface, i)) != NULL)
       if (strcmp (str, ifname) == 0)
 	return i;
@@ -883,7 +997,7 @@ rip_enable_if_lookup (const char *ifname)
 }
 
 /* Add interface to rip_enable_if. */
-static int
+int
 rip_enable_if_add (const char *ifname)
 {
   int ret;
@@ -900,7 +1014,7 @@ rip_enable_if_add (const char *ifname)
 }
 
 /* Delete interface from rip_enable_if. */
-static int
+int
 rip_enable_if_delete (const char *ifname)
 {
   int index;
@@ -920,7 +1034,7 @@ rip_enable_if_delete (const char *ifname)
 }
 
 /* Join to multicast group and send request to the interface. */
-static int
+int
 rip_interface_wakeup (struct thread *t)
 {
   struct interface *ifp;
@@ -950,43 +1064,42 @@ rip_interface_wakeup (struct thread *t)
 
 int rip_redistribute_check (int);
 
-static void
+void
 rip_connect_set (struct interface *ifp, int set)
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct connected *connected;
   struct prefix_ipv4 address;
 
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, connected))
-    {
-      struct prefix *p; 
-      p = connected->address;
+  for (nn = listhead (ifp->connected); nn; nextnode (nn))
+    if ((connected = getdata (nn)) != NULL)
+      {
+	struct prefix *p; 
+	p = connected->address;
 
-      if (p->family != AF_INET)
-        continue;
+	if (p->family != AF_INET)
+	  continue;
 
-      address.family = AF_INET;
-      address.prefix = p->u.prefix4;
-      address.prefixlen = p->prefixlen;
-      apply_mask_ipv4 (&address);
+	address.family = AF_INET;
+	address.prefix = p->u.prefix4;
+	address.prefixlen = p->prefixlen;
+	apply_mask_ipv4 (&address);
 
-      if (set) {
-        /* Check once more wether this prefix is within a "network IF_OR_PREF" one */
-        if ((rip_enable_if_lookup(connected->ifp->name) >= 0) ||
-            (rip_enable_network_lookup2(connected) >= 0))
-          rip_redistribute_add (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_INTERFACE,
-                                &address, connected->ifp->ifindex, 
-                                NULL, 0, 0);
-      } else
-        {
-          rip_redistribute_delete (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_INTERFACE,
-                                   &address, connected->ifp->ifindex);
-          if (rip_redistribute_check (ZEBRA_ROUTE_CONNECT))
-            rip_redistribute_add (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_REDISTRIBUTE,
-                                  &address, connected->ifp->ifindex,
-                                  NULL, 0, 0);
-        }
-    }
+	if (set) {
+          /* Check once more wether this prefix is within a "network IF_OR_PREF" one */
+          if ((rip_enable_if_lookup(connected->ifp->name) >= 0) ||
+              (rip_enable_network_lookup2(connected) >= 0))
+	    rip_redistribute_add (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_INTERFACE,
+				  &address, connected->ifp->ifindex, NULL);
+	} else
+	  {
+	    rip_redistribute_delete (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_INTERFACE,
+				     &address, connected->ifp->ifindex);
+	    if (rip_redistribute_check (ZEBRA_ROUTE_CONNECT))
+	      rip_redistribute_add (ZEBRA_ROUTE_CONNECT, RIP_ROUTE_REDISTRIBUTE,
+				    &address, connected->ifp->ifindex, NULL);
+	  }
+      }
 }
 
 /* Update interface status. */
@@ -1058,11 +1171,14 @@ void
 rip_enable_apply_all ()
 {
   struct interface *ifp;
-  struct listnode *node, *nnode;
+  struct listnode *node;
 
   /* Check each interface. */
-  for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
-    rip_enable_apply (ifp);
+  for (node = listhead (iflist); node; nextnode (node))
+    {
+      ifp = getdata (node);
+      rip_enable_apply (ifp);
+    }
 }
 
 int
@@ -1086,7 +1202,7 @@ rip_neighbor_lookup (struct sockaddr_in *from)
 }
 
 /* Add new RIP neighbor to the neighbor tree. */
-static int
+int
 rip_neighbor_add (struct prefix_ipv4 *p)
 {
   struct route_node *node;
@@ -1102,7 +1218,7 @@ rip_neighbor_add (struct prefix_ipv4 *p)
 }
 
 /* Delete RIP neighbor from the neighbor tree. */
-static int
+int
 rip_neighbor_delete (struct prefix_ipv4 *p)
 {
   struct route_node *node;
@@ -1140,7 +1256,7 @@ rip_clean_network ()
       }
 
   /* rip_enable_interface. */
-  for (i = 0; i < vector_active (rip_enable_interface); i++)
+  for (i = 0; i < vector_max (rip_enable_interface); i++)
     if ((str = vector_slot (rip_enable_interface, i)) != NULL)
       {
 	free (str);
@@ -1149,13 +1265,13 @@ rip_clean_network ()
 }
 
 /* Utility function for looking up passive interface settings. */
-static int
+int
 rip_passive_nondefault_lookup (const char *ifname)
 {
   unsigned int i;
   char *str;
 
-  for (i = 0; i < vector_active (Vrip_passive_nondefault); i++)
+  for (i = 0; i < vector_max (Vrip_passive_nondefault); i++)
     if ((str = vector_slot (Vrip_passive_nondefault, i)) != NULL)
       if (strcmp (str, ifname) == 0)
 	return i;
@@ -1176,18 +1292,21 @@ rip_passive_interface_apply (struct interface *ifp)
     zlog_debug ("interface %s: passive = %d",ifp->name,ri->passive);
 }
 
-static void
-rip_passive_interface_apply_all (void)
+void
+rip_passive_interface_apply_all ()
 {
   struct interface *ifp;
-  struct listnode *node, *nnode;
+  struct listnode *node;
 
-  for (ALL_LIST_ELEMENTS (iflist, node, nnode, ifp))
-    rip_passive_interface_apply (ifp);
+  for (node = listhead (iflist); node; nextnode (node))
+    {
+      ifp = getdata (node);
+      rip_passive_interface_apply (ifp);
+    }
 }
 
 /* Passive interface. */
-static int
+int
 rip_passive_nondefault_set (struct vty *vty, const char *ifname)
 {
   if (rip_passive_nondefault_lookup (ifname) >= 0)
@@ -1200,7 +1319,7 @@ rip_passive_nondefault_set (struct vty *vty, const char *ifname)
   return CMD_SUCCESS;
 }
 
-static int
+int
 rip_passive_nondefault_unset (struct vty *vty, const char *ifname)
 {
   int i;
@@ -1221,12 +1340,12 @@ rip_passive_nondefault_unset (struct vty *vty, const char *ifname)
 
 /* Free all configured RIP passive-interface settings. */
 void
-rip_passive_nondefault_clean (void)
+rip_passive_nondefault_clean ()
 {
   unsigned int i;
   char *str;
 
-  for (i = 0; i < vector_active (Vrip_passive_nondefault); i++)
+  for (i = 0; i < vector_max (Vrip_passive_nondefault); i++)
     if ((str = vector_slot (Vrip_passive_nondefault, i)) != NULL)
       {
 	free (str);
@@ -1555,7 +1674,6 @@ DEFUN (ip_rip_authentication_mode,
 {
   struct interface *ifp;
   struct rip_interface *ri;
-  int auth_type;
 
   ifp = (struct interface *)vty->index;
   ri = ifp->info;
@@ -1567,9 +1685,9 @@ DEFUN (ip_rip_authentication_mode,
     }
     
   if (strncmp ("md5", argv[0], strlen (argv[0])) == 0)
-    auth_type = RIP_AUTH_MD5;
+    ri->auth_type = RIP_AUTH_MD5;
   else if (strncmp ("text", argv[0], strlen (argv[0])) == 0)
-    auth_type = RIP_AUTH_SIMPLE_PASSWORD;
+    ri->auth_type = RIP_AUTH_SIMPLE_PASSWORD;
   else
     {
       vty_out (vty, "mode should be md5 or text%s", VTY_NEWLINE);
@@ -1577,16 +1695,13 @@ DEFUN (ip_rip_authentication_mode,
     }
 
   if (argc == 1)
-    {
-      ri->auth_type = auth_type;
-      return CMD_SUCCESS;
-    }
+  return CMD_SUCCESS;
 
-  if ( (argc == 2) && (auth_type != RIP_AUTH_MD5) )
+  if ( (argc == 2) && (ri->auth_type != RIP_AUTH_MD5) )
     {
       vty_out (vty, "auth length argument only valid for md5%s", VTY_NEWLINE);
       return CMD_WARNING;
-    }
+}
 
   if (strncmp ("r", argv[1], 1) == 0)
     ri->md5_auth_len = RIP_AUTH_MD5_SIZE;
@@ -1594,9 +1709,7 @@ DEFUN (ip_rip_authentication_mode,
     ri->md5_auth_len = RIP_AUTH_MD5_COMPAT_SIZE;
   else 
     return CMD_WARNING;
-    
-  ri->auth_type = auth_type;
-  
+
   return CMD_SUCCESS;
 }
 
@@ -1628,7 +1741,8 @@ DEFUN (no_ip_rip_authentication_mode,
   ifp = (struct interface *)vty->index;
   ri = ifp->info;
 
-  ri->auth_type = RIP_NO_AUTH;
+  /* ri->auth_type = RIP_NO_AUTH; */
+  ri->auth_type = RIP_AUTH_SIMPLE_PASSWORD;
   ri->md5_auth_len = RIP_AUTH_MD5_COMPAT_SIZE;
 
   return CMD_SUCCESS;
@@ -1852,7 +1966,7 @@ DEFUN (no_ip_rip_split_horizon,
   return CMD_SUCCESS;
 }
 
-DEFUN (no_ip_rip_split_horizon_poisoned_reverse,
+ALIAS (no_ip_rip_split_horizon,
        no_ip_rip_split_horizon_poisoned_reverse_cmd,
        "no ip rip split-horizon poisoned-reverse",
        NO_STR
@@ -1860,23 +1974,6 @@ DEFUN (no_ip_rip_split_horizon_poisoned_reverse,
        "Routing Information Protocol\n"
        "Perform split horizon\n"
        "With poisoned-reverse\n")
-{
-  struct interface *ifp;
-  struct rip_interface *ri;
-
-  ifp = vty->index;
-  ri = ifp->info;
-
-  switch( ri->split_horizon )
-  {
-	case RIP_SPLIT_HORIZON_POISONED_REVERSE:
-		ri->split_horizon = RIP_SPLIT_HORIZON;
-	default:
-		break;
-  }
-
-  return CMD_SUCCESS;
-}
 
 DEFUN (rip_passive_interface,
        rip_passive_interface_cmd,
@@ -1920,16 +2017,17 @@ DEFUN (no_rip_passive_interface,
 }
 
 /* Write rip configuration of each interface. */
-static int
+int
 rip_interface_config_write (struct vty *vty)
 {
   struct listnode *node;
   struct interface *ifp;
 
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+  for (node = listhead (iflist); node; nextnode (node))
     {
       struct rip_interface *ri;
 
+      ifp = getdata (node);
       ri = ifp->info;
 
       /* Do not display the interface if there is no
@@ -1982,8 +2080,11 @@ rip_interface_config_write (struct vty *vty)
 		 VTY_NEWLINE);
 
       /* RIP authentication. */
+#if 0 
+      /* RIP_AUTH_SIMPLE_PASSWORD becomes default mode. */
       if (ri->auth_type == RIP_AUTH_SIMPLE_PASSWORD)
 	vty_out (vty, " ip rip authentication mode text%s", VTY_NEWLINE);
+#endif /* 0 */
 
       if (ri->auth_type == RIP_AUTH_MD5)
         {
@@ -2025,7 +2126,7 @@ config_write_rip_network (struct vty *vty, int config_mode)
 	       VTY_NEWLINE);
 
   /* Interface name RIP enable statement. */
-  for (i = 0; i < vector_active (rip_enable_interface); i++)
+  for (i = 0; i < vector_max (rip_enable_interface); i++)
     if ((ifname = vector_slot (rip_enable_interface, i)) != NULL)
       vty_out (vty, "%s%s%s",
 	       config_mode ? " network " : "    ",
@@ -2044,7 +2145,7 @@ config_write_rip_network (struct vty *vty, int config_mode)
   if (config_mode) {
     if (passive_default)
       vty_out (vty, " passive-interface default%s", VTY_NEWLINE);
-    for (i = 0; i < vector_active (Vrip_passive_nondefault); i++)
+    for (i = 0; i < vector_max (Vrip_passive_nondefault); i++)
       if ((ifname = vector_slot (Vrip_passive_nondefault, i)) != NULL)
 	vty_out (vty, " %spassive-interface %s%s",
 		 (passive_default ? "no " : ""), ifname, VTY_NEWLINE);
@@ -2061,7 +2162,7 @@ struct cmd_node interface_node =
 };
 
 /* Called when interface structure allocated. */
-static int
+int
 rip_interface_new_hook (struct interface *ifp)
 {
   ifp->info = rip_interface_new ();
@@ -2069,7 +2170,7 @@ rip_interface_new_hook (struct interface *ifp)
 }
 
 /* Called when interface structure deleted. */
-static int
+int
 rip_interface_delete_hook (struct interface *ifp)
 {
   XFREE (MTYPE_RIP_INTERFACE, ifp->info);
@@ -2079,7 +2180,7 @@ rip_interface_delete_hook (struct interface *ifp)
 
 /* Allocate and initialize interface vector. */
 void
-rip_if_init (void)
+rip_if_init ()
 {
   /* Default initial size of interface vector. */
   if_init();
