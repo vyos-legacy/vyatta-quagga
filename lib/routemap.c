@@ -160,7 +160,7 @@ route_map_lookup_by_name (const char *name)
 
 /* Lookup route map.  If there isn't route map create one and return
    it. */
-static struct route_map *
+struct route_map *
 route_map_get (const char *name)
 {
   struct route_map *map;
@@ -172,7 +172,7 @@ route_map_get (const char *name)
 }
 
 /* Return route map's type string. */
-static const char *
+const static char *
 route_map_type_str (enum route_map_type type)
 {
   switch (type)
@@ -189,7 +189,7 @@ route_map_type_str (enum route_map_type type)
     }
 }
 
-static int
+int
 route_map_empty (struct route_map *map)
 {
   if (map->head == NULL && map->tail == NULL)
@@ -205,21 +205,11 @@ vty_show_route_map_entry (struct vty *vty, struct route_map *map)
   struct route_map_index *index;
   struct route_map_rule *rule;
 
-  /* Print the name of the protocol */
-  if (zlog_default)
-    vty_out (vty, "%s:%s", zlog_proto_names[zlog_default->protocol],
-             VTY_NEWLINE);
-
   for (index = map->head; index; index = index->next)
     {
       vty_out (vty, "route-map %s, %s, sequence %d%s",
                map->name, route_map_type_str (index->type),
                index->pref, VTY_NEWLINE);
-
-      /* Description */
-      if (index->description)
-	vty_out (vty, "  Description:%s    %s%s", VTY_NEWLINE,
-		 index->description, VTY_NEWLINE);
       
       /* Match clauses */
       vty_out (vty, "  Match clauses:%s", VTY_NEWLINE);
@@ -232,23 +222,26 @@ vty_show_route_map_entry (struct vty *vty, struct route_map *map)
         vty_out (vty, "    %s %s%s",
                  rule->cmd->str, rule->rule_str, VTY_NEWLINE);
       
-      /* Call clause */
-      vty_out (vty, "  Call clause:%s", VTY_NEWLINE);
+      vty_out (vty, "  Action:%s", VTY_NEWLINE);
+      
       if (index->nextrm)
         vty_out (vty, "    Call %s%s", index->nextrm, VTY_NEWLINE);
-      
-      /* Exit Policy */
-      vty_out (vty, "  Action:%s", VTY_NEWLINE);
-      if (index->exitpolicy == RMAP_GOTO)
+      else if (index->exitpolicy == RMAP_GOTO)
         vty_out (vty, "    Goto %d%s", index->nextpref, VTY_NEWLINE);
       else if (index->exitpolicy == RMAP_NEXT)
-        vty_out (vty, "    Continue to next entry%s", VTY_NEWLINE);
+        {
+          vty_out (vty, "    Goto next, (entry ");
+          if (index->next)
+            vty_out (vty, " %d)%s", index->next->pref, VTY_NEWLINE);
+          else
+            vty_out (vty, " undefined)%s", VTY_NEWLINE);
+        }
       else if (index->exitpolicy == RMAP_EXIT)
         vty_out (vty, "    Exit routemap%s", VTY_NEWLINE);
     }
 }
 
-static int
+int
 vty_show_route_map (struct vty *vty, const char *name)
 {
   struct route_map *map;
@@ -268,19 +261,14 @@ vty_show_route_map (struct vty *vty, const char *name)
           return CMD_WARNING;
         }
     }
-  else
-    {
-      for (map = route_map_master.head; map; map = map->next)
-	vty_show_route_map_entry (vty, map);
-    }
   return CMD_SUCCESS;
 }
 
 
 /* New route map allocation. Please note route map's name must be
    specified. */
-static struct route_map_index *
-route_map_index_new (void)
+struct route_map_index *
+route_map_index_new ()
 {
   struct route_map_index *new;
 
@@ -316,7 +304,7 @@ route_map_index_delete (struct route_map_index *index, int notify)
 
   /* Free 'char *nextrm' if not NULL */
   if (index->nextrm)
-    XFREE (MTYPE_ROUTE_MAP_NAME, index->nextrm);
+    free (index->nextrm);
 
     /* Execute event hook. */
   if (route_map_master.event_hook && notify)
@@ -327,7 +315,7 @@ route_map_index_delete (struct route_map_index *index, int notify)
 }
 
 /* Lookup index from route map. */
-static struct route_map_index *
+struct route_map_index *
 route_map_index_lookup (struct route_map *map, enum route_map_type type,
 			int pref)
 {
@@ -341,7 +329,7 @@ route_map_index_lookup (struct route_map *map, enum route_map_type type,
 }
 
 /* Add new index to route map. */
-static struct route_map_index *
+struct route_map_index *
 route_map_index_add (struct route_map *map, enum route_map_type type,
 		     int pref)
 {
@@ -393,7 +381,7 @@ route_map_index_add (struct route_map *map, enum route_map_type type,
 }
 
 /* Get route map index. */
-static struct route_map_index *
+struct route_map_index *
 route_map_index_get (struct route_map *map, enum route_map_type type, 
 		     int pref)
 {
@@ -412,8 +400,8 @@ route_map_index_get (struct route_map *map, enum route_map_type type,
 }
 
 /* New route map rule */
-static struct route_map_rule *
-route_map_rule_new (void)
+struct route_map_rule *
+route_map_rule_new ()
 {
   struct route_map_rule *new;
 
@@ -436,13 +424,13 @@ route_map_install_set (struct route_map_rule_cmd *cmd)
 }
 
 /* Lookup rule command from match list. */
-static struct route_map_rule_cmd *
+struct route_map_rule_cmd *
 route_map_lookup_match (const char *name)
 {
   unsigned int i;
   struct route_map_rule_cmd *rule;
 
-  for (i = 0; i < vector_active (route_match_vec); i++)
+  for (i = 0; i < vector_max (route_match_vec); i++)
     if ((rule = vector_slot (route_match_vec, i)) != NULL)
       if (strcmp (rule->str, name) == 0)
 	return rule;
@@ -450,13 +438,13 @@ route_map_lookup_match (const char *name)
 }
 
 /* Lookup rule command from set list. */
-static struct route_map_rule_cmd *
+struct route_map_rule_cmd *
 route_map_lookup_set (const char *name)
 {
   unsigned int i;
   struct route_map_rule_cmd *rule;
 
-  for (i = 0; i < vector_active (route_set_vec); i++)
+  for (i = 0; i < vector_max (route_set_vec); i++)
     if ((rule = vector_slot (route_set_vec, i)) != NULL)
       if (strcmp (rule->str, name) == 0)
 	return rule;
@@ -501,7 +489,7 @@ route_map_rule_delete (struct route_map_rule_list *list,
 }
 
 /* strcmp wrapper function which don't crush even argument is NULL. */
-static int
+int
 rulecmp (const char *dst, const char *src)
 {
   if (dst == NULL)
@@ -739,7 +727,7 @@ route_map_delete_set (struct route_map_index *index, const char *set_name,
    We need to make sure our route-map processing matches the above
 */
 
-static route_map_result_t
+route_map_result_t
 route_map_apply_match (struct route_map_rule_list *match_list,
                        struct prefix *prefix, route_map_object_t type,
                        void *object)
@@ -883,7 +871,7 @@ route_map_event_hook (void (*func) (route_map_event_t, const char *))
 }
 
 void
-route_map_init (void)
+route_map_init ()
 {
   /* Make vector for match and set. */
   route_match_vec = vector_init (1);
@@ -1077,7 +1065,7 @@ DEFUN (rmap_onmatch_goto,
   if (index)
     {
       if (argc == 1 && argv[0])
-        VTY_GET_INTEGER_RANGE("route-map index", d, argv[0], 1, 65536);
+        VTY_GET_INTEGER_RANGE("route-map index", d, argv[0], 1, 65536)
       else
         d = index->pref + 1;
       
@@ -1140,17 +1128,23 @@ ALIAS (no_rmap_onmatch_goto,
        "Continue on a different entry within the route-map\n"
        "Route-map entry sequence number\n")
 
+DEFUN (rmap_show,
+       rmap_show_cmd,
+       "show route-map",
+       SHOW_STR
+       "route-map information\n")
+{
+    return vty_show_route_map (vty, NULL);
+}
+
 DEFUN (rmap_show_name,
        rmap_show_name_cmd,
-       "show route-map [WORD]",
+       "show route-map WORD",
        SHOW_STR
        "route-map information\n"
        "route-map name\n")
 {
-    const char *name = NULL;
-    if (argc)
-      name = argv[0];
-    return vty_show_route_map (vty, name);
+    return vty_show_route_map (vty, argv[0]);
 }
 
 ALIAS (rmap_onmatch_goto,
@@ -1171,8 +1165,8 @@ DEFUN (rmap_call,
   if (index)
     {
       if (index->nextrm)
-          XFREE (MTYPE_ROUTE_MAP_NAME, index->nextrm);
-      index->nextrm = XSTRDUP (MTYPE_ROUTE_MAP_NAME, argv[0]);
+          free (index->nextrm);
+      index->nextrm = strdup (argv[0]);
     }
   return CMD_SUCCESS;
 }
@@ -1189,51 +1183,15 @@ DEFUN (no_rmap_call,
 
   if (index->nextrm)
     {
-      XFREE (MTYPE_ROUTE_MAP_NAME, index->nextrm);
+      free (index->nextrm);
       index->nextrm = NULL;
     }
 
   return CMD_SUCCESS;
 }
 
-DEFUN (rmap_description,
-       rmap_description_cmd,
-       "description .LINE",
-       "Route-map comment\n"
-       "Comment describing this route-map rule\n")
-{
-  struct route_map_index *index;
-
-  index = vty->index;
-  if (index)
-    {
-      if (index->description)
-	XFREE (MTYPE_TMP, index->description);
-      index->description = argv_concat (argv, argc, 0);
-    }
-  return CMD_SUCCESS;
-}
-
-DEFUN (no_rmap_description,
-       no_rmap_description_cmd,
-       "no description",
-       NO_STR
-       "Route-map comment\n")
-{
-  struct route_map_index *index;
-
-  index = vty->index;
-  if (index)
-    {
-      if (index->description)
-	XFREE (MTYPE_TMP, index->description);
-      index->description = NULL;
-    }
-  return CMD_SUCCESS;
-}
-
 /* Configuration write function. */
-static int
+int
 route_map_config_write (struct vty *vty)
 {
   struct route_map *map;
@@ -1254,9 +1212,6 @@ route_map_config_write (struct vty *vty)
 		 map->name,
 		 route_map_type_str (index->type),
 		 index->pref, VTY_NEWLINE);
-
-	if (index->description)
-	  vty_out (vty, " description %s%s", index->description, VTY_NEWLINE);
 
 	for (rule = index->match_list.head; rule; rule = rule->next)
 	  vty_out (vty, " match %s %s%s", rule->cmd->str, 
@@ -1289,7 +1244,7 @@ struct cmd_node rmap_node =
 
 /* Initialization of route map vector. */
 void
-route_map_init_vty (void)
+route_map_init_vty ()
 {
   /* Install route map top node. */
   install_node (&rmap_node, route_map_config_write);
@@ -1315,11 +1270,8 @@ route_map_init_vty (void)
   /* Install the call stuff. */
   install_element (RMAP_NODE, &rmap_call_cmd);
   install_element (RMAP_NODE, &no_rmap_call_cmd);
-
-  /* Install description commands. */
-  install_element (RMAP_NODE, &rmap_description_cmd);
-  install_element (RMAP_NODE, &no_rmap_description_cmd);
    
   /* Install show command */
+  install_element (ENABLE_NODE, &rmap_show_cmd);
   install_element (ENABLE_NODE, &rmap_show_name_cmd);
 }
