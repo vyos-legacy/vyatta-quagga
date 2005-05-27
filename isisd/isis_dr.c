@@ -103,7 +103,7 @@ isis_run_dr_l2 (struct thread *thread)
   return ISIS_OK;
 }
 
-static int
+int
 isis_check_dr_change (struct isis_adjacency *adj, int level)
 {
   int i;
@@ -152,8 +152,9 @@ isis_dr_elect (struct isis_circuit *circuit, int level)
   /*
    * Loop the adjacencies and find the one with the biggest priority
    */
-  for (ALL_LIST_ELEMENTS_RO (list, node, adj))
+  for (node = listhead (list); node; nextnode (node))
     {
+      adj = getdata (node);
       /* clear flag for show output */
       adj->dis_record[level - 1].dis = ISIS_IS_NOT_DIS;
       adj->dis_record[level - 1].last_dis_change = time (NULL);
@@ -214,8 +215,11 @@ isis_dr_elect (struct isis_circuit *circuit, int level)
 	   */
 
 	  /* rotate the history log */
-	  for (ALL_LIST_ELEMENTS_RO (list, node, adj))
-            isis_check_dr_change (adj, level);
+	  for (node = listhead (list); node; nextnode (node))
+	    {
+	      adj = getdata (node);
+	      isis_check_dr_change (adj, level);
+	    }
 
 	  /* commence */
 	  list_delete (list);
@@ -234,8 +238,11 @@ isis_dr_elect (struct isis_circuit *circuit, int level)
        * if yes rotate the history log
        */
 
-      for (ALL_LIST_ELEMENTS_RO (list, node, adj))
-        isis_check_dr_change (adj, level);
+      for (node = listhead (list); node; nextnode (node))
+	{
+	  adj = getdata (node);
+	  isis_check_dr_change (adj, level);
+	}
 
       /*
        * We are not DR - if we were -> resign
@@ -307,8 +314,7 @@ isis_dr_commence (struct isis_circuit *circuit, int level)
 {
   u_char old_dr[ISIS_SYS_ID_LEN + 2];
 
-  if (isis->debugs & DEBUG_EVENTS)
-    zlog_debug ("isis_dr_commence l%d", level);
+  zlog_debug ("isis_dr_commence l%d", level);
 
   /* Lets keep a pause in DR election */
   circuit->u.bc.run_dr_elect[level - 1] = 0;
