@@ -114,7 +114,6 @@ config_write_ospf6_debug (struct vty *vty)
   config_write_ospf6_debug_neighbor (vty);
   config_write_ospf6_debug_spf (vty);
   config_write_ospf6_debug_route (vty);
-  config_write_ospf6_debug_brouter (vty);
   config_write_ospf6_debug_asbr (vty);
   config_write_ospf6_debug_abr (vty);
   config_write_ospf6_debug_flood (vty);
@@ -188,16 +187,19 @@ DEFUN (show_ipv6_ospf6_database,
 
   level = parse_show_level (argc, argv);
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, NULL, NULL, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, NULL, NULL, oi->lsdb);
@@ -260,18 +262,21 @@ DEFUN (show_ipv6_ospf6_database_type,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, NULL, NULL, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, NULL, NULL, oi->lsdb);
@@ -348,16 +353,19 @@ DEFUN (show_ipv6_ospf6_database_id,
   argv++;
   level = parse_show_level (argc, argv);
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, &id, NULL, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, &id, NULL, oi->lsdb);
@@ -444,16 +452,19 @@ DEFUN (show_ipv6_ospf6_database_router,
   argv++;
   level = parse_show_level (argc, argv);
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, NULL, &adv_router, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, NULL, &adv_router, oi->lsdb);
@@ -558,18 +569,21 @@ DEFUN (show_ipv6_ospf6_database_type_id,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, &id, NULL, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, &id, NULL, oi->lsdb);
@@ -714,18 +728,21 @@ DEFUN (show_ipv6_ospf6_database_type_router,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, NULL, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, NULL, &adv_router, oi->lsdb);
@@ -864,16 +881,19 @@ DEFUN (show_ipv6_ospf6_database_id_router,
   argv++;
   level = parse_show_level (argc, argv);
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, &id, &adv_router, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, &id, &adv_router, oi->lsdb);
@@ -947,16 +967,19 @@ DEFUN (show_ipv6_ospf6_database_adv_router_linkstate_id,
   argv++;
   level = parse_show_level (argc, argv);
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, &id, &adv_router, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, &id, &adv_router, oi->lsdb);
@@ -1048,18 +1071,21 @@ DEFUN (show_ipv6_ospf6_database_type_id_router,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oi->lsdb);
@@ -1170,18 +1196,21 @@ DEFUN (show_ipv6_ospf6_database_type_adv_router_linkstate_id,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oi->lsdb);
@@ -1253,16 +1282,19 @@ DEFUN (show_ipv6_ospf6_database_self_originated,
 
   adv_router = o->router_id;
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
+      oa = (struct ospf6_area *) getdata (i);
       vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
       ospf6_lsdb_show (vty, level, NULL, NULL, &adv_router, oa->lsdb);
     }
 
-  for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+  for (i = listhead (o->area_list); i; nextnode (i))
     {
-      for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+      oa = (struct ospf6_area *) getdata (i);
+      for (j = listhead (oa->if_list); j; nextnode (j))
         {
+          oi = (struct ospf6_interface *) getdata (j);
           vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                    oi->interface->name, oa->name, VNL, VNL);
           ospf6_lsdb_show (vty, level, NULL, NULL, &adv_router, oi->lsdb);
@@ -1330,18 +1362,21 @@ DEFUN (show_ipv6_ospf6_database_type_self_originated,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, NULL, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, NULL, &adv_router, oi->lsdb);
@@ -1443,18 +1478,21 @@ DEFUN (show_ipv6_ospf6_database_type_self_originated_linkstate_id,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oi->lsdb);
@@ -1556,18 +1594,21 @@ DEFUN (show_ipv6_ospf6_database_type_id_self_originated,
   switch (OSPF6_LSA_SCOPE (type))
     {
       case OSPF6_SCOPE_AREA:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
+            oa = (struct ospf6_area *) getdata (i);
             vty_out (vty, AREA_LSDB_TITLE_FORMAT, VNL, oa->name, VNL, VNL);
             ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oa->lsdb);
           }
         break;
 
       case OSPF6_SCOPE_LINKLOCAL:
-        for (ALL_LIST_ELEMENTS_RO (o->area_list, i, oa))
+        for (i = listhead (o->area_list); i; nextnode (i))
           {
-            for (ALL_LIST_ELEMENTS_RO (oa->if_list, j, oi))
+            oa = (struct ospf6_area *) getdata (i);
+            for (j = listhead (oa->if_list); j; nextnode (j))
               {
+                oi = (struct ospf6_interface *) getdata (j);
                 vty_out (vty, IF_LSDB_TITLE_FORMAT, VNL,
                          oi->interface->name, oa->name, VNL, VNL);
                 ospf6_lsdb_show (vty, level, &type, &id, &adv_router, oi->lsdb);
@@ -1689,8 +1730,10 @@ DEFUN (show_ipv6_ospf6_linkstate,
   struct listnode *node;
   struct ospf6_area *oa;
 
-  for (ALL_LIST_ELEMENTS_RO (ospf6->area_list, node, oa))
+  for (node = listhead (ospf6->area_list); node; nextnode (node))
     {
+      oa = OSPF6_AREA (getdata (node));
+
       vty_out (vty, "%s        SPF Result in Area %s%s%s",
                VNL, oa->name, VNL, VNL);
       ospf6_linkstate_table_show (vty, argc, argv, oa->spf_table);
@@ -1744,8 +1787,10 @@ DEFUN (show_ipv6_ospf6_linkstate_detail,
   sargv[sargc++] = "detail";
   sargv[sargc] = NULL;
 
-  for (ALL_LIST_ELEMENTS_RO (ospf6->area_list, node, oa))
+  for (node = listhead (ospf6->area_list); node; nextnode (node))
     {
+      oa = OSPF6_AREA (getdata (node));
+
       vty_out (vty, "%s        SPF Result in Area %s%s%s",
                VNL, oa->name, VNL, VNL);
       ospf6_linkstate_table_show (vty, sargc, sargv, oa->spf_table);
@@ -1784,7 +1829,6 @@ ospf6_init ()
   install_element_ospf6_debug_zebra ();
   install_element_ospf6_debug_spf ();
   install_element_ospf6_debug_route ();
-  install_element_ospf6_debug_brouter ();
   install_element_ospf6_debug_asbr ();
   install_element_ospf6_debug_abr ();
   install_element_ospf6_debug_flood ();
