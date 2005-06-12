@@ -72,8 +72,8 @@ prefix_match (const struct prefix *n, const struct prefix *p)
   int shift;
 
   /* Set both prefix's head pointer. */
-  const u_char *np = (const u_char *)&n->u.prefix;
-  const u_char *pp = (const u_char *)&p->u.prefix;
+  u_char *np = (u_char *)&n->u.prefix;
+  u_char *pp = (u_char *)&p->u.prefix;
 
   /* If n's prefix is longer than p's one return 0. */
   if (n->prefixlen > p->prefixlen)
@@ -160,8 +160,8 @@ prefix_cmp (const struct prefix *p1, const struct prefix *p2)
   int shift;
 
   /* Set both prefix's head pointer. */
-  const u_char *pp1 = (const u_char *)&p1->u.prefix;
-  const u_char *pp2 = (const u_char *)&p2->u.prefix;
+  u_char *pp1 = (u_char *)&p1->u.prefix;
+  u_char *pp2 = (u_char *)&p2->u.prefix;
 
   if (p1->family != p2->family || p1->prefixlen != p2->prefixlen)
     return 1;
@@ -199,10 +199,7 @@ prefix_ipv4_new ()
 {
   struct prefix_ipv4 *p;
 
-  /* Call prefix_new to allocate a full-size struct prefix to avoid problems
-     where the struct prefix_ipv4 is cast to struct prefix and unallocated
-     bytes were being referenced (e.g. in structure assignments). */
-  p = (struct prefix_ipv4 *)prefix_new();
+  p = XCALLOC (MTYPE_PREFIX_IPV4, sizeof *p);
   p->family = AF_INET;
   return p;
 }
@@ -211,7 +208,7 @@ prefix_ipv4_new ()
 void
 prefix_ipv4_free (struct prefix_ipv4 *p)
 {
-  prefix_free((struct prefix *)p);
+  XFREE (MTYPE_PREFIX_IPV4, p);
 }
 
 /* When string format is invalid return 0. */
@@ -295,7 +292,7 @@ ip_masklen (struct in_addr netmask)
   pnt = (u_char *) &netmask;
   end = pnt + 4;
 
-  while ((pnt < end) && (*pnt == 0xff))
+  while ((*pnt == 0xff) && pnt < end)
     {
       len+= 8;
       pnt++;
@@ -347,13 +344,11 @@ prefix_ipv4_any (const struct prefix_ipv4 *p)
 
 /* Allocate a new ip version 6 route */
 struct prefix_ipv6 *
-prefix_ipv6_new (void)
+prefix_ipv6_new ()
 {
   struct prefix_ipv6 *p;
 
-  /* Allocate a full-size struct prefix to avoid problems with structure
-     size mismatches. */
-  p = (struct prefix_ipv6 *)prefix_new();
+  p = XCALLOC (MTYPE_PREFIX_IPV6, sizeof (struct prefix_ipv6));
   p->family = AF_INET6;
   return p;
 }
@@ -362,7 +357,7 @@ prefix_ipv6_new (void)
 void
 prefix_ipv6_free (struct prefix_ipv6 *p)
 {
-  prefix_free((struct prefix *)p);
+  XFREE (MTYPE_PREFIX_IPV6, p);
 }
 
 /* If given string is valid return pin6 else return NULL */
