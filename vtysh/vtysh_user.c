@@ -116,10 +116,10 @@ user_free (struct vtysh_user *user)
 struct vtysh_user *
 user_lookup (const char *name)
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct vtysh_user *user;
 
-  for (ALL_LIST_ELEMENTS (userlist, node, nnode, user))
+  LIST_LOOP (userlist, user, nn)
     {
       if (strcmp (user->name, name) == 0)
 	return user;
@@ -130,10 +130,10 @@ user_lookup (const char *name)
 void
 user_config_write ()
 {
-  struct listnode *node, *nnode;
+  struct listnode *nn;
   struct vtysh_user *user;
 
-  for (ALL_LIST_ELEMENTS (userlist, node, nnode, user))
+  LIST_LOOP (userlist, user, nn)
     {
       if (user->nopassword)
 	printf (" username %s nopassword\n", user->name);
