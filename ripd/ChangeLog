@@ -1,3 +1,10 @@
+2006-05-24 Paul Jakma <paul.jakma@sun.com>
+
+	* rip_interface.c: (rip_interface_config_write) Don't skip
+	  write-out of interface configuration, auth config must always
+	  be written due to the 0.98.6 auth changes.
+	  Makes ripd auth configuration behave as documented for 0.98.6.
+
 2006-05-04 Paul Jakma <paul.jakma@sun.com>
 
 	* (general) Fixes for bugs #261 and 262. Thanks to

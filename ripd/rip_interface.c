@@ -2035,19 +2035,6 @@ rip_interface_config_write (struct vty *vty)
       ifp = getdata (node);
       ri = ifp->info;
 
-      /* Do not display the interface if there is no
-       * configuration about it.
-       **/
-      if ((!ifp->desc)                                     &&
-          (ri->split_horizon == ri->split_horizon_default) &&
-          (ri->ri_send == RI_RIP_UNSPEC)                   &&
-          (ri->ri_receive == RI_RIP_UNSPEC)                &&
-          (ri->auth_type != RIP_AUTH_MD5)                  &&
-          (ri->md5_auth_len != RIP_AUTH_MD5_SIZE)          &&
-          (!ri->auth_str)                                  &&
-          (!ri->key_chain)                                 )
-        continue;
-
       vty_out (vty, "interface %s%s", ifp->name,
 	       VTY_NEWLINE);
 
