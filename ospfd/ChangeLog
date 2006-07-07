@@ -1,3 +1,9 @@
+2006-07-06 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_nsm.c: (ospf_nsm_event) LLDown event also results in nbr
+	  being deleted, requires early-return too. Likely explains
+	  some crash reports after interface events.
+
 2006-06-29 Andrew J. Schorr <ajschorr@alumni.princeton.edu>
 
 	* ospf_nsm.c: (nsm_twoway_received) When deciding whether to
