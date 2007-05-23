@@ -1,3 +1,8 @@
+2006-09-13 Tom Everett <tom@khubla.com>
+
+        * kernel_socket.c (rtm_type_str): ifdef RTM_OLD{ADD,DEL} to
+        compile on systems that no longer define them.
+
 2005-09-21 David Young <dyoung@ojctech.com>
 
 	* zebra_rib.c: Fix rib_delete_ipv6() to match routes in the RIB by
