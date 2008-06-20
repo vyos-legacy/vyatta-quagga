@@ -42,7 +42,6 @@ redhat/quagga.spec
 ripd/ripd
 ripngd/ripngd
 stamp-h1
-mkinstalldirs
 missing
 ospf6d/ospf6d
 ospfclient/ospfclient

@@ -1863,20 +1863,24 @@ kernel_read (struct thread *thread)
 static void netlink_install_filter (int sock, __u32 pid)
 {
   struct sock_filter filter[] = {
-    /* 0: ldh [4]	          */
-    BPF_STMT(BPF_LD|BPF_ABS|BPF_H, offsetof(struct nlmsghdr, nlmsg_type)),
-    /* 1: jeq 0x18 jt 3 jf 6  */
-    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(RTM_NEWROUTE), 1, 0),
-    /* 2: jeq 0x19 jt 3 jf 6  */
-    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(RTM_DELROUTE), 0, 3),	
-    /* 3: ldw [12]		  */
-    BPF_STMT(BPF_LD|BPF_ABS|BPF_W, offsetof(struct nlmsghdr, nlmsg_pid)),
-    /* 4: jeq XX  jt 5 jf 6   */
-    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htonl(pid), 0, 1),
-    /* 5: ret 0    (skip)     */
-    BPF_STMT(BPF_RET|BPF_K, 0),
-    /* 6: ret 0xffff (keep)   */
-    BPF_STMT(BPF_RET|BPF_K, 0xffff),
+    /* 0*/ BPF_STMT(BPF_LD|BPF_ABS|BPF_H, offsetof(struct nlmsghdr, nlmsg_type)),
+    /* 1*/ BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(RTM_DELROUTE), 1, 0),
+    /* 2*/ BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(RTM_NEWROUTE), 0, 11),
+    /* 3*/ BPF_STMT(BPF_LD|BPF_ABS|BPF_B,
+		    sizeof(struct nlmsghdr) + offsetof(struct rtmsg, rtm_type)),
+    /* 4*/ BPF_JUMP(BPF_JMP|BPF_B, RTN_UNICAST, 0, 8),
+    /* 5*/ BPF_STMT(BPF_LD|BPF_ABS|BPF_B,
+		    sizeof(struct nlmsghdr) + offsetof(struct rtmsg, rtm_flags)),
+    /* 6*/ BPF_JUMP(BPF_JMP|BPF_JSET|BPF_K, RTM_F_CLONED, 6, 0),
+    /* 7*/ BPF_STMT(BPF_LD|BPF_ABS|BPF_B,
+		    sizeof(struct nlmsghdr) + offsetof(struct rtmsg, rtm_protocol)),
+    /* 8*/ BPF_JUMP(BPF_JMP+ BPF_B, RTPROT_REDIRECT, 4, 0),
+    /* 9*/ BPF_JUMP(BPF_JMP+ BPF_B, RTPROT_KERNEL, 0, 1),
+    /*10*/ BPF_JUMP(BPF_JMP+ BPF_B, RTPROT_ZEBRA, 0, 3),
+    /*11*/ BPF_STMT(BPF_LD|BPF_ABS|BPF_H, offsetof(struct nlmsghdr, nlmsg_type)),
+    /*12*/ BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(RTM_NEWROUTE), 0, 1),
+    /*13*/ BPF_STMT(BPF_RET|BPF_K, 0),		/* drop */
+    /*14*/ BPF_STMT(BPF_RET|BPF_K, 0xffff),	/* keep */
   };
 
   struct sock_fprog prog = {
