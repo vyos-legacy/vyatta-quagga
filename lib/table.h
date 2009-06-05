@@ -52,24 +52,6 @@ struct route_node
   void *aggregate;
 };
 
-
-/* Lock node. */
-static inline struct route_node *
-route_lock_node (struct route_node *node)
-{
-  node->lock++;
-  return node;
-}
-
-/* Unlock node. */
-static inline void
-route_unlock_node (struct route_node *node)
-{
-  if (--node->lock == 0)
-    route_node_delete (node);
-}
-
-
 /* Prototypes. */
 extern struct route_table *route_table_init (void);
 extern void route_table_finish (struct route_table *);
