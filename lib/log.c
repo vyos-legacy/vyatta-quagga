@@ -353,9 +353,53 @@ open_crashlog(void)
 #undef CRASHLOG_PREFIX
 }
 
+static void
+vzlog_signal (struct zlog *zl, int priority, int signo, const char *msg)
+{
+  time_t now;
+  char buf[sizeof("DEFAULT: Received signal XX, ")+100];
+  char *s = buf;
+  char *msgstart = buf;
+#define LOC s,buf+sizeof(buf)-s
+
+  time(&now);
+  if (zlog_default)
+    {
+      s = str_append(LOC,zlog_proto_names[zlog_default->protocol]);
+      *s++ = ':';
+      *s++ = ' ';
+      msgstart = s;
+    }
+  s = str_append(LOC,"Received signal ");
+  s = num_append(LOC,signo);
+  s = str_append(LOC, ", ");
+  s = str_append(LOC, msg);
+  if (s < buf+sizeof(buf))
+    *s++ = '\n';
+
+#define DUMP(FD) write(FD, buf, s-buf);
+  /* If no file logging configured, try to write to fallback log file. */
+  if ((logfile_fd >= 0) || ((logfile_fd = open_crashlog()) >= 0))
+    DUMP(logfile_fd)
+  if (!zlog_default)
+    DUMP(STDERR_FILENO)
+  else
+    {
+      if (priority <= zlog_default->maxlvl[ZLOG_DEST_STDOUT])
+        DUMP(STDOUT_FILENO)
+      /* Remove trailing '\n' for monitor and syslog */
+      *--s = '\0';
+      if (priority <= zlog_default->maxlvl[ZLOG_DEST_MONITOR])
+        vty_log_fixed(buf,s-buf);
+      if (priority <= zlog_default->maxlvl[ZLOG_DEST_SYSLOG])
+	syslog_sigsafe(priority|zlog_default->facility,msgstart,s-msgstart);
+    }
+
+}
+
 /* Note: the goal here is to use only async-signal-safe functions. */
 void
-zlog_signal(int signo, const char *action
+zlog_signal_backtrace (int signo, const char *action
 #ifdef SA_SIGINFO
 	    , siginfo_t *siginfo, void *program_counter
 #endif
@@ -567,6 +611,11 @@ FUNCNAME(const char *format, ...) \
   va_start(args, format); \
   vzlog (NULL, PRIORITY, format, args); \
   va_end(args); \
+} \
+void \
+FUNCNAME ## _signal(int signo, const char *msg) \
+{ \
+  vzlog_signal (NULL, PRIORITY, signo, msg); \
 }
 
 ZLOG_FUNC(zlog_err, LOG_ERR)
