@@ -228,8 +228,7 @@ smux_socket (void)
     }
   freeaddrinfo(res0);
   if (sock < 0)
-     if (debug_smux)
-         zlog_debug ("Can't connect to SNMP agent with SMUX");
+    zlog_warn ("Can't connect to SNMP agent with SMUX");
 #else
   sock = socket (AF_INET, SOCK_STREAM, 0);
   if (sock < 0)
@@ -260,8 +259,7 @@ smux_socket (void)
     {
       close (sock);
       smux_sock = -1;
-      if (debug_smux)
-         zlog_debug ("Can't connect to SNMP agent with SMUX");
+      zlog_warn ("Can't connect to SNMP agent with SMUX");
       return -1;
     }
 #endif
@@ -350,7 +348,7 @@ smux_var (u_char *ptr, size_t len, oid objid[], size_t *objid_len,
   
   if (debug_smux)
     {
-      zlog_debug ("SMUX var parse: type %u len %zd", type, len);
+      zlog_debug ("SMUX var parse: type %d len %zd", type, len);
       zlog_debug ("SMUX var parse: type must be %d", 
 		 (ASN_SEQUENCE | ASN_CONSTRUCTOR));
     }
@@ -948,7 +946,7 @@ smux_open (int sock)
   u_char *ptr;
   size_t len;
   long version;
-  const char progname[] = QUAGGA_PROGNAME "-" QUAGGA_VERSION;
+  u_char progname[] = QUAGGA_PROGNAME "-" QUAGGA_VERSION;
 
   if (debug_smux)
     {
@@ -967,7 +965,7 @@ smux_open (int sock)
   version = 0;
   ptr = asn_build_int (ptr, &len, 
 		       (u_char)(ASN_UNIVERSAL | ASN_PRIMITIVE | ASN_INTEGER),
-		       (long *)&version, sizeof (version));
+		       &version, sizeof (version));
 
   /* SMUX connection oid. */
   ptr = asn_build_objid (ptr, &len,
@@ -979,7 +977,7 @@ smux_open (int sock)
   ptr = asn_build_string (ptr, &len, 
 			  (u_char)
 			  (ASN_UNIVERSAL | ASN_PRIMITIVE | ASN_OCTET_STR),
-			  (u_char *) progname, strlen (progname));
+			  progname, strlen (progname));
 
   /* SMUX connection password. */
   ptr = asn_build_string (ptr, &len, 
@@ -1183,10 +1181,7 @@ smux_connect (struct thread *t)
   int ret;
 
   if (debug_smux)
-    {
-    fail = fail + 1;
-    zlog_debug ("SMUX connect try %d", fail);
-    }
+    zlog_debug ("SMUX connect try %d", fail + 1);
 
   /* Clear thread poner of myself. */
   smux_connect_thread = NULL;
@@ -1195,10 +1190,8 @@ smux_connect (struct thread *t)
   smux_sock = smux_socket ();
   if (smux_sock < 0)
     {
-      if (debug_smux)
-         zlog_debug ("SMUX socket/connection creation error");
-      // if (++fail < SMUX_MAX_FAILURE)
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return 0;
     }
 
@@ -1209,8 +1202,8 @@ smux_connect (struct thread *t)
       zlog_warn ("SMUX open message send failed: %s", safe_strerror (errno));
       close (smux_sock);
       smux_sock = -1;
-      // if (++fail < SMUX_MAX_FAILURE)
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return -1;
     }
 
@@ -1221,8 +1214,8 @@ smux_connect (struct thread *t)
       zlog_warn ("SMUX register message send failed: %s", safe_strerror (errno));
       close (smux_sock);
       smux_sock = -1;
-      // if (++fail < SMUX_MAX_FAILURE)
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return -1;
     }
 
