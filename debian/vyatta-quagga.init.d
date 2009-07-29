@@ -40,7 +40,7 @@ vyatta_quagga_start ()
 	daemons=( zebra ripd ripngd ospfd ospf6d bgpd )
     fi
 
-    log_daemon_msg "Starting routing daemons"
+    log_daemon_msg "Starting routing daemons "
     for daemon in ${daemons[@]} ; do
 	[ "$daemon" != zebra ] && log_action_cont_msg "$daemon"
 	local pidfile=${pid_dir}/${daemon}.pid
