@@ -227,7 +227,7 @@ smux_socket (void)
       break;
     }
   freeaddrinfo(res0);
-  if (sock < 0)
+  if (sock < 0 && debug_smux)
     zlog_warn ("Can't connect to SNMP agent with SMUX");
 #else
   sock = socket (AF_INET, SOCK_STREAM, 0);
@@ -259,7 +259,8 @@ smux_socket (void)
     {
       close (sock);
       smux_sock = -1;
-      zlog_warn ("Can't connect to SNMP agent with SMUX");
+      if (debug_smux)
+	zlog_warn ("Can't connect to SNMP agent with SMUX");
       return -1;
     }
 #endif
