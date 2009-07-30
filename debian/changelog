@@ -1,3 +1,271 @@
+vyatta-quagga (0.99.14-4) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * Justified OSPF cost function names and added support for:
+  * Dmitry Tejblum <tejblum@yandex-team.ru>
+  * [bgpd] AS4 bugfix by Chris Caputo <ccaputo@alt.net>
+
+  [ Paul Jakma ]
+  * [build] tools/multiple-bgpd.sh should be in 'make dist'
+
+  [ Stephen Hemminger ]
+  * Fix bgp ipv4/ipv6 accept handling
+
+  [ Paul Jakma ]
+  * [release] Bump version to 0.99.12
+
+  [ Andrew J. Schorr ]
+  * [bgpd] 64-bit bugfix in community_del_val by Jeremy Jackson
+    <jerj@coplanar.net>
+
+  [ Denis Ovsienko ]
+  * [doc] Stick with quagga.net for consistency (#436)
+  * [trivia] Fixed typos in communities text (#334)
+
+  [ Steve Hill ]
+  * [bgp] Fix crash on SIGHUP, deref of freed workqueues
+
+  [ Krisztian Kovacs ]
+  * [ripd] Fix metrix in call to rip_zebra_ipv4_delete
+
+  [ Francesco Dolcini ]
+  * [ospfd] fix vty ospfd no ospf abr-type standard
+
+  [ Chris Caputo ]
+  * [smux] 64-bit fix for lib/smux.h SNMP_INTEGER() macro
+  * [snmp] Compiler warning fixes for when "--enable-snmp" is
+    configured.
+
+  [ Denis Ovsienko ]
+  * [bgpd] Fixed as-path prepend/exclude ASN handling
+
+  [ Paul Jakma ]
+  * [bgpd] Add support for the old Linux 2.4, TCP_MD5_AUTH RFC2385 patch
+
+  [ Stephen Hemminger ]
+  * [cleanup] Convert XMALLOC/memset to XCALLOC
+  * [cleanup] add const attribute to lib/if.c::if_dump
+  * [cleanup] functions taking no args should be declared with void args
+  * [cleanup] Make command nodes static
+  * [gcc] Add gcc printf format checks
+  * [vtysh] Force line buffered mode.
+  * [vtysh] Make vtysh more useable for scripting
+  * [vtysh] Return non-zero exit code on error.
+  * [vtysh] Add a --noerror option
+
+  [ Stig Thormodsrud ]
+  * [zebra] Fix vyatta bug 2814: Add "show ip route summary" command.
+
+  [ Stephen Hemminger ]
+  * [zebra] netlink interface minor cleanup
+  * [zebra] Cleanup meta-queue code
+  * [zebra] remove incorrect debug message
+  * [zebra] MTU is unsigned
+  * [zebra] Only announce connected routes if link is detected
+  * [ospfd] Fix OSPF route refcount leak
+
+  [ Jon ]
+  * [ospf6d] Fix ospf6d crash if range defined twice
+  * [ospf6] Add no router ospf6
+  * [ospf6d] Fix ospf6d crash in show border routers
+  * [ospf6d] Fix ospf6d crash if removing interface with no area
+
+  [ Stephen Hemminger ]
+  * [ospf6d] Remove 'no router' from OSPF6_NODE
+  * [lib] sockopt_tcp_signature: sin6 requires HAVE_IPV6
+  * [lib] Put symbolic backtrace on system log
+  * [ripd] Ignore non-running interfaces in rip status
+  * [cleanup] Use correct buffer size for inet_ntop()
+  * [zebra] Force rib_update when connected route deleted
+  * [zebra] Remove unused structure element
+  * [bgpd] Make declarations match
+  * [bgpd] reference count the BGP instance
+  * [bgpd/cleanup] Make BGP FSM table read-only static
+  * [bgpd/cleanup] BGP make attribute variables local
+  * [cleanup] Use const in smux interface
+  * [cleanup] Fix compile warnings
+  * [cleanup] Allow message tables to be constant
+
+  [ Paul Jakma ]
+  * [bgpd] add comment that bgp_capability_receive is exported for unit-
+    tests
+
+  [ Stephen Hemminger ]
+  * [bgpd/cleanup] make message lists read only
+  * [OSPF/cleanup] make message lists read only
+  * [zebra/cleanup] make message table read only
+  * [BGP/cleanup] main program cleanup
+  * [BGP/cleanup] make ecommunity variables/functions local
+  * [BGP/cleanup] make some damp function static
+  * [BGP/cleanup] make community hash table static
+  * [BGP/cleanup] make message list in bgp_open const
+  * [configure] Detect support for monotonic clock
+
+  [ Paul Jakma ]
+  * [configure] Refine CLOCK_MONOTONIC test
+
+  [ Jeremy Jackson ]
+  * [doc] Removes documentation of nonexistant option.
+  * [daemons/cleanup] Remove disabled log_mode argument support.
+  * [configure] add configure support for PCRE Posix library
+  * [build] cleanup low-hanging autoreconf warnings
+  * [configure] remote support for AIX, it conflicts on newer autoconf
+  * [configure/cleanup] fix broken autoconf cache variables
+  * [configure] remove unused/broken autoconf cache variable ac_statedir
+  * [cleanup] convert bzero() deprecated by POSIX to memset()
+  * [configure] fix check for GNU awk/gawk to abort ./configure if
+    missing
+  * [ospfd/BSD] add missing UINT16_MAX - picked up from FreeBSD ports
+    patch
+
+  [ Paul Jakma ]
+  * [bgpd] Fix 'update-source' command: It doesn't accept interface
+    names
+
+  [ Takashi Sogabe ]
+  * Convert ospf6d over to quagga_gettime() wrappers.
+
+  [ Paul Jakma ]
+  * [doc] remove -dither arg to imagemagick, in building PDFs
+
+  [ Chris Caputo ]
+  * RFC 4191 Default Router Preference support for router advertisements
+
+  [ Dmitry Tejblum ]
+  * [ospfd] cancel OSPF timer hack in nsm_change_state
+
+  [ Chris Caputo ]
+  * Fixes to RFC2385/MD5 BGP
+  * Fix vtysh based "write term" output.
+  * Fix "show ip bgp dampened-paths" garbage output.
+
+  [ Jingjing Duan ]
+  * [trivia] work around ksh93 builtin name (#451)
+
+  [ Mathieu Goessens ]
+  * [zebra] linux policy routing support with ipv6
+
+  [ Denis Ovsienko ]
+  * [bgpd] review 32-bit AS-path hotfix for 0.99.12
+
+  [ Dmitry Tejblum ]
+  * [ospfd] discount IP header size from a new LSA pkt
+
+  [ Tomasz Pala ]
+  * [bgpd] Add 'show ip bgp view WORD neighbors IP
+    (advertised|received)-routes'
+  * [cleanup] Add log.h includes
+  * [configure] Allow for large-file support, e.g. for log files >2GB
+  * [vtysh] Save vtysh history to a file
+
+  [ Joakim Tjernlund ]
+  * zebra: Static route does not reach kernel.
+  * [ospfd] Fix a few LSA performance "bugs"
+  * [ospfd] external LSA route_unlock_node() fixes
+  * [doc] Add "--disable-doc" to configure
+  * [ospfd] compare ifIndex too when matching paths
+  * Add test for Internet checksum.
+
+  [ Paul Jakma ]
+  * [bgpd] Log a debug/update warning if filters are configured but
+    don't exist
+
+  [ Joakim Tjernlund ]
+  * [ospfd] Do not use stale Network/Router LSAs
+
+  [ Paul Jakma ]
+  * [lib/cleanup] Use a typedef for the thread type
+
+  [ Tom Henderson ]
+  * [ospf6d] Fix regression in monotonic time patch - LSA max-aging
+    broke
+
+  [ Stephen Hemminger ]
+  * [lib] Fix IPv6 normalisation
+
+  [ Paul Jakma ]
+  * [bgpd] Bug #533: Fix crash with copy/pasted commands, inc 'no bgp
+    ...'
+  * [build] fix default CFLAGS and squish warning
+
+  [ Chris Caputo ]
+  * [bgpd] Fix compiler warnings related to MD5
+  * [bgpd] Stability fixes including bugs 397, 492
+  * [zebra] Silence noisy process_subq
+
+  [ Nick Hilliard ]
+  * [bgpd] Small buffer overrun in bgp_clear_node_queue_init
+
+  [ Timo Teräs ]
+  * [bgpd] Avoid zombie accepted peer entries
+
+  [ Paul Jakma ]
+  * [bgpd] fix typo made by paul in previous commit
+
+  [ Vasilis Tsiligiannis ]
+  * [bgp] Fix nexthop reachability check on confederations
+
+  [ Paul Jakma ]
+  * [build] Bump release to 0.99.14
+
+  [ Thijs Kinkhorst ]
+  * [doc] zebra.8 via Christian Hammers (#531)
+
+  [ Denis Ovsienko ]
+  * [zebra] do not touch socket before pidfile locking
+
+  [ Paul Jakma ]
+  * [bgpd] Restore ability of 'neighbor ... update-source' to take
+    interface name
+
+  [ Stephen Hemminger ]
+  * ripd: set IP TOS for control socket
+  * bgpd: peer action table static/const
+  * bgpd: start listener on first instance
+  * [global] interface flags format warnings
+
+  [ Vasilis Tsiligiannis ]
+  * bgpd: Implement BGP confederation error handling (RFC5065, Par. 5)
+  * bgpd: Delete AS_CONFED_SEQUENCE when prepending an AS_SEQUENCE type
+    segment
+
+  [ Paul Jakma ]
+  * [zebra] Fix crash in test_zebra
+
+  [ Steve Hill ]
+  * bgpd: fd leak in bgpd
+  * bgpd: Allow inbound connections to non-default view
+
+  [ Paul Jakma ]
+  * bgpd/trivial: Fix indentation in previous
+
+  [ Joakim Tjernlund ]
+  * ospfd: export ospf_if_table_lookup() and use it in
+    ospf_network_run_interface()
+  * ospfd: Make ospf_if_lookup_recv_if() find the right unnumbered i/f
+
+  [ Stephen Hemminger ]
+  * add missing space to boot message
+
+  [ Paul Jakma ]
+  * [doc] Update HACKING
+
+  [ Michael Lambert ]
+  * bgpd: Workaround for invalid MBGP next hop
+
+  [ Paul Jakma ]
+  * [bgpd] delete erroneous extra brace..
+
+  [ Joakim Tjernlund ]
+  * ospfd: Discriminate better when selecting links between vertices in
+    SPF
+
+  [ Stephen Hemminger ]
+  * fix smux back to original
+  * SMUX: don't give up after fixed number of tries
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 30 Jul 2009 15:19:51 -0700
+
 vyatta-quagga (0.99.14-3) unstable; urgency=low
 
   * Merge branch 'upstream' into kenwood
