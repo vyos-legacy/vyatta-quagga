@@ -498,7 +498,7 @@ link_info_set (struct stream *s, struct in_addr id,
       
       if (ret == OSPF_MAX_LSA_SIZE)
         {
-          zlog_warn ("%s: Out of space in LSA stream, left %ld, size %ld",
+          zlog_warn ("%s: Out of space in LSA stream, left %zd, size %zd",
                      __func__, STREAM_REMAIN (s), STREAM_SIZE (s));
           return 0;
         }
@@ -1528,7 +1528,10 @@ ospf_external_lsa_nexthop_get (struct ospf *ospf, struct in_addr nexthop)
   nh.family = AF_INET;
   nh.u.prefix4 = nexthop;
   nh.prefixlen = IPV4_MAX_BITLEN;
-
+  
+  /* XXX/SCALE: If there were a lot of oi's on an ifp, then it'd be
+   * better to make use of the per-ifp table of ois.
+   */
   for (ALL_LIST_ELEMENTS_RO (ospf->oiflist, node, oi))
     if (if_is_operative (oi->ifp))
       if (oi->address->family == AF_INET)
@@ -1857,45 +1860,6 @@ ospf_lsa_translated_nssa_new (struct ospf *ospf,
   
   return new; 
 }
-
-#if 0
-/* compare type-5 to type-7
- * -1: err, 0: same, 1: different
- */
-static int
-ospf_lsa_translated_nssa_compare (struct ospf_lsa *t7, struct ospf_lsa *t5)
-{
-
-  struct as_external_lsa *e5 = (struct as_external_lsa *)t5, 
-                         *e7 = (struct as_external_lsa *)t7;
-  
-  
-  /* sanity checks */
-  if (! ((t5->data->type == OSPF_AS_EXTERNAL_LSA)
-         && (t7->data->type == OSPF_AS_NSSA_LSA)))
-    return -1;
-
-  if (t5->data->id.s_addr != t7->data->id.s_addr)
-    return -1;
-
-  if (t5->data->ls_seqnum != t7->data->ls_seqnum)
-    return LSA_REFRESH_FORCE;
-
-  if (e5->mask.s_addr != e7->mask.s_addr)
-    return LSA_REFRESH_FORCE;
-    
-  if (e5->e[0].fwd_addr.s_addr != e7->e[0].fwd_addr.s_addr)
-    return LSA_REFRESH_FORCE;
-
-  if (e5->e[0].route_tag != e7->e[0].route_tag)
-    return LSA_REFRESH_FORCE;
-    
-  if (GET_METRIC (e5->e[0].metric) != GET_METRIC (e7->e[0].metric))
-    return LSA_REFRESH_FORCE;
-    
-  return LSA_REFRESH_IF_CHANGED;
-}
-#endif
 
 /* Originate Translated Type-5 for supplied Type-7 NSSA LSA */
 struct ospf_lsa *
