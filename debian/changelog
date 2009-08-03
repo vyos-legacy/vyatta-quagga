@@ -1,3 +1,23 @@
+vyatta-quagga (0.99.14-5) unstable; urgency=low
+
+  [ Joakim Tjernlund ]
+  * ospfd: Change struct ospf_path *oi to ifindex.
+
+  [ Paul Jakma ]
+  * ospfd: update some comments
+  * ospfd: neuter some compiler warnings
+
+  [ Stephen Hemminger ]
+  * Zebra: remove dead code
+  * Fix spelling in comments and strings
+  * Route table update
+  * Zebra: unify ipv4/ipv6
+  * Vty: add vty_serv_sock_family back
+  * Align with upstream code
+  * fix debian/changelog spelling error
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 03 Aug 2009 16:17:01 -0700
+
 vyatta-quagga (0.99.14-4) unstable; urgency=low
 
   [ Denis Ovsienko ]
