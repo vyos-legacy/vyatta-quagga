@@ -614,7 +614,6 @@ set_metric (struct ospf_lsa *lsa, u_int32_t metric)
   memcpy(header->metric, mp, 3);
 }
 
-#if 0
 static int
 ospf_abr_check_nssa_range (struct prefix_ipv4 *p, u_int32_t cost,
 				   struct ospf_area *area)
@@ -623,7 +622,6 @@ ospf_abr_check_nssa_range (struct prefix_ipv4 *p, u_int32_t cost,
        for lsa installation and flooding */
   return 0;
 }
-#endif
 
 /* ospf_abr_translate_nssa */
 static int
@@ -1579,7 +1577,6 @@ ospf_abr_send_nssa_aggregates (struct ospf *ospf) /* temporarily turned off */
     zlog_debug ("ospf_abr_send_nssa_aggregates(): Stop");
 }
 
-#if 0
 static void
 ospf_abr_announce_nssa_defaults (struct ospf *ospf) /* By ABR-Translator */
 {
@@ -1615,7 +1612,6 @@ ospf_abr_announce_nssa_defaults (struct ospf *ospf) /* By ABR-Translator */
         }
     }
 }
-#endif
 
 static void
 ospf_abr_announce_stub_defaults (struct ospf *ospf)
