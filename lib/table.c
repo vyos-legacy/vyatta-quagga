@@ -27,8 +27,6 @@
 #include "memory.h"
 #include "sockunion.h"
 
-void route_node_delete (struct route_node *);
-void route_table_free (struct route_table *);
 
 struct route_table *
 route_table_init (void)
@@ -37,12 +35,6 @@ route_table_init (void)
 
   rt = XCALLOC (MTYPE_ROUTE_TABLE, sizeof (struct route_table));
   return rt;
-}
-
-void
-route_table_finish (struct route_table *rt)
-{
-  route_table_free (rt);
 }
 
 /* Allocate new route node. */
@@ -77,7 +69,7 @@ route_node_free (struct route_node *node)
 
 /* Free route table. */
 void
-route_table_free (struct route_table *rt)
+route_table_finish (struct route_table *rt)
 {
   struct route_node *tmp_node;
   struct route_node *node;
@@ -199,24 +191,6 @@ set_link (struct route_node *node, struct route_node *new)
 
   node->link[bit] = new;
   new->parent = node;
-}
-
-/* Lock node. */
-struct route_node *
-route_lock_node (struct route_node *node)
-{
-  node->lock++;
-  return node;
-}
-
-/* Unlock node. */
-void
-route_unlock_node (struct route_node *node)
-{
-  node->lock--;
-
-  if (node->lock == 0)
-    route_node_delete (node);
 }
 
 /* Dump routing table. */
@@ -500,4 +474,14 @@ route_next_until (struct route_node *node, struct route_node *limit)
     }
   route_unlock_node (start);
   return NULL;
+}
+
+/* Unlock current node and return parent node (locked) */
+struct route_node *
+route_node_parent (struct route_node *rn)
+{
+  rn = rn->parent;
+  if (rn)
+    route_lock_node (rn);
+  return rn;
 }
