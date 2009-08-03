@@ -346,7 +346,7 @@ static int rib_is_ebgp(const struct rib *rib)
     && !CHECK_FLAG (rib->flags, ZEBRA_FLAG_IBGP);
 }
 
-/* If force flag is not set, do not modify falgs at all for uninstall
+/* If force flag is not set, do not modify flags at all for uninstall
    the route from FIB. */
 static int
 nexthop_active_ipv4 (struct rib *rib, struct nexthop *nexthop, int set,
@@ -381,7 +381,7 @@ nexthop_active_ipv4 (struct rib *rib, struct nexthop *nexthop, int set,
     {
       route_unlock_node (rn);
       
-      /* If lookup self prefix return immidiately. */
+      /* If lookup self prefix return immediately. */
       if (rn == top)
 	return 0;
 
@@ -479,7 +479,7 @@ nexthop_active_ipv4 (struct rib *rib, struct nexthop *nexthop, int set,
 }
 
 #ifdef HAVE_IPV6
-/* If force flag is not set, do not modify falgs at all for uninstall
+/* If force flag is not set, do not modify flags at all for uninstall
    the route from FIB. */
 static int
 nexthop_active_ipv6 (struct rib *rib, struct nexthop *nexthop, int set,
@@ -513,7 +513,7 @@ nexthop_active_ipv6 (struct rib *rib, struct nexthop *nexthop, int set,
     {
       route_unlock_node (rn);
       
-      /* If lookup self prefix return immidiately. */
+      /* If lookup self prefix return immediately. */
       if (rn == top)
 	return 0;
 
@@ -776,7 +776,7 @@ rib_lookup_ipv4_route (struct prefix_ipv4 *p, union sockunion * qgate)
   if (match->type == ZEBRA_ROUTE_CONNECT)
     return ZEBRA_RIB_FOUND_CONNECTED;
   
-  /* Ok, we have a cood candidate, let's check it's nexthop list... */
+  /* Ok, we have a good candidate, let's check it's nexthop list... */
   for (nexthop = match->nexthop; nexthop; nexthop = nexthop->next)
     if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
       {
@@ -1217,7 +1217,7 @@ rib_process (struct route_node *rn)
       else if (rib_is_managed (select))
         {
           /* Housekeeping code to deal with 
-             race conditions in kernel with linux
+             race conditions in kernel with Linux
              netlink reporting interface up before IPv4 or IPv6 protocol
              is ready to add routes.
              This makes sure the routes are IN the kernel.
@@ -1456,7 +1456,7 @@ meta_queue_new (void)
   return new;
 }
 
-/* initialise zebra rib work queue */
+/* initialize zebra rib work queue */
 static void
 rib_queue_init (struct zebra_t *zebra)
 {
@@ -1465,7 +1465,7 @@ rib_queue_init (struct zebra_t *zebra)
   if (! (zebra->ribq = work_queue_new (zebra->master, 
                                        "route_node processing")))
     {
-      zlog_err ("%s: could not initialise work queue!", __func__);
+      zlog_err ("%s: could not initialize work queue!", __func__);
       return;
     }
 
@@ -1478,7 +1478,7 @@ rib_queue_init (struct zebra_t *zebra)
   
   if (!(zebra->mq = meta_queue_new ()))
   {
-    zlog_err ("%s: could not initialise meta queue!", __func__);
+    zlog_err ("%s: could not initialize meta queue!", __func__);
     return;
   }
   return;

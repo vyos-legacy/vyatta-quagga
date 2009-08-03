@@ -221,7 +221,7 @@ netlink_request (int family, int type, struct nlsock *nl)
   req.nlh.nlmsg_seq = ++nl->seq;
   req.g.rtgen_family = family;
 
-  /* linux appears to check capabilities on every message 
+  /* Linux appears to check capabilities on every message 
    * have to raise caps for every message sent
    */
   if (zserv_privs.change (ZPRIVS_RAISE))
@@ -1211,7 +1211,7 @@ netlink_talk (struct nlmsghdr *n, struct nlsock *nl)
 
   n->nlmsg_seq = ++nl->seq;
 
-  /* Request an acknowledgement by setting NLM_F_ACK */
+  /* Request an acknowledgment by setting NLM_F_ACK */
   n->nlmsg_flags |= NLM_F_ACK;
 
   /* Send message to netlink interface. */
@@ -1232,7 +1232,7 @@ netlink_talk (struct nlmsghdr *n, struct nlsock *nl)
 
   /* 
    * Get reply from netlink socket. 
-   * The reply should either be an acknowlegement or an error.
+   * The reply should either be an acknowledgment or an error.
    */
   return netlink_parse_info (netlink_talk_filter, nl);
 }

@@ -137,7 +137,7 @@ usage (char *progname, int status)
 	      "-C, --dryrun       Check configuration for validity and exit\n"\
 	      "-A, --vty_addr     Set vty's bind address\n"\
 	      "-P, --vty_port     Set vty's port number\n"\
-	      "-S, --system       Manage all routes on link transistions\n" \
+	      "-S, --system       Manage all routes on link transitions\n" \
 	      "-r, --retain       When program terminates, retain added route "\
 				  "by zebra.\n"\
 	      "-u, --user         User to run as\n"\
@@ -311,7 +311,7 @@ main (int argc, char **argv)
   /* Make master thread emulator. */
   zebrad.master = thread_master_create ();
 
-  /* privs initialise */
+  /* privs initialize */
   zprivs_init (&zserv_privs);
 
   /* Vty related initialize. */
