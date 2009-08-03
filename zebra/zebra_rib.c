@@ -96,39 +96,12 @@ vrf_alloc (const char *name)
   return vrf;
 }
 
-#if 0
-/* Free VRF.  */
-static void
-vrf_free (struct vrf *vrf)
-{
-  if (vrf->name)
-    XFREE (MTYPE_VRF_NAME, vrf->name);
-  XFREE (MTYPE_VRF, vrf);
-}
-#endif
-
 /* Lookup VRF by identifier.  */
-struct vrf *
+static struct vrf *
 vrf_lookup (u_int32_t id)
 {
   return vector_lookup (vrf_vector, id);
 }
-
-#if 0
-/* Lookup VRF by name.  */
-static struct vrf *
-vrf_lookup_by_name (char *name)
-{
-  unsigned int i;
-  struct vrf *vrf;
-
-  for (i = 0; i < vector_active (vrf_vector); i++)
-    if ((vrf = vector_slot (vrf_vector, i)) != NULL)
-      if (vrf->name && name && strcmp (vrf->name, name) == 0)
-	return vrf;
-  return NULL;
-}
-#endif
 
 /* Initialize VRF.  */
 static void
@@ -3011,22 +2984,6 @@ rib_update (void)
       if (rn->info)
         rib_queue_add (&zebrad, rn);
 }
-
-#if 0
-/* Interface goes up. */
-static void
-rib_if_up (struct interface *ifp)
-{
-  rib_update ();
-}
-
-/* Interface goes down. */
-static void
-rib_if_down (struct interface *ifp)
-{
-  rib_update ();
-}
-#endif
 
 /* Remove all routes which comes from non main table.  */
 static void
