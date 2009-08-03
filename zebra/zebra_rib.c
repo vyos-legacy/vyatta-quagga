@@ -467,6 +467,18 @@ nexthop_active (struct rib *rib, struct nexthop *nexthop, int set,
   if (!match)
     return 0;
 
+  if (IS_ZEBRA_DEBUG_RIB)
+    {
+      char buf[INET6_ADDRSTRLEN];
+      zlog_debug ("%s: %s match type %d rib flags %#x",
+		  __func__, inet_ntop (p.family, &p.u.prefix, buf, sizeof buf),
+		  match->type, rib->flags);
+      if (match->nexthop)
+	zlog_debug ("  nexthop %s flags %#x",
+		    nexthop_isactive(match->nexthop) ? "active" : "inactive",
+		    match->nexthop->flags);
+    }
+
   /* If this is a connected route then see if it is alive */
   if (match->type == ZEBRA_ROUTE_CONNECT)
     {
@@ -536,7 +548,7 @@ nexthop_active (struct rib *rib, struct nexthop *nexthop, int set,
 	  }
 
 	/* Did destination for recursive route change? */
-	if (!nexthop_same(nexthop, newhop))
+	if (!nexthop_same (nexthop, newhop))
 	  SET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
 	return 1;
       }
