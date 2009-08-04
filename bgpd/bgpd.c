@@ -2973,15 +2973,6 @@ peer_port_set (struct peer *peer, u_int16_t port)
   peer->port = port;
   return 0;
 }
-
-#ifdef unused
-int
-peer_port_unset (struct peer *peer)
-{
-  peer->port = BGP_PORT_DEFAULT;
-  return 0;
-}
-#endif
 
 /* neighbor weight. */
 int

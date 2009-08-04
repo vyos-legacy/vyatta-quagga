@@ -1288,7 +1288,7 @@ bgp_attr_cluster_list (struct peer *peer, bgp_size_t length,
 }
 
 /* Multiprotocol reachability information parse. */
-static int
+int
 bgp_mp_reach_parse (struct peer *peer, bgp_size_t length, struct attr *attr,
 		    struct bgp_nlri *mp_update)
 {
@@ -1422,7 +1422,7 @@ bgp_mp_reach_parse (struct peer *peer, bgp_size_t length, struct attr *attr,
 }
 
 /* Multiprotocol unreachable parse */
-static int
+int
 bgp_mp_unreach_parse (struct peer *peer, bgp_size_t length, 
 		      struct bgp_nlri *mp_withdraw)
 {
