@@ -36,13 +36,11 @@
 #include "zebra/interface.h"
 #include "zebra/connected.h"
 extern struct zebra_t zebrad;
-
 
 /* withdraw a connected address */
 static void
 connected_withdraw (struct connected *ifc)
 {
-
   if (! ifc)
     return;
 

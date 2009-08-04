@@ -1348,7 +1348,7 @@ zebra_serv ()
     {
       zlog_warn ("Can't create zserv stream socket: %s", 
                  safe_strerror (errno));
-      zlog_warn ("zebra can't proviso full functionality due to above error");
+      zlog_warn ("zebra can't provide full functionality due to above error");
       return;
     }
 
