@@ -87,14 +87,6 @@ rtadv_new (void)
   return XCALLOC (MTYPE_TMP, sizeof (struct rtadv));
 }
 
-#if 0
-static void
-rtadv_free (struct rtadv *rtadv)
-{
-  XFREE (MTYPE_TMP, rtadv);
-}
-#endif
-
 static int
 rtadv_recv_packet (int sock, u_char *buf, int buflen,
 		   struct sockaddr_in6 *from, unsigned int *ifindex,
@@ -455,7 +447,7 @@ rtadv_read (struct thread *thread)
   int len;
   u_char buf[RTADV_MSG_SIZE];
   struct sockaddr_in6 from;
-  unsigned int ifindex = 0;
+  unsigned int ifindex;
   int hoplimit = -1;
 
   sock = THREAD_FD (thread);

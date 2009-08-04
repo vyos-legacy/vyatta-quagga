@@ -592,25 +592,15 @@ if_down (struct interface *ifp)
 
 	  if (p->family == AF_INET)
 	    connected_down_ipv4 (ifp, ifc);
+#ifdef HAVE_IPV6
+	  else if (p->family == AF_INET6)
+	    connected_down_ipv6 (ifp, ifc);
+#endif /* HAVE_IPV6 */
 	}
     }
 
   /* Examine all static routes which direct to the interface. */
   rib_update ();
-
-#ifdef HAVE_IPV6
-  if (ifp->connected)
-    {
-      for (ALL_LIST_ELEMENTS (ifp->connected, node, next, ifc))
-	{
-	  p = ifc->address;
-	  if (p->family == AF_INET6)
-	    connected_down_ipv6 (ifp, ifc);
-	}
-    }
-
-  rib_update ();
-#endif /* HAVE_IPV6 */
 }
 
 void
@@ -888,21 +878,6 @@ if_dump_vty (struct vty *vty, struct interface *ifp)
 #endif /* __bsdi__ || __NetBSD__ */
 #endif /* HAVE_NET_RT_IFLIST */
 }
-
-#if 0
-/* Check supported address family. */
-static int
-if_supported_family (int family)
-{
-  if (family == AF_INET)
-    return 1;
-#ifdef HAVE_IPV6
-  if (family == AF_INET6)
-    return 1;
-#endif /* HAVE_IPV6 */
-  return 0;
-}
-#endif
 
 /* Wrapper hook point for zebra daemon so that ifindex can be set 
  * DEFUN macro not used as extract.pl HAS to ignore this
