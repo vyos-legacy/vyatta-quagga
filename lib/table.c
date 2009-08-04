@@ -475,13 +475,3 @@ route_next_until (struct route_node *node, struct route_node *limit)
   route_unlock_node (start);
   return NULL;
 }
-
-/* Unlock current node and return parent node (locked) */
-struct route_node *
-route_node_parent (struct route_node *rn)
-{
-  rn = rn->parent;
-  if (rn)
-    route_lock_node (rn);
-  return rn;
-}

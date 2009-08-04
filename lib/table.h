@@ -58,7 +58,6 @@ extern void route_table_finish (struct route_table *);
 extern void route_node_delete (struct route_node *node);
 extern struct route_node *route_top (struct route_table *);
 extern struct route_node *route_next (struct route_node *);
-extern struct route_node *route_node_parent (struct route_node *);
 extern struct route_node *route_next_until (struct route_node *,
                                             struct route_node *);
 extern struct route_node *route_node_get (struct route_table *,
@@ -74,6 +73,8 @@ extern struct route_node *route_node_match_ipv6 (struct route_table *,
 					  struct in6_addr *);
 #endif /* HAVE_IPV6 */
 
+/* Inline functions */
+
 /* Lock node. */
 static inline struct route_node *
 route_lock_node (struct route_node *node)
@@ -88,6 +89,16 @@ route_unlock_node (struct route_node *node)
 {
   if (--node->lock == 0)
     route_node_delete (node);
+}
+
+/* Get parent (locked) */
+static inline struct route_node *
+route_node_parent (struct route_node *rn)
+{
+  rn = rn->parent;
+  if (rn)
+    route_lock_node (rn);
+  return rn;
 }
 
 #endif /* _ZEBRA_TABLE_H */
