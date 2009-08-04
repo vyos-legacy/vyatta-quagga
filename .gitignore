@@ -34,4 +34,7 @@ build
 .rebase-*
 *~
 *.loT
-
+extract.pl
+cscope.files cscope.out
+patches
+.pc
