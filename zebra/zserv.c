@@ -786,9 +786,9 @@ zread_ipv4_add (struct zserv *client, u_short length)
 	    case ZEBRA_NEXTHOP_IPV6:
 	      stream_forward_getp (s, IPV6_MAX_BYTELEN);
 	      break;
-      case ZEBRA_NEXTHOP_BLACKHOLE:
-        nexthop_blackhole_add (rib);
-        break;
+	    case ZEBRA_NEXTHOP_BLACKHOLE:
+	      nexthop_blackhole_add (rib);
+	      break;
 	    }
 	}
     }
@@ -802,8 +802,11 @@ zread_ipv4_add (struct zserv *client, u_short length)
     rib->metric = stream_getl (s);
     
   /* Table */
-  rib->table=zebrad.rtm_table_default;
+  rib->table = zebrad.rtm_table_default;
   rib_add_ipv4_multipath (&p, rib);
+
+  rib_update();
+
   return 0;
 }
 
@@ -969,6 +972,8 @@ zread_ipv6_add (struct zserv *client, u_short length)
   else
     rib_add_ipv6 (api.type, api.flags, &p, &nexthop, ifindex, zebrad.rtm_table_default, api.metric,
 		  api.distance);
+
+  rib_update ();
   return 0;
 }
 

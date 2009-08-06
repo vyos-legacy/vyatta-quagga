@@ -902,6 +902,8 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
     }
 #endif /* HAVE_IPV6 */
 
+  rib_update();
+
   return 0;
 }
 
