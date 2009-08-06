@@ -48,7 +48,7 @@ vyatta_quagga_start ()
 	# Handle daemon specific args
 	local -a args=( -d -P 0 -i $pidfile )
 	case $daemon in
-	    zebra)	args+=( -l -S -s 1048576 );;
+	    zebra)	args+=( -S -s 1048576 );;
 	    bgpd)	args+=( -I );;
 	esac
 
