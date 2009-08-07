@@ -47,11 +47,12 @@ extern struct zebra_t zebrad;
 /* Should kernel routes be removed on link down? */
 int set_interface_mode;
 
-/* Hold time for RIB process, should be very minimal.
- * it is useful to able to set it otherwise for testing, hence exported
- * as global here for test-rig code.
+/* Hold time for RIB update processing.
+ * By default limit to 250ms ( 4 per second)
+ * overhead of full RIB scan, and limit flapping if interface
+ * goes up/down to often
  */
-int rib_process_hold_time = 10;
+int rib_process_hold_time = 250;
 
 /* Each route type's string and default distance value. */
 static const struct

@@ -63,8 +63,9 @@ int keep_kernel_mode = 0;
 u_int32_t nl_rcvbufsize = 0;
 #endif /* HAVE_NETLINK */
 
-/* Manage connected routes */
-extern int set_interface_mode;
+
+extern int set_interface_mode;		/* Manage connected routes */
+extern int rib_process_hold_time;	/* Delay for RIB updates */
 
 /* Command line options. */
 struct option longopts[] = 
@@ -86,6 +87,7 @@ struct option longopts[] =
   { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
   { "set_interface",  no_argument,       NULL, 'S'},
+  { "hold_time",   required_argument, NULL, 'H' },
   { 0 }
 };
 
@@ -233,12 +235,7 @@ main (int argc, char **argv)
     {
       int opt;
   
-#ifdef HAVE_NETLINK  
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:CS", longopts, 0);
-#else
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vCS", longopts, 0);
-#endif /* HAVE_NETLINK */
-
+      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:CSH:", longopts, 0);
       if (opt == EOF)
 	break;
 
@@ -266,6 +263,9 @@ main (int argc, char **argv)
 	case 'A':
 	  vty_addr = optarg;
 	  break;
+	case 'H':
+	  rib_process_hold_time = atoi(optarg);
+	  break;
         case 'i':
           pid_file = optarg;
           break;
@@ -284,11 +284,11 @@ main (int argc, char **argv)
 	case 'r':
 	  retain_mode = 1;
 	  break;
-#ifdef HAVE_NETLINK
 	case 's':
+#ifdef HAVE_NETLINK
 	  nl_rcvbufsize = atoi (optarg);
-	  break;
 #endif /* HAVE_NETLINK */
+	  break;
 	case 'u':
 	  zserv_privs.user = optarg;
 	  break;
