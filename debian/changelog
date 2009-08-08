@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.14-7) unstable; urgency=low
+
+  * Check return value from daemon() call
+  * Cleanup RIB meta-queue code
+  * Zebra: change RIB hold time
+  * Zebra: move update to thread
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 07 Aug 2009 17:40:49 -0700
+
 vyatta-quagga (0.99.14-6) unstable; urgency=low
 
   * zebra: add debugging to nexthop_active
