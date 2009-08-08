@@ -1380,8 +1380,6 @@ meta_queue_new (void)
 static void
 rib_queue_init (struct zebra_t *zebra)
 {
-  assert (zebra);
-  
   if (! (zebra->ribq = work_queue_new (zebra->master, 
                                        "route_node processing")))
     {
@@ -1394,7 +1392,7 @@ rib_queue_init (struct zebra_t *zebra)
   zebra->ribq->spec.errorfunc = NULL;
   /* XXX: TODO: These should be runtime configurable via vty */
   zebra->ribq->spec.max_retries = 3;
-  zebra->ribq->spec.hold = rib_process_hold_time;
+  zebra->ribq->spec.hold = 10;
   
   if (!(zebra->mq = meta_queue_new ()))
     zlog_err ("%s: could not initialize meta queue!", __func__);
@@ -2874,8 +2872,8 @@ static_delete_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 #endif /* HAVE_IPV6 */
 
 /* RIB update function. */
-void
-rib_update (void)
+static int
+rib_update_thread (struct thread *self)
 {
   struct route_node *rn;
   struct route_table *table;
@@ -2891,6 +2889,18 @@ rib_update (void)
     for (rn = route_top (table); rn; rn = route_next (rn))
       if (rn->info)
         rib_queue_add (&zebrad, rn);
+
+  return 0;
+}
+
+void
+rib_update (void)
+{
+  if (zebrad.update)
+    return;
+
+  zebrad.update = thread_add_background (zebrad.master, rib_update_thread,
+					 NULL, rib_process_hold_time);
 }
 
 /* Remove all routes which comes from non main table.  */
