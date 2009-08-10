@@ -535,7 +535,7 @@ if_rename (struct interface *ifp, const char *name)
 	zebra_interface_address_add_update (ifp, ifc);
     }
 
-  rib_update();
+  rib_update ();
 }
 
 /* Interface is up. */
@@ -565,9 +565,6 @@ if_up (struct interface *ifp)
 #endif /* HAVE_IPV6 */
 	}
     }
-
-  /* Examine all static routes. */
-  rib_update ();
 }
 
 /* Interface goes down.  We have to manage different behavior of based
@@ -598,9 +595,6 @@ if_down (struct interface *ifp)
 #endif /* HAVE_IPV6 */
 	}
     }
-
-  /* Examine all static routes which direct to the interface. */
-  rib_update ();
 }
 
 void
