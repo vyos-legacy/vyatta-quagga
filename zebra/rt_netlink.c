@@ -285,14 +285,6 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
           return -1;
         }
       
-      /* JF: Ignore messages that aren't from the kernel */
-      if ( snl.nl_pid != 0 )
-	{
-	  zlog_info ("%s: ignoring message from pid %u", __func__, 
-		      snl.nl_pid );
-	  continue;
-	}
-
       for (h = (struct nlmsghdr *) buf; NLMSG_OK (h, (unsigned int) status);
            h = NLMSG_NEXT (h, status))
         {
@@ -902,7 +894,7 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
     }
 #endif /* HAVE_IPV6 */
 
-  rib_update();
+  rib_update ();
 
   return 0;
 }

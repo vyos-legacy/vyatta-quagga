@@ -448,6 +448,6 @@ connected_delete_ipv6 (struct interface *ifp, struct in6_addr *address,
 
   connected_withdraw (ifc);
 
-  rib_update();
+  rib_update ();
 }
 #endif /* HAVE_IPV6 */

@@ -805,7 +805,7 @@ zread_ipv4_add (struct zserv *client, u_short length)
   rib->table = zebrad.rtm_table_default;
   rib_add_ipv4_multipath (&p, rib);
 
-  rib_update();
+  rib_update_background ();
 
   return 0;
 }
@@ -881,6 +881,8 @@ zread_ipv4_delete (struct zserv *client, u_short length)
     
   rib_delete_ipv4 (api.type, api.flags, &p, &nexthop, ifindex,
 		   client->rtm_table);
+
+  rib_update_background ();
   return 0;
 }
 
@@ -973,7 +975,7 @@ zread_ipv6_add (struct zserv *client, u_short length)
     rib_add_ipv6 (api.type, api.flags, &p, &nexthop, ifindex, zebrad.rtm_table_default, api.metric,
 		  api.distance);
 
-  rib_update ();
+  rib_update_background ();
   return 0;
 }
 
@@ -1038,6 +1040,8 @@ zread_ipv6_delete (struct zserv *client, u_short length)
     rib_delete_ipv6 (api.type, api.flags, &p, NULL, ifindex, client->rtm_table);
   else
     rib_delete_ipv6 (api.type, api.flags, &p, &nexthop, ifindex, client->rtm_table);
+
+  rib_update_background ();
   return 0;
 }
 
