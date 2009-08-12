@@ -1,3 +1,21 @@
+vyatta-quagga (0.99.14-9) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * update .gitignore
+
+  [ Paul Jakma ]
+  * bgpd: Fix mistakes in applying 'allow inbound connections to non-
+    default view'
+  * ospfd: Make "Packet ... received on wrong link" conditional on debug
+
+  [ Joakim Tjernlund ]
+  * ospfd: Make sure route table is recalculated.
+
+  [ Stephen Hemminger ]
+  * Clean up boot message
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 12 Aug 2009 13:06:59 -0700
+
 vyatta-quagga (0.99.14-8) unstable; urgency=low
 
   * indentation if rib_update
