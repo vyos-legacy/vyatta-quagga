@@ -70,3 +70,4 @@ build
 .rebase-*
 *~
 *.loT
+extract.pl
