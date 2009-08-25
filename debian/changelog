@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.14-11) unstable; urgency=low
+
+  * Fix bgp listen with MD5
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 25 Aug 2009 10:19:04 -0700
+
 vyatta-quagga (0.99.14-10) unstable; urgency=low
 
   * ospfd: fix performance problem with redistribute delete
