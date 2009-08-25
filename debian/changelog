@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.14-10) unstable; urgency=low
+
+  * ospfd: fix performance problem with redistribute delete
+  * bgp: compiler warning fix
+  * bgp: missing pieces from listener patch
+  * all: check return value from daemon() call
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 25 Aug 2009 09:34:15 -0700
+
 vyatta-quagga (0.99.14-9) unstable; urgency=low
 
   [ Stephen Hemminger ]
