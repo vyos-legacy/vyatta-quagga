@@ -213,7 +213,8 @@ ifname2ifindex (const char *name)
 {
   struct interface *ifp;
 
-  return ((ifp = if_lookup_by_name(name)) != NULL) ? ifp->ifindex : 0;
+  return ((ifp = if_lookup_by_name(name)) != NULL) ? ifp->ifindex
+                                                   : IFINDEX_INTERNAL;
 }
 
 /* Interface existance check by interface name. */
@@ -222,12 +223,13 @@ if_lookup_by_name (const char *name)
 {
   struct listnode *node;
   struct interface *ifp;
-
-  for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
-    {
-      if (strcmp(name, ifp->name) == 0)
-	return ifp;
-    }
+  
+  if (name)
+    for (ALL_LIST_ELEMENTS_RO (iflist, node, ifp))
+      {
+        if (strcmp(name, ifp->name) == 0)
+          return ifp;
+      }
   return NULL;
 }
 
