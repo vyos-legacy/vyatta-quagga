@@ -81,6 +81,7 @@ bgp_option_set (int flag)
     case BGP_OPT_NO_FIB:
     case BGP_OPT_MULTIPLE_INSTANCE:
     case BGP_OPT_CONFIG_CISCO:
+    case BGP_OPT_IMPORT_CHECK:
       SET_FLAG (bm->options, flag);
       break;
     default:
@@ -100,6 +101,7 @@ bgp_option_unset (int flag)
       /* Fall through.  */
     case BGP_OPT_NO_FIB:
     case BGP_OPT_CONFIG_CISCO:
+    case BGP_OPT_IMPORT_CHECK:
       UNSET_FLAG (bm->options, flag);
       break;
     default:
