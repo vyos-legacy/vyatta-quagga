@@ -807,11 +807,12 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
   if (IS_ZEBRA_DEBUG_KERNEL)
     {
       char buf[INET6_ADDRSTRLEN];
-      zlog_debug ("%s %s %s proto %s",
+      zlog_debug ("%s %s %s proto %s table %d",
 		  h->nlmsg_type == RTM_NEWROUTE ? "RTM_NEWROUTE" : "RTM_DELROUTE",
 		  inet_ntop(rtm->rtm_family, dest, buf, sizeof(buf)),
 		  rtm->rtm_type == RTN_UNICAST ? "unicast" : "multicast",
-		  lookup (rtproto_str, rtm->rtm_protocol));
+		  lookup (rtproto_str, rtm->rtm_protocol),
+		  rtm->rtm_table);
     }
 
   if (rtm->rtm_type != RTN_UNICAST)
