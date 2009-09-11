@@ -752,6 +752,18 @@ static const struct message rtproto_str[] = {
 #ifdef RTPROT_BIRD
   {RTPROT_BIRD,     "BIRD"},
 #endif /* RTPROT_BIRD */
+#ifdef RTPROT_DNROUTED
+  {RTPROT_DNROUTED, "Decnet"},
+#endif
+#ifdef RTPROT_XORP
+  {RTPROT_XORP,	    "XORP"},
+#endif
+#ifdef RTPROT_NTK
+  {RTPROT_NTK,	    "NTK"},
+#endif
+#ifdef RTPROT_DHCP
+  {RTPROT_DHCP,	    "DHCP"},
+#endif
   {0,               NULL}
 };
 
