@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.15-2) unstable; urgency=low
+
+  * Add more routing protocols to debug output
+  * add table to debug message
+  * Fix kernel routes lingering when interface brought down
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 14 Sep 2009 12:16:25 -0700
+
 vyatta-quagga (0.99.15-1) unstable; urgency=low
 
   [ Joakim Tjernlund ]
