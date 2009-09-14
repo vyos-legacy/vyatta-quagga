@@ -1,3 +1,32 @@
+vyatta-quagga (0.99.15-1) unstable; urgency=low
+
+  [ Joakim Tjernlund ]
+  * ospfd: Tighten up the connected check for redistribution
+  * ospfd: Make sure priority is respected.
+
+  [ Paul Jakma ]
+  * lib: if_lookup_by_name should be more robust to null argument
+  * zebra: test_main.c should be a bit more helpful about its usage
+  * zebra: Add an example config file for testzebra
+  * lib/trivial: str2prefix checks return of inet_pton in fragile way
+
+  [ Stephen Hemminger ]
+  * bgpd: fix md5 set on listen sockets
+
+  [ Tom Henderson ]
+  * ospf6d: bug #529, fix endianness problem in earlier commit
+
+  [ Paul Jakma ]
+  * release: 0.99.15
+
+  [ David Ward ]
+  * zebra: Fix router advertisements for non-Ethernet link layer
+    addresses
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 03 Sep 2009 09:29:46 -0700
+
 vyatta-quagga (0.99.14-11) unstable; urgency=low
 
   * Fix bgp listen with MD5
