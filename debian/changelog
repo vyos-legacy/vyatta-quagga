@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.12-5+jenner19) unstable; urgency=low
+
+  * Don't scan rib twice on link down
+  * Fix kernel routes lingering when interface brought down
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 14 Sep 2009 12:14:10 -0700
+
 vyatta-quagga (0.99.12-5+jenner18) unstable; urgency=low
 
   * Allow bgp-import-check to be set
