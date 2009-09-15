@@ -2051,6 +2051,7 @@ rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 
       if (rib->type != type)
 	continue;
+
       if (rib->type == ZEBRA_ROUTE_CONNECT && (nexthop = rib->nexthop) &&
 	  nexthop->type == NEXTHOP_TYPE_IFINDEX && nexthop->ifindex == ifindex)
 	{
@@ -2065,10 +2066,20 @@ rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 	  break;
 	}
       /* Make sure that the route found has the same gateway. */
-      else if (gate != NULL &&
-	       ((nexthop = rib->nexthop) &&
-	        (IPV4_ADDR_SAME (&nexthop->gate.ipv4, gate) ||
-		 IPV4_ADDR_SAME (&nexthop->rgate.ipv4, gate)))) 
+      else if (gate)
+	{
+	  if ( ((nexthop = rib->nexthop) &&
+		(IPV4_ADDR_SAME (&nexthop->gate.ipv4, gate) ||
+		 IPV4_ADDR_SAME (&nexthop->rgate.ipv4, gate))))
+	    {
+	      same = rib;
+	      break;
+	    }
+	}
+      else if (rib->type == ZEBRA_ROUTE_KERNEL &&
+	       (nexthop = rib->nexthop) &&
+	       nexthop->type == NEXTHOP_TYPE_IFINDEX &&
+	       nexthop->ifindex == ifindex)
         {
 	  same = rib;
 	  break;
