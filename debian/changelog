@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.12-5+jenner20) unstable; urgency=low
+
+  * Fix removal of direct kernel routes
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 14 Sep 2009 18:15:19 -0700
+
 vyatta-quagga (0.99.12-5+jenner19) unstable; urgency=low
 
   * Don't scan rib twice on link down
