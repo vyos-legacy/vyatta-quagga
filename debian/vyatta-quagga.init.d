@@ -34,10 +34,16 @@ vyatta_quagga_start ()
 {
     local -a daemons
 
+    # Give IPv6 module a chance to load since we are going to test for
+    # its existance.
+    modprobe -s --use-blacklist ipv6
+
     if [ $# -gt 0 ] ; then
 	daemons=( $* )
-    else
+    elif [ -d /proc/sys/net/ipv6 ]; then
 	daemons=( zebra ripd ripngd ospfd ospf6d bgpd )
+    else
+	daemons=( zebra ripd ripngd ospfd bgpd )
     fi
 
     log_daemon_msg "Starting routing daemons"
