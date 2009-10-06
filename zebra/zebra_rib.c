@@ -2872,7 +2872,7 @@ static_delete_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 #endif /* HAVE_IPV6 */
 
 /* RIB update function. */
-static void rib_update_table (struct table *table)
+static void rib_update_table (struct route_table *table)
 {
   struct route_node *rn;
 
@@ -2885,8 +2885,6 @@ static void rib_update_table (struct table *table)
 void
 rib_update (void)
 {
-  struct route_table *table;
-
   if (zebrad.update)
     {
       thread_cancel (zebrad.update);
