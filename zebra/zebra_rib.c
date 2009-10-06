@@ -416,7 +416,8 @@ nexthop_same (const struct nexthop *h1,
 /* If force flag is not set, do not modify flags at all for uninstall
    the route from FIB. */
 static int
-nexthop_active (struct rib *rib, struct nexthop *nexthop, int set,
+nexthop_active (int family,
+		struct rib *rib, struct nexthop *nexthop, int set,
 		struct route_node *top)
 {
   struct prefix p;
@@ -431,7 +432,7 @@ nexthop_active (struct rib *rib, struct nexthop *nexthop, int set,
   nexthop_to_prefix(nexthop, &p);
 
   /* Lookup table.  */
-  table = vrf_table (AFI_IP, SAFI_UNICAST, 0);
+  table = vrf_table (family, SAFI_UNICAST, 0);
   if (! table)
     return 0;
 
@@ -869,7 +870,7 @@ nexthop_active_check (struct route_node *rn, struct rib *rib,
 	nexthop->ifindex = 0;
     case NEXTHOP_TYPE_IPV4_IFINDEX:
       family = AFI_IP;
-      if (nexthop_active (rib, nexthop, set, rn))
+      if (nexthop_active (family, rib, nexthop, set, rn))
 	SET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
       else
 	UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
@@ -890,7 +891,7 @@ nexthop_active_check (struct route_node *rn, struct rib *rib,
 	    UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
 	  break;
 	}
-      else if (nexthop_active (rib, nexthop, set, rn))
+      else if (nexthop_active (family, rib, nexthop, set, rn))
 	SET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
       else
 	UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
