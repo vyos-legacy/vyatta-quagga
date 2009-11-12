@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.15-6) unstable; urgency=low
+
+  * Update RIB on interface link state change
+  * Make vtysh command args exit if warning received
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 12 Nov 2009 15:37:58 -0800
+
 vyatta-quagga (0.99.15-5) unstable; urgency=low
 
   [ Denis Ovsienko ]
