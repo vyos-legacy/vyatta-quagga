@@ -1,3 +1,16 @@
+vyatta-quagga (0.99.15-7) unstable; urgency=low
+
+  * Add show ospf6 debuggging
+  * Inline trivial reference count functions
+  * Move route_lock_node to fix warnings
+  * OSPF vty cleanup
+  * OSPF6: don't enable TCP vty port
+  * ospfd: make some functions static
+  * Avoid N^2 behaviour on redistribute withdraw
+  * Allow bgp-import-check to be set
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 13 Nov 2009 16:12:30 -0800
+
 vyatta-quagga (0.99.15-6) unstable; urgency=low
 
   * Update RIB on interface link state change
