@@ -1,3 +1,25 @@
+vyatta-quagga (0.99.15-8) unstable; urgency=low
+
+  [ Dmitry Tejblum ]
+  * configure: fix HAVE_CLOCK_MONOTONIC spelling
+
+  [ Tom Goff ]
+  * ospf6d: fix LSA locking in ospf6_new_ls_id()
+  * zebra: make declaration const in rtm_flag_dump()
+
+  [ David Ward ]
+  * zebra: fix RIB debug message for IPv6
+
+  [ Stephen Hemminger ]
+  * ospfd: make local functions static
+  * ospfd: comment out unused function
+  * ospfd: VTY strings cleanup
+
+  [ David Ward ]
+  * configure: fix spelling
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 03 Dec 2009 09:47:47 -0800
+
 vyatta-quagga (0.99.15-7) unstable; urgency=low
 
   * Add show ospf6 debuggging
