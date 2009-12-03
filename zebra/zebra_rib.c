@@ -943,23 +943,21 @@ static int
 nexthop_active_update (struct route_node *rn, struct rib *rib, int set)
 {
   struct nexthop *nexthop;
+  int prev_active, prev_index, new_active;
 
   rib->nexthop_active_num = 0;
   UNSET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
 
   for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
     {
-      unsigned int prev_index = nexthop->ifindex;
-      int prev_active = CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
-      int new_active = nexthop_active_check (rn, rib, nexthop, set);
-
-      if (new_active)
+      prev_active = CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
+      prev_index = nexthop->ifindex;
+      if ((new_active = nexthop_active_check (rn, rib, nexthop, set)))
 	rib->nexthop_active_num++;
-
-      if (prev_active != new_active || prev_index != nexthop->ifindex)
+      if (prev_active != new_active ||
+	  prev_index != nexthop->ifindex)
 	SET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
     }
-
   return rib->nexthop_active_num;
 }
 
@@ -1332,14 +1330,20 @@ rib_meta_queue_add (struct meta_queue *mq, struct route_node *rn)
 static void
 rib_queue_add (struct zebra_t *zebra, struct route_node *rn)
 {
+  char buf[INET6_ADDRSTRLEN];
+  assert (zebra && rn);
   
   if (IS_ZEBRA_DEBUG_RIB_Q)
+    inet_ntop (rn->p.family, &rn->p.u.prefix, buf, INET6_ADDRSTRLEN);
+
+  /* Pointless to queue a route_node with no RIB entries to add or remove */
+  if (!rn->info)
     {
-      char buf[INET_ADDRSTRLEN];
-      
       zlog_info ("%s: %s/%d: work queue added", __func__,
 		 inet_ntop (AF_INET, &rn->p.u.prefix, buf, INET_ADDRSTRLEN),
 		 rn->p.prefixlen);
+      zlog_backtrace(LOG_DEBUG);
+      return;
     }
 
   /*

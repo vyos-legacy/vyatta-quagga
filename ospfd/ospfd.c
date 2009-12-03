@@ -834,7 +834,7 @@ ospf_network_unset (struct ospf *ospf, struct prefix_ipv4 *p,
 /* Check whether interface matches given network
  * returns: 1, true. 0, false
  */
-static int 
+static int
 ospf_network_match_iface(const struct connected *co, const struct prefix *net)
 {
   /* new approach: more elegant and conceptually clean */
