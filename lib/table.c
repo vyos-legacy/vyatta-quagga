@@ -193,23 +193,6 @@ set_link (struct route_node *node, struct route_node *new)
   new->parent = node;
 }
 
-/* Dump routing table. */
-static void __attribute__ ((unused))
-route_dump_node (struct route_table *t)
-{
-  struct route_node *node;
-  char buf[46];
-
-  for (node = route_top (t); node != NULL; node = route_next (node))
-    {
-      printf ("[%d] %p %s/%d\n", 
-	      node->lock,
-	      node->info,
-	      inet_ntop (node->p.family, &node->p.u.prefix, buf, 46),
-	      node->p.prefixlen);
-    }
-}
-
 /* Find matched prefix. */
 struct route_node *
 route_node_match (struct route_table *table, struct prefix *p)
