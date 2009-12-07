@@ -157,9 +157,6 @@ route_common (struct prefix *n, struct prefix *p, struct prefix *new)
     }
 }
 
-/* Macro version of check_bit (). */
-#define CHECK_BIT(X,P) ((((u_char *)(X))[(P) / 8]) >> (7 - ((P) % 8)) & 1)
-
 /* Check bit of the prefix. */
 static int
 check_bit (u_char *prefix, u_char prefixlen)
@@ -175,10 +172,6 @@ check_bit (u_char *prefix, u_char prefixlen)
   
   return (p[offset] >> shift & 1);
 }
-
-/* Macro version of set_link (). */
-#define SET_LINK(X,Y) do { (X)->link[CHECK_BIT(&(Y)->p.u.prefix,(X)->p.prefixlen)] = (Y);\
-                      (Y)->parent = (X); } while (0)
 
 static void
 set_link (struct route_node *node, struct route_node *new)
