@@ -1,3 +1,33 @@
+vyatta-quagga (0.99.15-9) unstable; urgency=low
+
+  [ David Ward ]
+  * isisd: fix BPF ioctl() calls, treat "true" and "false" as reserved
+
+  [ heasley ]
+  * zebra: fix argument reference in strncpy() call for BSD
+
+  [ David Ward ]
+  * isisd: fix --enable-isis-topology for 64-bit Linux
+  * zebra: handle RTF_CLONING removal from FreeBSD 8.0
+
+  [ Denis Ovsienko ]
+  * bgpd: work around warning in assegments_parse()
+
+  [ Ondrej Zajicek ]
+  * ospf6d: review LSA sequence number comparison
+
+  [ heasley ]
+  * lib: log source of vty connections (bug #566)
+
+  [ Denis Ovsienko ]
+  * lib: remove unused function: route_dump_node()
+
+  [ Stephen Hemminger ]
+  * table: remove unused macro
+  * table: make match functions take const args
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 07 Dec 2009 11:57:46 -0800
+
 vyatta-quagga (0.99.15-8) unstable; urgency=low
 
   [ Dmitry Tejblum ]
