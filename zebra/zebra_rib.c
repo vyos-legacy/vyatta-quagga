@@ -826,7 +826,7 @@ static inline int rib_is_managed(const struct rib *rib)
  * The return value is the final value of 'ACTIVE' flag.
  */
 
-static int
+static unsigned
 nexthop_active_check (struct route_node *rn, struct rib *rib,
 		      struct nexthop *nexthop, int set)
 {
@@ -943,7 +943,7 @@ static int
 nexthop_active_update (struct route_node *rn, struct rib *rib, int set)
 {
   struct nexthop *nexthop;
-  int prev_active, prev_index, new_active;
+  unsigned int prev_active, prev_index, new_active;
 
   rib->nexthop_active_num = 0;
   UNSET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
@@ -1330,20 +1330,14 @@ rib_meta_queue_add (struct meta_queue *mq, struct route_node *rn)
 static void
 rib_queue_add (struct zebra_t *zebra, struct route_node *rn)
 {
-  char buf[INET6_ADDRSTRLEN];
-  assert (zebra && rn);
   
   if (IS_ZEBRA_DEBUG_RIB_Q)
-    inet_ntop (rn->p.family, &rn->p.u.prefix, buf, INET6_ADDRSTRLEN);
-
-  /* Pointless to queue a route_node with no RIB entries to add or remove */
-  if (!rn->info)
     {
+      char buf[INET6_ADDRSTRLEN];
+
       zlog_info ("%s: %s/%d: work queue added", __func__,
-		 inet_ntop (AF_INET, &rn->p.u.prefix, buf, INET_ADDRSTRLEN),
+		 inet_ntop (rn->p.family, &rn->p.u.prefix, buf, INET6_ADDRSTRLEN),
 		 rn->p.prefixlen);
-      zlog_backtrace(LOG_DEBUG);
-      return;
     }
 
   /*
@@ -1400,7 +1394,7 @@ rib_queue_init (struct zebra_t *zebra)
   zebra->ribq->spec.hold = 10;
   
   if (!(zebra->mq = meta_queue_new ()))
-    zlog_err ("%s: could not initialize meta queue!", __func__);
+    zlog_err ("%s: could not initialise meta queue!", __func__);
 }
 
 /* RIB updates are processed via a queue of pointers to route_nodes.
@@ -2890,6 +2884,7 @@ static void rib_update_table (struct route_table *table)
 void
 rib_update (void)
 {
+  /* cancel background update */
   if (zebrad.update)
     {
       thread_cancel (zebrad.update);
