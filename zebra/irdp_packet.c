@@ -59,6 +59,7 @@
 #include "zebra/irdp.h"
 #include <netinet/ip_icmp.h>
 #include "if.h"
+#include "checksum.h"
 #include "sockunion.h"
 #include "log.h"
 #include "sockopt.h"
@@ -67,12 +68,9 @@
 /* GLOBAL VARS */
 
 int irdp_sock = -1;
-char b1[16], b2[16], b3[16], b4[16];  /* For inet_2a */
 
 extern struct zebra_t zebrad;
 extern struct thread *t_irdp_raw;
-int in_cksum (void *ptr, int nbytes);
-void process_solicit (struct interface *ifp);
 
 static void
 parse_irdp_packet(char *p, 
