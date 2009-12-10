@@ -71,3 +71,4 @@ build
 *~
 *.loT
 extract.pl
+mkinstalldirs
