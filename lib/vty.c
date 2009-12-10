@@ -250,7 +250,7 @@ vty_hello (struct vty *vty)
 	vty_out (vty, "MOTD file not found%s", VTY_NEWLINE);
     }
   else if (host.motd)
-    vty_out (vty, host.motd);
+    vty_out (vty, "%s", host.motd);
 }
 
 /* Put out prompt and wait input from user. */
@@ -1840,71 +1840,6 @@ vty_serv_sock_addrinfo (const char *hostname, unsigned short port)
   freeaddrinfo (ainfo_save);
 }
 #endif /* HAVE_IPV6 && ! NRL */
-
-/* Make vty server socket. */
-static void
-vty_serv_sock_family (const char* addr, unsigned short port, int family)
-{
-  int ret;
-  union sockunion su;
-  int accept_sock;
-  void* naddr=NULL;
-
-  memset (&su, 0, sizeof (union sockunion));
-  su.sa.sa_family = family;
-  if(addr)
-    switch(family)
-    {
-      case AF_INET:
-        naddr=&su.sin.sin_addr;
-#ifdef HAVE_IPV6
-      case AF_INET6:
-        naddr=&su.sin6.sin6_addr;
-#endif	
-    }
-
-  if(naddr)
-    switch(inet_pton(family,addr,naddr))
-    {
-      case -1:
-        zlog_err("bad address %s",addr);
-	naddr=NULL;
-	break;
-      case 0:
-        zlog_err("error translating address %s: %s",addr,safe_strerror(errno));
-	naddr=NULL;
-    }
-
-  /* Make new socket. */
-  accept_sock = sockunion_stream_socket (&su);
-  if (accept_sock < 0)
-    return;
-
-  /* This is server, so reuse address. */
-  sockopt_reuseaddr (accept_sock);
-  sockopt_reuseport (accept_sock);
-
-  /* Bind socket to universal address and given port. */
-  ret = sockunion_bind (accept_sock, &su, port, naddr);
-  if (ret < 0)
-    {
-      zlog_warn("can't bind socket");
-      close (accept_sock);	/* Avoid sd leak. */
-      return;
-    }
-
-  /* Listen socket under queue 3. */
-  ret = listen (accept_sock, 3);
-  if (ret < 0) 
-    {
-      zlog (NULL, LOG_WARNING, "can't listen socket");
-      close (accept_sock);	/* Avoid sd leak. */
-      return;
-    }
-
-  /* Add vty server event. */
-  vty_event (VTY_SERV, accept_sock, NULL);
-}
 
 #ifdef VTYSH
 /* For sockaddr_un. */
