@@ -1,3 +1,31 @@
+vyatta-quagga (0.99.15-10) unstable; urgency=low
+
+  * lib: make match functions take const args
+  * zebra: remove unused function to fix warning
+  * zebra: fix more compiler warnings
+  * zebra: fix more warnings in rtadv
+  * lib: fix warning on little endian
+  * lib: move check_bit into prefix common code
+  * zebra: cleanup RIB meta queue code
+  * bgpd: compile warnings cleanup
+  * zebra: deal with irdp compile warnings
+  * ripngd: compiler warnings cleanup
+  * ospf6d: fix warnings from recent prefix bit commit
+  * ospf6d: remove dead code
+  * ripd: fix compiler warnings
+  * vty: fix warnings
+  * irdp: warning cleanup
+  * irdp: fix uninitialized variable
+  * ripd: cleanup
+  * ripng: compiler warning cleanup
+  * ospf: cleanup
+  * Add prefix6_bit
+  * Subject: ospf6d: remove dead code
+  * Fix ifdef for vty_serv_sock_family
+  * Ignore derived file mkinstalldirs
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 10 Dec 2009 11:24:41 -0800
+
 vyatta-quagga (0.99.15-9) unstable; urgency=low
 
   [ David Ward ]
