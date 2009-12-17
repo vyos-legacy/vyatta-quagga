@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.15-11) unstable; urgency=low
+
+  * bgpd: code cleanup
+  * zebra: router-id table not sorted properly.
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 17 Dec 2009 15:59:23 -0800
+
 vyatta-quagga (0.99.15-10) unstable; urgency=low
 
   * lib: make match functions take const args
