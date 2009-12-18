@@ -41,8 +41,8 @@
 #include "zebra/router-id.h"
 #include "zebra/redistribute.h"
 
-static struct list rid_all_sorted_list;
-static struct list rid_lo_sorted_list;
+static struct list rid_all_list;
+static struct list rid_lo_list;
 static struct prefix rid_user_assigned;
 
 /* master zebra server structure */
@@ -62,7 +62,7 @@ router_id_find_node (struct list *l, struct connected *ifc)
 }
 
 static int
-router_id_bad_address (struct connected *ifc)
+router_id_bad_address (const struct connected *ifc)
 {
   if (ifc->address->family != AF_INET)
     return 1;
@@ -78,7 +78,6 @@ void
 router_id_get (struct prefix *p)
 {
   struct listnode *node;
-  struct connected *c;
 
   p->u.prefix4.s_addr = 0;
   p->family = AF_INET;
@@ -86,22 +85,16 @@ router_id_get (struct prefix *p)
 
   if (rid_user_assigned.u.prefix4.s_addr)
     p->u.prefix4.s_addr = rid_user_assigned.u.prefix4.s_addr;
-  else if (!list_isempty (&rid_lo_sorted_list))
+  else if ((node = listhead (&rid_lo_list)) != NULL ||
+	   (node = listhead (&rid_all_list)) != NULL)
     {
-      node = listtail (&rid_lo_sorted_list);
-      c = listgetdata (node);
-      p->u.prefix4.s_addr = c->address->u.prefix4.s_addr;
-    }
-  else if (!list_isempty (&rid_all_sorted_list))
-    {
-      node = listtail (&rid_all_sorted_list);
-      c = listgetdata (node);
+      const struct connected *c = listgetdata (node);
       p->u.prefix4.s_addr = c->address->u.prefix4.s_addr;
     }
 }
 
 static void
-router_id_set (struct prefix *p)
+router_id_set (const struct prefix *p)
 {
   struct prefix p2;
   struct listnode *node;
@@ -131,9 +124,9 @@ router_id_add_address (struct connected *ifc)
 
   if (!strncmp (ifc->ifp->name, "lo", 2)
       || !strncmp (ifc->ifp->name, "dummy", 5))
-    l = &rid_lo_sorted_list;
+    l = &rid_lo_list;
   else
-    l = &rid_all_sorted_list;
+    l = &rid_all_list;
   
   if (!router_id_find_node (l, ifc))
     listnode_add (l, ifc);
@@ -164,9 +157,9 @@ router_id_del_address (struct connected *ifc)
 
   if (!strncmp (ifc->ifp->name, "lo", 2)
       || !strncmp (ifc->ifp->name, "dummy", 5))
-    l = &rid_lo_sorted_list;
+    l = &rid_lo_list;
   else
-    l = &rid_all_sorted_list;
+    l = &rid_all_list;
 
   if ((c = router_id_find_node (l, ifc)))
     listnode_delete (l, c);
@@ -217,27 +210,9 @@ DEFUN (no_router_id,
   struct prefix rid;
 
   rid.u.prefix4.s_addr = 0;
-  rid.prefixlen = 0;
-  rid.family = AF_INET;
-
   router_id_set (&rid);
 
   return CMD_SUCCESS;
-}
-
-static int
-router_id_cmp (void *a, void *b)
-{
-  unsigned int A, B;
-
-  A = ((struct connected *) a)->address->u.prefix4.s_addr;
-  B = ((struct connected *) b)->address->u.prefix4.s_addr;
-
-  if (A > B)
-    return 1;
-  else if (A < B)
-    return -1;
-  return 0;
 }
 
 void
@@ -245,13 +220,6 @@ router_id_init (void)
 {
   install_element (CONFIG_NODE, &router_id_cmd);
   install_element (CONFIG_NODE, &no_router_id_cmd);
-
-  memset (&rid_all_sorted_list, 0, sizeof (rid_all_sorted_list));
-  memset (&rid_lo_sorted_list, 0, sizeof (rid_lo_sorted_list));
-  memset (&rid_user_assigned, 0, sizeof (rid_user_assigned));
-
-  rid_all_sorted_list.cmp = router_id_cmp;
-  rid_lo_sorted_list.cmp = router_id_cmp;
 
   rid_user_assigned.family = AF_INET;
   rid_user_assigned.prefixlen = 32;
