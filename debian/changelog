@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.15-12) unstable; urgency=low
+
+  * Revert "zebra: router-id table not sorted properly."
+  * Take first router-id and keep it
+  * Ignore mkinstalldirs which changes during build
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 18 Dec 2009 16:30:49 -0800
+
 vyatta-quagga (0.99.15-11) unstable; urgency=low
 
   * bgpd: code cleanup
