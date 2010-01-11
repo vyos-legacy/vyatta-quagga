@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.15-14) unstable; urgency=low
+
+  * Use monotonic clock for BGP
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 11 Jan 2010 15:50:59 -0800
+
 vyatta-quagga (0.99.15-13) unstable; urgency=low
 
   * Change compiler flags
