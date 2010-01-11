@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.15-13) unstable; urgency=low
+
+  * Change compiler flags
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 11 Jan 2010 14:54:02 -0800
+
 vyatta-quagga (0.99.15-12) unstable; urgency=low
 
   * Revert "zebra: router-id table not sorted properly."
