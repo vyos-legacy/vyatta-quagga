@@ -17,11 +17,14 @@ DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
 PACKAGE=vyatta-quagga
 PKGDIR=$(CURDIR)/debian/$(PACKAGE)
 BUILD_STAMP=debian/build-stamp
-CFLAGS = -Wall
+CFLAGS = -Wall -fstack-protector
 WANT_SNMP=1
 
-CFLAGS += -Os -freorder-blocks
-CFLAGS += -g1 -fno-omit-frame-pointer -fno-optimize-sibling-calls
+ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
+	CFLAGS += -O0 -g
+else
+	CFLAGS += -O2 -g
+endif
 
 ifeq ($(WANT_SNMP),1)
 	xable_snmp = --enable-snmp
