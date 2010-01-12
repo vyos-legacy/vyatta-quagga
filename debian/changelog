@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.15-15) unstable; urgency=low
+
+  * BGP: fix crash when allowas-in is done
+  * Remove except fd set from thread select
+  * BGP: only use write event for non-blocking connect
+  * BGP: leave peer socket in non-blocking mode (mostly)
+  * remove unused stream_read_unblock
+  * Add TCP_CORK wrapper
+  * BGP: enable TCP corking
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 12 Jan 2010 15:33:21 -0800
+
 vyatta-quagga (0.99.15-14) unstable; urgency=low
 
   * Use monotonic clock for BGP
