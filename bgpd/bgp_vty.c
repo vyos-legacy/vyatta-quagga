@@ -6822,6 +6822,32 @@ bgp_show_summary_vty (struct vty *vty, const char *name,
   return CMD_SUCCESS;
 }
 
+/* 'snapshot bgp' command */
+DEFUN (show_bgp_snapshot,
+       show_bgp_snapshot_cmd,
+       "show bgp snapshot",
+	SHOW_STR
+	BGP_STR
+       "Snapshot system information\n")
+{
+  pid_t pid;
+
+  pid = fork();
+  if (pid < 0)
+    {
+      vty_out (vty, "fork failed %s", safe_strerror(errno));
+      return CMD_WARNING;
+    }
+
+  if (pid == 0)
+      bgp_isolate ();
+  else
+      vty->status = VTY_CLOSE;
+      
+
+  return CMD_SUCCESS;
+}
+
 /* `show ip bgp summary' commands. */
 DEFUN (show_ip_bgp_summary, 
        show_ip_bgp_summary_cmd,
@@ -9919,6 +9945,11 @@ bgp_vty_init (void)
   install_element (RESTRICTED_NODE, &show_bgp_views_cmd);
   install_element (ENABLE_NODE, &show_bgp_views_cmd);
   
+  /* "snapshot" command */
+  install_element (VIEW_NODE, &show_bgp_snapshot_cmd);
+  install_element (RESTRICTED_NODE, &show_bgp_snapshot_cmd);
+  install_element (ENABLE_NODE, &show_bgp_snapshot_cmd);
+
   /* Community-list. */
   community_list_vty ();
 }

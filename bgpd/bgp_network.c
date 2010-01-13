@@ -536,3 +536,36 @@ bgp_close (void)
       XFREE (MTYPE_BGP_LISTENER, listener);
     }
 }
+
+/* Close of all network connections and cancel threads */
+void
+bgp_isolate (void)
+{
+  struct listnode *node;
+  struct bgp_listener *listener;
+  struct peer *peer;
+  const struct bgp *bgp;
+
+  for (ALL_LIST_ELEMENTS_RO (bm->listen_sockets, node, listener))
+    {
+      if (listener->fd < 0)
+	continue;
+      thread_cancel (listener->thread);
+      close (listener->fd);
+      listener->fd = -1;
+    }
+
+  bgp = bgp_get_default ();
+  if (!bgp)
+      return;
+
+  for (ALL_LIST_ELEMENTS_RO (bgp->peer, node, peer))
+    {
+      if (peer->fd < 0)
+	continue;
+      thread_cancel(peer->t_read);
+      thread_cancel(peer->t_write);
+      peer->fd = -1;
+    }
+}
+
