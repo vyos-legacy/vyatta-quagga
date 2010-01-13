@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "thread.h"
 #include "sockunion.h"
 #include "sockopt.h"
+#include "network.h"
 #include "memory.h"
 #include "log.h"
 #include "if.h"
