@@ -25,7 +25,7 @@ extern int bgp_socket (unsigned short, const char *);
 extern void bgp_close (void);
 extern int bgp_connect (struct peer *);
 extern void bgp_getsockname (struct peer *);
-extern void bgp_isolate (void);
+
 extern int bgp_md5_set (struct peer *);
 
 #endif /* _QUAGGA_BGP_NETWORK_H */
