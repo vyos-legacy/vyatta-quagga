@@ -6602,7 +6602,7 @@ bgp_show_route (struct vty *vty, const char *view_name, const char *ip_str,
 }
 
 /* BGP route print out function. */
-DEFUN (show_ip_bgp,
+DEFUN_BACKGROUND (show_ip_bgp,
        show_ip_bgp_cmd,
        "show ip bgp",
        SHOW_STR
@@ -6612,7 +6612,7 @@ DEFUN (show_ip_bgp,
   return bgp_show (vty, NULL, AFI_IP, SAFI_UNICAST, bgp_show_type_normal, NULL);
 }
 
-DEFUN (show_ip_bgp_ipv4,
+DEFUN_BACKGROUND (show_ip_bgp_ipv4,
        show_ip_bgp_ipv4_cmd,
        "show ip bgp ipv4 (unicast|multicast)",
        SHOW_STR
@@ -6629,7 +6629,7 @@ DEFUN (show_ip_bgp_ipv4,
   return bgp_show (vty, NULL, AFI_IP, SAFI_UNICAST, bgp_show_type_normal, NULL);
 }
 
-DEFUN (show_ip_bgp_route,
+DEFUN_BACKGROUND (show_ip_bgp_route,
        show_ip_bgp_route_cmd,
        "show ip bgp A.B.C.D",
        SHOW_STR

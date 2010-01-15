@@ -2119,6 +2119,10 @@ cmd_execute_command_real (vector vline, struct vty *vty,
   if (matched_element->daemon)
     return CMD_SUCCESS_DAEMON;
 
+  /* Only valid if not vtysh */
+  if (matched_element->attr == CMD_ATTR_BACKGROUND)
+      return vty_background (matched_element, vty, argc, argv);
+
   /* Execute matched command. */
   return (*matched_element->func) (matched_element, vty, argc, argv);
 }
@@ -2160,7 +2164,7 @@ cmd_execute_command (vector vline, struct vty *vty, struct cmd_element **cmd,
     return saved_ret;
 
   /* This assumes all nodes above CONFIG_NODE are childs of CONFIG_NODE */
-  while ( ret != CMD_SUCCESS && ret != CMD_WARNING 
+  while ( ret != CMD_SUCCESS && ret != CMD_WARNING  && ret != CMD_BACKGROUND
 	  && vty->node > CONFIG_NODE )
     {
       try_node = node_parent(try_node);

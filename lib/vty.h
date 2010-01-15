@@ -80,7 +80,7 @@ struct vty
   unsigned char escape;
 
   /* Current vty status. */
-  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE} status;
+  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE, VTY_WAIT} status;
 
   /* IAC handling: was the last character received the
      IAC (interpret-as-command) escape character (and therefore the next
@@ -114,6 +114,9 @@ struct vty
   /* Read and write thread. */
   struct thread *t_read;
   struct thread *t_write;
+
+  /* File descriptor of sentinel to child */
+  int child_pipe;
 
   /* Timeout seconds and thread. */
   unsigned long v_timeout;
@@ -219,6 +222,8 @@ extern int vty_config_unlock (struct vty *);
 extern int vty_shell (struct vty *);
 extern int vty_shell_serv (struct vty *);
 extern void vty_hello (struct vty *);
+extern int vty_background(struct cmd_element *cmd, struct vty *vty,
+			  int argc, const char *argv[]);
 
 /* Send a fixed-size message to all vty terminal monitors; this should be
    an async-signal-safe function. */
