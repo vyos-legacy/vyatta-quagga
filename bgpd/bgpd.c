@@ -203,7 +203,7 @@ bgp_cluster_id_unset (struct bgp *bgp)
   return 0;
 }
 
-/* time_t value that is monotonicly increasing 
+/* time_t value that is monotonicly increasing
  * and uneffected by adjustments to system clock
  */
 time_t bgp_clock (void)
