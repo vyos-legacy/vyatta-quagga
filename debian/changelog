@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.15-17) unstable; urgency=low
+
+  * Fix 5237: ospfv3: adding interface to multiple areas should cause
+    commit failed.
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Wed, 20 Jan 2010 14:56:12 -0800
+
 vyatta-quagga (0.99.15-16) unstable; urgency=low
 
   * Add missing include
