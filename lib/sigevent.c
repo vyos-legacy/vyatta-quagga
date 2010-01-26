@@ -192,7 +192,7 @@ exit_handler(int signo
 #endif
 	    )
 {
-  zlog_signal_backtrace (signo, "exiting..."
+  zlog_signal(signo, "exiting..."
 #ifdef SA_SIGINFO
 	      , siginfo, program_counter(context)
 #endif
@@ -207,23 +207,12 @@ core_handler(int signo
 #endif
 	    )
 {
-  zlog_signal_backtrace(signo, "aborting..."
+  zlog_signal(signo, "aborting..."
 #ifdef SA_SIGINFO
 	      , siginfo, program_counter(context)
 #endif
 	     );
   abort();
-}
-
-static void
-catch_handler(int signo
-#ifdef SA_SIGINFO
-	     , siginfo_t *siginfo, void *context
-#endif
-	    )
-{
-  /* should be zlog_sigsafe really, but it aborts */
-  zlog_info_signal (signo, "with default catch handler.");
 }
 
 static void
@@ -268,9 +257,6 @@ trap_default_signals(void)
   static const int ignore_signals[] = {
     SIGPIPE,
   };
-  static const int catch_signals[] = {
-    SIGCHLD,
-  };
   static const struct {
     const int *sigs;
     u_int nsigs;
@@ -283,7 +269,6 @@ trap_default_signals(void)
     { core_signals, sizeof(core_signals)/sizeof(core_signals[0]), core_handler},
     { exit_signals, sizeof(exit_signals)/sizeof(exit_signals[0]), exit_handler},
     { ignore_signals, sizeof(ignore_signals)/sizeof(ignore_signals[0]), NULL},
-    { catch_signals, sizeof(catch_signals)/sizeof(catch_signals[0]), catch_handler},
   };
   u_int i;
 
