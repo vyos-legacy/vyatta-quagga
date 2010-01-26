@@ -120,15 +120,6 @@ extern void zlog_warn (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_info (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_notice (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_debug (const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
-/* signal-safe, no format specifiers possible, msg
- * must be less than 100 bytes long
- */
-extern void zlog_err_signal (int signo, const char *msg);
-extern void zlog_warn_signal (int signo, const char *msg);
-extern void zlog_info_signal (int signo, const char *msg);
-extern void zlog_notice_signal (int signo, const char *msg);
-extern void zlog_debug_signal (int signo, const char *msg);
-extern void zlog_err_signal (int signo, const char *msg);
 
 /* For bgpd's peer oriented log. */
 extern void plog_err (struct zlog *, const char *format, ...)
