@@ -129,7 +129,7 @@ router_id_add_address (struct connected *ifc)
     l = &rid_all_list;
   
   if (!router_id_find_node (l, ifc))
-    listnode_add (l, ifc);
+    listnode_add_sort (l, ifc);
 
   router_id_get (&after);
 
@@ -213,6 +213,17 @@ DEFUN (no_router_id,
   router_id_set (&rid);
 
   return CMD_SUCCESS;
+}
+
+static int
+router_id_cmp (void *a, void *b)
+{
+  const struct connected *ifa = (const struct connected *)a;
+  const struct connected *ifb = (const struct connected *)b;
+  unsigned int A = ntohl(ifa->address->u.prefix4.s_addr);
+  unsigned int B = ntohl(ifb->address->u.prefix4.s_addr);
+
+  return (int) (A - B);
 }
 
 void
