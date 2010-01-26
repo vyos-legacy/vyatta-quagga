@@ -1,3 +1,35 @@
+vyatta-quagga (0.99.15-18) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * lib: make some structures constant
+  * zebra: change router-id selection algo
+
+  [ David Ward ]
+  * lib: fix memory logging
+
+  [ Paul Jakma ]
+  * ospfd: remove unneeded memset from a very hot function
+  * ospfd: Fix debug messages that were masked by DISCARD_LSA
+
+  [ Stephen Hemminger ]
+  * Revert "Add BGP snapshot command"
+  * Add background attribute for commands
+  * bgp: use monotonic clock for time of day
+
+  [ Paul Jakma ]
+  * Add signal safe zlog_<level> functions, and catch SIGCHLD by default
+
+  [ Mathias Krause ]
+  * lib: fix PIE build flags
+
+  [ Stephen Hemminger ]
+  * Revert "Add signal safe zlog_<level> functions, and catch SIGCHLD by
+    default"
+  * Revert "Add BGP snapshot command"
+  * Inherit Position Indpendent build options
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 25 Jan 2010 17:18:07 -0800
+
 vyatta-quagga (0.99.15-17) unstable; urgency=low
 
   * Fix 5237: ospfv3: adding interface to multiple areas should cause
