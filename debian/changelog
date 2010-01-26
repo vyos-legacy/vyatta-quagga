@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.15-19) unstable; urgency=low
+
+  * Revert "lib: fix PIE build flags"
+  * Revert "Inherit Position Indpendent build options"
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 25 Jan 2010 23:05:27 -0800
+
 vyatta-quagga (0.99.15-18) unstable; urgency=low
 
   [ Stephen Hemminger ]
