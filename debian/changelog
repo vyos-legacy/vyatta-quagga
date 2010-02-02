@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.15-20) unstable; urgency=low
+
+  * Revert "Add background attribute for commands"
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 01 Feb 2010 17:27:53 -0800
+
 vyatta-quagga (0.99.15-19) unstable; urgency=low
 
   * Revert "lib: fix PIE build flags"
