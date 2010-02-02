@@ -46,7 +46,6 @@ enum event
   VTY_READ,
   VTY_WRITE,
   VTY_TIMEOUT_RESET,
-  VTY_BACKGROUND,
 #ifdef VTYSH
   VTYSH_SERV,
   VTYSH_READ,
@@ -419,13 +418,6 @@ vty_command (struct vty *vty, char *buf)
 
   ret = cmd_execute_command (vline, vty, NULL, 0);
 
-  /* Command is running on another process */
-  if (ret == CMD_BACKGROUND)
-    {
-      vty->status = VTY_WAIT;
-      goto out;
-    }
-
   /* Get the name of the protocol if any */
   if (zlog_default)
       protocolname = zlog_proto_names[zlog_default->protocol];
@@ -459,7 +451,6 @@ vty_command (struct vty *vty, char *buf)
 	vty_out (vty, "%% Command incomplete.%s", VTY_NEWLINE);
 	break;
       }
- out:
   cmd_free_strvec (vline);
 
   return ret;
@@ -1297,7 +1288,7 @@ vty_execute (struct vty *vty)
   vty->cp = vty->length = 0;
   vty_clear_buf (vty);
 
-  if (!(vty->status == VTY_CLOSE || vty->status == VTY_WAIT))
+  if (vty->status != VTY_CLOSE )
     vty_prompt (vty);
 
   return ret;
@@ -1341,61 +1332,6 @@ vty_buffer_reset (struct vty *vty)
   buffer_reset (vty->obuf);
   vty_prompt (vty);
   vty_redraw_line (vty);
-}
-
-/* Child has exited (closing pipe) */
-static int
-vty_reap (struct thread *thread)
-{
-  int pipe = THREAD_FD (thread);
-  struct vty *vty = THREAD_ARG (thread);
- 
-  close (pipe);
-  vty->child_pipe = -1;
-
-  vty_event (VTY_WRITE, vty->fd, vty);
-  vty_event (VTY_READ, vty->fd, vty);
-  return 0;
-}
-
-/* Run command in background.
- * CMD_BACKGROUND or CMD_WARNING in parent
- * never returns in child.
- */
-int
-vty_background (struct cmd_element *cmd, struct vty *vty,
-		int argc, const char *argv[])
-{
-  pid_t pid;
-  int pfd[2];
-
-  if (pipe(pfd) < 0)
-    {
-      vty_out (vty, "pipe failed %s", safe_strerror(errno));
-      return CMD_WARNING;
-    }
-
-  signal (SIGCHLD, SIG_IGN);/* prevent zombies */
-  pid = fork ();
-  if (pid < 0)
-    {
-      vty_out (vty, "fork failed %s", safe_strerror(errno));
-      close (pfd[0]);
-      close (pfd[1]);
-      return CMD_WARNING;
-    }
-
-  if (pid == 0)
-    {
-      /* Child process runs command */
-      close (pfd[0]);
-      (*cmd->func) (cmd, vty, argc, argv);
-      exit(0);
-    }
- 
-  close (pfd[1]);
-  vty->child_pipe = pfd[0];
-  return CMD_BACKGROUND;
 }
 
 /* Read data via vty socket. */
@@ -1600,8 +1536,6 @@ vty_read (struct thread *thread)
   /* Check status. */
   if (vty->status == VTY_CLOSE)
     vty_close (vty);
-  else if (vty->status == VTY_WAIT)
-    vty_event (VTY_BACKGROUND, vty_sock, vty);
   else
     {
       vty_event (VTY_WRITE, vty_sock, vty);
@@ -2601,11 +2535,6 @@ vty_event (enum event event, int sock, struct vty *vty)
     case VTY_WRITE:
       if (! vty->t_write)
 	vty->t_write = thread_add_write (master, vty_flush, vty, sock);
-      break;
-    case VTY_BACKGROUND:
-      vty->t_read = thread_add_read (master, vty_reap, vty, vty->child_pipe);
-      if (vty->t_timeout)
-	thread_cancel (vty->t_timeout);
       break;
     case VTY_TIMEOUT_RESET:
       if (vty->t_timeout)

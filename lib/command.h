@@ -128,7 +128,6 @@ enum
 {
   CMD_ATTR_DEPRECATED = 1,
   CMD_ATTR_HIDDEN,
-  CMD_ATTR_BACKGROUND,
 };
 
 /* Structure of command element. */
@@ -164,7 +163,6 @@ struct desc
 #define CMD_COMPLETE_MATCH       8
 #define CMD_COMPLETE_LIST_MATCH  9
 #define CMD_SUCCESS_DAEMON      10
-#define CMD_BACKGROUND		11
 
 /* Argc max counts. */
 #define CMD_ARGC_MAX   25
@@ -209,9 +207,6 @@ struct desc
 
 #define DEFUN_DEPRECATED(funcname, cmdname, cmdstr, helpstr) \
   DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED) \
-
-#define DEFUN_BACKGROUND(funcname, cmdname, cmdstr, helpstr) \
-  DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_BACKGROUND)
 
 /* DEFUN_NOSH for commands that vtysh should ignore */
 #define DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr) \
