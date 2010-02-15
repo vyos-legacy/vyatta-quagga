@@ -1000,7 +1000,7 @@ DEFUN (no_set_metric,
 
 ALIAS (no_set_metric,
        no_set_metric_val_cmd,
-       "no set metric (<0-4294967295>|<+/-metric>)",
+       "no set metric <0-4294967295>",
        NO_STR
        SET_STR
        "Metric value for destination routing protocol\n"
