@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.15-22) unstable; urgency=low
+
+  * route-map no set metric command not sent to ospf6d.
+  * no_set_metric_val_cmd not sent to ripd.
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Sun, 14 Feb 2010 17:27:13 -0800
+
 vyatta-quagga (0.99.15-21) unstable; urgency=low
 
   * Use Debian hardening in build
