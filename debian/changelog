@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.15-23) unstable; urgency=low
+
+  * Remove check for RIP_METRIC_INFINITY to match ripng behavior.
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Tue, 16 Feb 2010 11:15:42 -0800
+
 vyatta-quagga (0.99.15-22) unstable; urgency=low
 
   * route-map no set metric command not sent to ospf6d.
