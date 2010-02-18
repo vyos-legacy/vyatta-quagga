@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.15-23+kenwood1) unstable; urgency=low
+
+  * UNRELEASED
+
+ -- An-Cheng Huang <ancheng@vyatta.com>  Wed, 17 Feb 2010 16:09:22 -0800
+
 vyatta-quagga (0.99.15-23) unstable; urgency=low
 
   * Remove check for RIP_METRIC_INFINITY to match ripng behavior.
