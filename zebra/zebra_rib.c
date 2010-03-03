@@ -2884,33 +2884,11 @@ static void rib_update_table (struct route_table *table)
 void
 rib_update (void)
 {
-  /* cancel background update */
-  if (zebrad.update)
-    {
-      thread_cancel (zebrad.update);
-      zebrad.update = NULL;
-    }
-
   rib_update_table (vrf_table (AFI_IP, SAFI_UNICAST, 0));
 
 #ifdef HAVE_IPV6
   rib_update_table (vrf_table (AFI_IP6, SAFI_UNICAST, 0));
 #endif
-}
-
-static int
-rib_update_thread (struct thread *self)
-{
-  rib_update ();
-  return 0;
-}
-
-void
-rib_update_background (void)
-{
-  if (!zebrad.update)
-    zebrad.update = thread_add_background (zebrad.master, rib_update_thread,
-					   NULL, rib_process_hold_time);
 }
 
 /* Remove all routes which comes from non main table.  */
