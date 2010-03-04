@@ -371,50 +371,48 @@ nexthop_to_prefix (const struct nexthop *nexthop, struct prefix *p)
   }
 }
 
+/* Did destination for recursive route change? */
 static int
-nexthop_same (const struct nexthop *h1,
-		const struct nexthop *h2)
+nexthop_changed (const struct nexthop *nexthop, const struct nexthop *newhop)
 {
-  if (h1->type != h2->type)
-    return 0;
+  /* It became recursive */
+  if ( ! CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_RECURSIVE) )
+    return 1;
 
-  switch (h1->type)
+  if (nexthop->rtype != newhop->type)
+    return 1;
+
+  switch (newhop->type)
     {
-    case NEXTHOP_TYPE_IFNAME:
-      return strcmp (h1->ifname, h2->ifname) == 0;
-
     case NEXTHOP_TYPE_IFINDEX:
-      return h1->ifindex == h2->ifindex;
-
-    case NEXTHOP_TYPE_IPV4_IFINDEX:
-      return (h1->ifindex == h2->ifindex) &&
-	IPV4_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
+    case NEXTHOP_TYPE_IFNAME:
+      return nexthop->rifindex == newhop->ifindex;
 
     case NEXTHOP_TYPE_IPV4_IFNAME:
-      return (strcmp (h1->ifname, h2->ifname) == 0) &&
-	IPV4_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
+    case NEXTHOP_TYPE_IPV4_IFINDEX:
+      return nexthop->rifindex != newhop->ifindex ||
+	     ! IPV4_ADDR_SAME(&newhop->rgate.ipv4, &nexthop->gate.ipv4);
 
     case NEXTHOP_TYPE_IPV4:
-      return IPV4_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
+      return nexthop->rifindex != newhop->ifindex ||
+	     ! IPV4_ADDR_SAME(&newhop->rgate.ipv4, &nexthop->gate.ipv4);
 
     case NEXTHOP_TYPE_IPV6_IFINDEX:
-      return (h1->ifindex == h2->ifindex) &&
-	IPV6_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
-
     case NEXTHOP_TYPE_IPV6_IFNAME:
-      return (strcmp (h1->ifname, h2->ifname) == 0) &&
-	IPV6_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
+      return nexthop->rifindex != newhop->ifindex ||
+	     ! IPV6_ADDR_SAME(&nexthop->rgate.ipv6, &newhop->gate.ipv6);
 
     case NEXTHOP_TYPE_IPV6:
-      return IPV6_ADDR_SAME(&h1->gate.ipv4, &h2->gate.ipv4);
-
+      return nexthop->rifindex != newhop->ifindex ||
+	     ! IPV6_ADDR_SAME(&nexthop->rgate.ipv6, &newhop->gate.ipv6);
     default:
-      return 1;
+      return 0;
     }
 }
 
-/* If force flag is not set, do not modify flags at all for uninstall
-   the route from FIB. */
+/* Evaluate a RIB entry and determine if its now active.
+   Called first with set = 0 to scan, and again with set = 1
+   to update recursive routes. */
 static int
 nexthop_active (int family,
 		struct rib *rib, struct nexthop *nexthop, int set,
@@ -493,10 +491,10 @@ nexthop_active (int family,
 	}
       else
 	{
-	  /* If this is a recursive route and interface has
-	     changed, then flag it */
-	  if (nexthop->ifindex != newhop->ifindex ||
-	      CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_RECURSIVE))
+	  /* Will update interface in set pass */
+	  if ((nexthop->type == NEXTHOP_TYPE_IPV4 ||
+	       nexthop->type == NEXTHOP_TYPE_IPV6) &&
+	      nexthop->ifindex != newhop->ifindex)
 	    SET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
 	}
 
@@ -546,10 +544,9 @@ nexthop_active (int family,
 		break;
 	      }
 	  }
-
-	/* Did destination for recursive route change? */
-	if (!nexthop_same (nexthop, newhop))
+	else if (nexthop_changed(nexthop, newhop))
 	  SET_FLAG (rib->flags, ZEBRA_FLAG_CHANGED);
+
 	return 1;
       }
 
