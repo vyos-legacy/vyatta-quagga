@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.15-25) unstable; urgency=low
+
+  * Remove unused function
+  * Align with upstream
+  * Fix recursive route slowdown
+  * Fix recursive route change detect logic
+  * Mark static routes as INTERNAL
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 04 Mar 2010 15:58:04 -0800
+
 vyatta-quagga (0.99.15-24) unstable; urgency=low
 
   * UNRELEASED
