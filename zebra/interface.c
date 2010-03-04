@@ -564,10 +564,10 @@ if_up (struct interface *ifp)
 	    connected_up_ipv6 (ifp, ifc);
 #endif /* HAVE_IPV6 */
 	}
-
-      /* Examine all static routes which direct to the interface. */
-      rib_update();
     }
+
+  /* Examine all static routes. */
+  rib_update ();
 }
 
 /* Interface goes down.  We have to manage different behavior of based
@@ -604,10 +604,10 @@ if_down (struct interface *ifp)
 	    connected_down_ipv6 (ifp, ifc);
 #endif /* HAVE_IPV6 */
 	}
-
-      /* Examine all static routes which direct to the interface. */
-      rib_update();
     }
+
+  /* Examine all static routes which direct to the interface. */
+  rib_update ();
 }
 
 void
