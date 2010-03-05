@@ -19,8 +19,8 @@
 declare progname=${0##*/}
 declare action=$1; shift
 
-pid_dir=/var/run/vyatta/quagga
-log_dir=/var/log/vyatta/quagga
+pid_dir=/var/run/quagga
+log_dir=/var/log/quagga
 
 for dir in $pid_dir $log_dir ; do
     if [ ! -d $dir ]; then
@@ -61,7 +61,7 @@ vyatta_quagga_start ()
 	esac
 
 	start-stop-daemon --start --oknodo --quiet \
-	    --chdir $log_dir --exec /usr/sbin/vyatta-$daemon \
+	    --chdir $log_dir --exec /usr/sbin/$daemon \
 	    --pidfile $pidfile -- ${args[@]} || \
     	    ( log_action_end_msg 1 ; return 1 )
     done
@@ -85,7 +85,7 @@ vyatta_quagga_stop ()
 	fi
 
 	start-stop-daemon --stop --quiet --oknodo --retry 5 \
-	    --exec /usr/sbin/vyatta-$daemon --pidfile=$pidfile
+	    --exec /usr/sbin/$daemon --pidfile=$pidfile
 	rm -f $pidfile
     done    
     log_action_end_msg $?
@@ -100,7 +100,7 @@ vyatta_quagga_stop ()
 vyatta_quagga_status ()
 {
     local pidfile=$pid_dir/zebra.pid
-    local binpath=/usr/sbin/vyatta-zebra
+    local binpath=/usr/sbin/zebra
 
     status_of_proc -p $pidfile $binpath vyatta-zebra && exit 0 || exit $?
 }

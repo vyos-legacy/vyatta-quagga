@@ -41,14 +41,13 @@ configure	 = ./configure
 configure	+= --host=$(DEB_HOST_GNU_TYPE)
 configure	+= --build=$(DEB_BUILD_GNU_TYPE)
 configure	+= --prefix=/usr
-configure	+= --program-prefix=vyatta-
-configure	+= --libdir=/usr/lib/$(PACKAGE)
-configure	+= --localstatedir=/var/run/vyatta/quagga
-configure	+= --sysconfdir=/etc/vyatta/quagga
+configure	+= --sbindir=/usr/sbin
+configure	+= --libdir=/usr/lib/quagga
+configure	+= --localstatedir=/var/run/quagga
+configure	+= --sysconfdir=/etc/quagga
 configure	+= --mandir=/usr/share/man
-configure	+= --includedir=/usr/include/vyatta
-configure	+= --infodir=/usr/share/info/$(PACKAGE)
-configure	+= --enable-exampledir=/usr/share/doc/$(PACKAGE)/examples
+configure	+= --infodir=/usr/share/info/quagga
+configure	+= --enable-exampledir=$(T)/usr/share/doc/quagga/examples/
 configure	+= --enable-vtysh
 configure	+= --enable-ipv6
 configure	+= --enable-watchquagga
@@ -67,7 +66,6 @@ configure	+= --enable-gcc-rdynamic
 configure	+= $(xable_snmp)
 configure	+= --with-libpam
 configure	+= CFLAGS="$(CFLAGS)"
-# configure	+= LDFLAGS="-Wl,-z,defs"
 
 configure: configure.ac Makefile.am
 	chmod +x debian/autogen.sh
@@ -130,7 +128,7 @@ binary-arch: build install
 	dh_installexamples
 	dh_installinit
 	dh_installpam --name=quagga
-	dh_installlogrotate
+	dh_installlogrotate --name=quagga
 
 	dh_strip --dbg-package=vyatta-quagga-dbg
 	dh_compress
