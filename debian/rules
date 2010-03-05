@@ -51,7 +51,6 @@ configure	+= --infodir=/usr/share/info/$(PACKAGE)
 configure	+= --enable-exampledir=/usr/share/doc/$(PACKAGE)/examples
 configure	+= --enable-vtysh
 configure	+= --enable-ipv6
-configure	+= --enable-isisd
 configure	+= --enable-watchquagga
 configure	+= --enable-opaque-lsa
 configure	+= --enable-ospfclient=yes
