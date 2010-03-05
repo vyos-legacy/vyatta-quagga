@@ -43,7 +43,7 @@ vyatta_quagga_start ()
     elif [ -d /proc/sys/net/ipv6 ]; then
 	daemons=( zebra ripd ripngd ospfd ospf6d bgpd )
     else
-	daemons=( zebra ripd ripngd ospfd bgpd )
+	daemons=( zebra ripd ospfd bgpd )
     fi
 
     log_daemon_msg "Starting routing daemons"
