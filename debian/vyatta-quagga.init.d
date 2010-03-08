@@ -19,8 +19,8 @@
 declare progname=${0##*/}
 declare action=$1; shift
 
-pid_dir=/var/run/vyatta/quagga
-log_dir=/var/log/vyatta/quagga
+pid_dir=/var/run/quagga
+log_dir=/var/log/quagga
 
 for dir in $pid_dir $log_dir ; do
     if [ ! -d $dir ]; then
@@ -30,20 +30,22 @@ for dir in $pid_dir $log_dir ; do
     fi
 done
 
+# Simple quick test for IPV6 existance
+has_ipv6 ()
+{
+    ping6 -q -c1 ::1 >/dev/null 2>/dev/null
+}
+
 vyatta_quagga_start ()
 {
     local -a daemons
 
-    # Give IPv6 module a chance to load since we are going to test for
-    # its existance.
-    modprobe -s --use-blacklist ipv6
-
     if [ $# -gt 0 ] ; then
 	daemons=( $* )
-    elif [ -d /proc/sys/net/ipv6 ]; then
+    elif has_ipv6; then
 	daemons=( zebra ripd ripngd ospfd ospf6d bgpd )
     else
-	daemons=( zebra ripd ripngd ospfd bgpd )
+	daemons=( zebra ripd ospfd bgpd )
     fi
 
     log_daemon_msg "Starting routing daemons"
@@ -59,7 +61,7 @@ vyatta_quagga_start ()
 	esac
 
 	start-stop-daemon --start --oknodo --quiet \
-	    --chdir $log_dir --exec /usr/sbin/vyatta-$daemon \
+	    --chdir $log_dir --exec /usr/sbin/$daemon \
 	    --pidfile $pidfile -- ${args[@]} || \
     	    ( log_action_end_msg 1 ; return 1 )
     done
@@ -83,7 +85,7 @@ vyatta_quagga_stop ()
 	fi
 
 	start-stop-daemon --stop --quiet --oknodo --retry 5 \
-	    --exec /usr/sbin/vyatta-$daemon --pidfile=$pidfile
+	    --exec /usr/sbin/$daemon --pidfile=$pidfile
 	rm -f $pidfile
     done    
     log_action_end_msg $?
@@ -98,7 +100,7 @@ vyatta_quagga_stop ()
 vyatta_quagga_status ()
 {
     local pidfile=$pid_dir/zebra.pid
-    local binpath=/usr/sbin/vyatta-zebra
+    local binpath=/usr/sbin/zebra
 
     status_of_proc -p $pidfile $binpath vyatta-zebra && exit 0 || exit $?
 }

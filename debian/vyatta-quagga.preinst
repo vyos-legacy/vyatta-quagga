@@ -1,16 +1,13 @@
 #!/bin/bash
 
+LOG_DIR=/var/log/quagga
+RUN_DIR=/var/run/quagga
+ETC_DIR=/etc/quagga
+
 if [ -n "$DEBIAN_SCRIPT_DEBUG" ]; then set -v -x; DEBIAN_SCRIPT_TRACE=1; fi
 ${DEBIAN_SCRIPT_TRACE:+ echo "#42#DEBUG# RUNNING $0 $*"}
 set -e
 set -u
-
-LOG_DIR=/var/log/vyatta/quagga
-LOG_PDIR=${LOG_DIR%/*}
-RUN_DIR=/var/run/vyatta/quagga
-RUN_PDIR=${RUN_DIR%/*}
-ETC_DIR=/etc/vyatta/quagga
-ETC_PDIR=${ETC_DIR%/*}
 
 # creating quaggavty group if it isn't already there
 if ! getent group quaggavty >/dev/null; then
@@ -27,63 +24,59 @@ if ! getent passwd quagga >/dev/null; then
         adduser \
           --system \
           --ingroup quagga \
-          --home /var/run/vyatta/ \
+          --home /var/run/quagga/ \
           --gecos "Vyatta Quagga routing suite" \
           --shell /bin/false \
           quagga  >/dev/null
 fi
 
-# Do not change permissions when upgrading as it would violate policy.
-if [ "$1" = "install" ]; then
-
-  # Logfiles are group readable in case users were put into the quagga group.
-    mkdir -p $LOG_PDIR
-    chmod 0755 $LOG_PDIR
+# Only make directory if doing install or upgrade from older version
+# where paths were different
+if [ "$1" = "install" ] || [ ! -d $LOG_DIR ]; then
+    # Logfiles are group readable in case users were put into the quagga group.
     mkdir -p $LOG_DIR
+    chown -R quagga:quagga $LOG_DIR
     chmod 0775 $LOG_DIR
-    chown quagga:quagga $LOG_DIR
+fi
 
-  # Strict permissions for the sockets.
-    mkdir -p $RUN_PDIR
-    chmod 0755 $RUN_PDIR
+if [ "$1" = "install" ] || [ ! -d $RUN_DIR ]; then
+    # Strict permissions for the sockets.
     mkdir -p $RUN_DIR
+    chown -R quagga:quagga $RUN_DIR
     chmod 0755 $RUN_DIR
-    chown quagga:quagga $RUN_DIR
+fi
 
-  # create empty config files
-    mkdir -p $ETC_PDIR
-    chmod 0755 $ETC_PDIR
+if [ "$1" = "install" ] || [ ! -d $ETC_DIR ]; then
     mkdir -p $ETC_DIR
-    chmod 0775 $ETC_DIR
+    chmod 0755 $ETC_DIR
     chown quagga:quaggavty $ETC_DIR
-    for daemon in zebra ripd ripngd ospfd ospf6d isisd bgpd ; do
-	if [ ! -e $ETC_DIR/${daemon}.conf ] ; then
-	    touch $ETC_DIR/${daemon}.conf
-	    chown quagga:quaggavty $ETC_DIR/${daemon}.conf
-	    chmod 0640 $ETC_DIR/${daemon}.conf
-	    cat <<-EOF > $ETC_DIR/${daemon}.conf
+fi
+
+# create template config files
+for daemon in zebra ripd ripngd ospfd ospf6d isisd bgpd ; do
+    if [ "$1" = "install" ] || [ ! -e $ETC_DIR/${daemon}.conf ] ; then
+	cat <<-EOF > $ETC_DIR/${daemon}.conf
 		log syslog
 		log facility local7
 		EOF
-	fi
-    done
-   
-   
-   echo "smux peer .1.3.6.1.4.1.3317.1.2.5" >> $ETC_DIR/ospfd.conf  
-   echo "smux peer .1.3.6.1.4.1.3317.1.2.2" >> $ETC_DIR/bgpd.conf
-   echo "smux peer .1.3.6.1.4.1.3317.1.2.3" >> $ETC_DIR/ripd.conf
+        case $daemon in 
+	ospfd) echo "smux peer .1.3.6.1.4.1.3317.1.2.5" >>$ETC_DIR/ospfd.conf ;;
+	bgpd)  echo "smux peer .1.3.6.1.4.1.3317.1.2.2" >>$ETC_DIR/bgpd.conf  ;;
+	ripd)  echo "smux peer .1.3.6.1.4.1.3317.1.2.3" >> $ETC_DIR/ripd.conf ;;
+	esac
 
-    if [ ! -e $ETC_DIR/vtysh.conf ] ; then
-	touch $ETC_DIR/vtysh.conf
-	chown quagga:quaggavty $ETC_DIR/vtysh.conf
-	chmod 0640 $ETC_DIR/vtysh.conf
-	cat <<-EOF >> $ETC_DIR/vtysh.conf
+	chown quagga:quaggavty $ETC_DIR/${daemon}.conf
+	chmod 0640 $ETC_DIR/${daemon}.conf
+    fi
+done
+
+if [ ! -e $ETC_DIR/vtysh.conf ] ; then
+    touch $ETC_DIR/vtysh.conf
+    chown quagga:quaggavty $ETC_DIR/vtysh.conf
+    chmod 0640 $ETC_DIR/vtysh.conf
+    cat <<-EOF >> $ETC_DIR/vtysh.conf
 	username root nopassword
 	EOF
-    fi
-
-  # Disable debian/ubuntu package init
-    update-rc.d -f quagga remove
 fi
 
 #DEBHELPER#

@@ -1,4 +1,4 @@
-/var/log/vyatta/quagga/*.log {
+/var/log/quagga/*.log {
         daily
         rotate 5
         sharedscripts
@@ -7,9 +7,9 @@
         create 640 quagga quaggavty
 
         postrotate
-		for daemon in zebra bgpd ripd ospfd ripngd ospf6d isisd; do
-                        if [ -e /var/run/vyatta/quagga/$daemon.pid ] ; then
-				kill -USR1 `cat /var/run/vyatta/quagga/$daemon.pid`
+		for i in zebra bgpd ripd ospfd ripngd ospf6d isisd; do
+                        if [ -e /var/run/quagga/$i.pid ] ; then
+				kill -USR1 `cat /var/run/quagga/$i.pid`
                         fi
 
                 done
