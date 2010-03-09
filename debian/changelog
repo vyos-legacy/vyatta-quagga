@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.16-1) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * lib: undo the last PIE commit
+
+  [ Denis Ovsienko ]
+  * release: 0.99.16
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 09 Mar 2010 10:17:06 -0800
+
 vyatta-quagga (0.99.15-26) unstable; urgency=low
 
   * Don't build ISIS
