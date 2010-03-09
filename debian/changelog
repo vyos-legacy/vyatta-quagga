@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.15-26) unstable; urgency=low
+
+  * Don't build ISIS
+  * Ignore mkinstalldirs
+  * Don't start RIPNG if IPv6 disabled
+  * Better check for IPv6
+  * Remove vyatta from filenames and path
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 08 Mar 2010 16:33:42 -0800
+
 vyatta-quagga (0.99.15-25) unstable; urgency=low
 
   * Remove unused function
