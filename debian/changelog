@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.16-2) unstable; urgency=low
+
+  * BGP GTSM support
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 09 Mar 2010 20:14:04 -0800
+
 vyatta-quagga (0.99.16-1) unstable; urgency=low
 
   [ Stephen Hemminger ]
