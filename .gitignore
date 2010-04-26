@@ -70,7 +70,5 @@ build
 .rebase-*
 *~
 *.loT
-extract.pl
-mkinstalldirs
-mkinstalldirs
-mkinstalldirs
+m4/*.m4
+
