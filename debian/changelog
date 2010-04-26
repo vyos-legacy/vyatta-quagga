@@ -1,3 +1,23 @@
+vyatta-quagga (0.99.16-4) unstable; urgency=low
+
+  [ Greg Troxel ]
+  * git: add (generated) m4 files to .gitignore
+  * git: add pointers to out-of-tree work
+
+  [ Joakim Tjernlund ]
+  * ospfd: Make sure all external routes are updated.
+  * ospfd: Make sure ospf_distribute_list_update_timer() eventually
+    runs.
+  * ospfd: Only refresh external default route once.
+
+  [ Greg Troxel ]
+  * build/extra: Enhance README.NetBSD make/gmake decision.
+
+  [ Stephen Hemminger ]
+  * Fix email address in changelog
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 26 Apr 2010 10:16:34 -0700
+
 vyatta-quagga (0.99.16-3) unstable; urgency=low
 
   [ Greg Troxel ]
