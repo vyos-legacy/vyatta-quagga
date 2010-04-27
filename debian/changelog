@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.16-5) unstable; urgency=low
+
+  [ Jon Andersson ]
+  * Fix out-of-bounds behaviour in ospf6_prefix_apply_mask If prefixlen
+    was /32, /64, or /96, function would write 0x00 to first location
+    outside prefix.
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Mon, 26 Apr 2010 17:33:02 -0700
+
 vyatta-quagga (0.99.16-4) unstable; urgency=low
 
   [ Greg Troxel ]
