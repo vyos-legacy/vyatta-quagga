@@ -140,7 +140,10 @@ bgp_advertise_unintern (struct hash *hash, struct bgp_advertise_attr *baa)
     baa->refcnt--;
 
   if (baa->refcnt && baa->attr)
-    bgp_attr_unintern (baa->attr);
+    {
+      bgp_attr_unintern (baa->attr);
+      baa->attr = NULL;
+    }
   else
     {
       if (baa->attr)
