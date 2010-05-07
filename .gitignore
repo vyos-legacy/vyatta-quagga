@@ -31,6 +31,7 @@ depcomp
 doc/texinfo.tex
 missing
 install-sh
+mkinstalldirs
 autom4te*.cache
 configure.lineno
 configure
