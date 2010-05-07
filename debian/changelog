@@ -1,3 +1,26 @@
+vyatta-quagga (0.99.16-6) unstable; urgency=low
+
+  [ David Ward ]
+  * ospf6d: Fix crash when '[no] ipv6 ospf6 advertise prefix-list' is in
+    startup-config
+
+  [ David Lamparter ]
+  * isisd: change ISIS_METHOD to use C preprocessor
+  * build: ignore mkinstalldirs and texinfo.tex
+
+  [ Greg Troxel ]
+  * Update for git and emphasize asking for good reports.
+
+  [ Roman Hoog Antink ]
+  * zebra: fix infinite loop when deleting an interface
+
+  [ Stephen Hemminger ]
+  * Depend on proper version of libcap
+  * Clear pointer to attr after unintern
+  * Make sure capability library is on build environment
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 07 May 2010 11:08:18 -0700
+
 vyatta-quagga (0.99.16-5) unstable; urgency=low
 
   [ Jon Andersson ]
