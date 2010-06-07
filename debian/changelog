@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.16-8) unstable; urgency=low
+
+  * fix spelling and make sure to unlock BGP node if failure
+
+ -- Robert Bays <rbays@roatan>  Mon, 07 Jun 2010 16:29:19 -0700
+
 vyatta-quagga (0.99.16-7) unstable; urgency=low
 
   * fix error in quagga aggregate-address command
