@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.16-9) unstable; urgency=low
+
+  [ Chris Hall ]
+  * bgpd: tighten bounds checking in RR ORF msg reader
+
+  [ Stephen Hemminger ]
+  * Revert "Clear pointer to attr after unintern"
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 10 Jun 2010 16:17:25 -0700
+
 vyatta-quagga (0.99.16-8) unstable; urgency=low
 
   * fix spelling and make sure to unlock BGP node if failure
