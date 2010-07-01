@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.16-10) unstable; urgency=low
+
+  * Fix email address in changelog
+  * Add debug logging for bgp attribute refcount
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 01 Jul 2010 15:42:48 -0700
+
 vyatta-quagga (0.99.16-9) unstable; urgency=low
 
   [ Chris Hall ]
