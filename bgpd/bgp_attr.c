@@ -544,8 +544,6 @@ bgp_attr_intern (struct attr *attr)
   find = (struct attr *) hash_get (attrhash, attr, bgp_attr_hash_alloc);
   find->refcnt++;
 
-  zlog(NULL, LOG_INFO, "%s return %p", __func__, find);
-
   return find;
 }
 
@@ -653,8 +651,6 @@ bgp_attr_unintern (struct attr *attr)
   struct ecommunity *ecommunity = NULL;
   struct cluster_list *cluster = NULL;
   struct transit *transit = NULL;
-
-  zlog(NULL, LOG_INFO, "%s(%p): attribute refcount %d", __func__, attr, attr->refcnt);
 
   /* Decrement attribute reference. */
   attr->refcnt--;
