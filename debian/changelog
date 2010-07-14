@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.16-13) unstable; urgency=low
+
+  * Allow Quagga daemons to dump core
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 14 Jul 2010 16:24:53 -0700
+
 vyatta-quagga (0.99.16-12) unstable; urgency=low
 
   * fix for bug 5821
