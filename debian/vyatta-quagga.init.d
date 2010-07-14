@@ -48,6 +48,9 @@ vyatta_quagga_start ()
 	daemons=( zebra ripd ospfd bgpd )
     fi
 
+    # Allow daemons to dump core
+    ulimit -c unlimited
+
     log_daemon_msg "Starting routing daemons"
     for daemon in ${daemons[@]} ; do
 	[ "$daemon" != zebra ] && log_progress_msg "$daemon"
