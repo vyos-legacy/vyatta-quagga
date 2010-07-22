@@ -7588,10 +7588,16 @@ bgp_show_peer (struct vty *vty, struct peer *p)
 		 p->host, VTY_NEWLINE);
     }
 
-  /* EBGP Multihop */
-  if (peer_sort (p) != BGP_PEER_IBGP && p->ttl > 1)
-    vty_out (vty, "  External BGP neighbor may be up to %d hops away.%s",
-	     p->ttl, VTY_NEWLINE);
+  /* EBGP Multihop and GTSM */
+  if (peer_sort (p) != BGP_PEER_IBGP)
+    {
+      if (p->gtsm_hops > 0)
+	vty_out (vty, "  External BGP TTL security neighbor must be nearer than %d hops.%s",
+		 p->gtsm_hops, VTY_NEWLINE);
+      else if (p->ttl > 1)
+	vty_out (vty, "  External BGP neighbor may be up to %d hops away.%s",
+		 p->ttl, VTY_NEWLINE);
+    }
 
   /* Local address. */
   if (p->su_local)
