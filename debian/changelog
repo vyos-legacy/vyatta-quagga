@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.16-15) unstable; urgency=low
+
+  * Display GTSM security info when showing neighbor
+  * Set TTL on listening socket to 255
+  * Add BGP support for IPv6 ttl security
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 21 Jul 2010 21:20:42 -0700
+
 vyatta-quagga (0.99.16-14) unstable; urgency=low
 
   * Allow ttl-security value to be changed
