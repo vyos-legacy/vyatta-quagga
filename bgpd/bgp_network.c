@@ -473,6 +473,9 @@ bgp_socket (unsigned short port, const char *address)
 	  continue;
 	}
 
+      /* if we intend to implement ttl-security, this socket needs ttl=255 */
+      sockopt_ttl (ainfo->ai_family, sock, MAXTTL);
+
       ret = bgp_listener (sock, ainfo->ai_addr, ainfo->ai_addrlen);
       if (ret == 0)
 	++count;
