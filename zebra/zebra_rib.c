@@ -306,7 +306,6 @@ nexthop_blackhole_add (struct rib *rib)
   nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
   nexthop->type = NEXTHOP_TYPE_BLACKHOLE;
   SET_FLAG (rib->flags, ZEBRA_FLAG_BLACKHOLE);
-
   nexthop_add (rib, nexthop);
 
   return nexthop;
@@ -2607,6 +2606,8 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
 	case STATIC_IPV6_GATEWAY_IFNAME:
 	  nexthop_ipv6_ifname_add (rib, &si->ipv6, si->ifname);
 	  break;
+	case STATIC_IPV6_BLACKHOLE:
+	  nexthop_blackhole_add (rib);
 	}
       rib_queue_add (&zebrad, rn);
     }
@@ -2631,6 +2632,8 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
 	case STATIC_IPV6_GATEWAY_IFNAME:
 	  nexthop_ipv6_ifname_add (rib, &si->ipv6, si->ifname);
 	  break;
+	case STATIC_IPV6_BLACKHOLE:
+	  nexthop_blackhole_add (rib);
 	}
 
       /* Save the flags of this static routes (reject, blackhole) */
@@ -2656,6 +2659,9 @@ static_ipv6_nexthop_same (struct nexthop *nexthop, struct static_ipv6 *si)
       && si->type == STATIC_IPV6_GATEWAY_IFNAME
       && IPV6_ADDR_SAME (&nexthop->gate.ipv6, &si->ipv6)
       && strcmp (nexthop->ifname, si->ifname) == 0)
+    return 1;
+  if (nexthop->type == NEXTHOP_TYPE_BLACKHOLE
+      && si->type == STATIC_IPV6_BLACKHOLE)
     return 1;
   return 0;
 }
@@ -2724,44 +2730,49 @@ static_uninstall_ipv6 (struct prefix *p, struct static_ipv6 *si)
 
 /* Add static route into static route configuration. */
 int
-static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
-		 const char *ifname, u_char flags, u_char distance,
-		 u_int32_t vrf_id)
+static_add_ipv6 (struct prefix *p, struct in6_addr *gate, const char *ifname,
+		 u_char flags, u_char distance, u_int32_t vrf_id)
 {
+  u_char type;
   struct route_node *rn;
   struct static_ipv6 *si;
   struct static_ipv6 *pp;
   struct static_ipv6 *cp;
+  struct static_ipv6 *update = NULL;
   struct route_table *stable;
 
   /* Lookup table.  */
   stable = vrf_static_table (AFI_IP6, SAFI_UNICAST, vrf_id);
   if (! stable)
     return -1;
-    
-  if (!gate &&
-      (type == STATIC_IPV6_GATEWAY || type == STATIC_IPV6_GATEWAY_IFNAME))
-    return -1;
-  
-  if (!ifname && 
-      (type == STATIC_IPV6_GATEWAY_IFNAME || type == STATIC_IPV6_IFNAME))
-    return -1;
 
   /* Lookup static route prefix. */
   rn = route_node_get (stable, p);
 
+  if (gate)
+    type = ifname ? STATIC_IPV6_GATEWAY_IFNAME : STATIC_IPV6_GATEWAY;
+  else if (ifname)
+    type = STATIC_IPV6_GATEWAY_IFNAME;
+  else
+    type = STATIC_IPV6_BLACKHOLE;
+
   /* Do nothing if there is a same static route.  */
   for (si = rn->info; si; si = si->next)
     {
-      if (distance == si->distance 
-	  && type == si->type
+      if (type == si->type
 	  && (! gate || IPV6_ADDR_SAME (gate, &si->ipv6))
 	  && (! ifname || strcmp (ifname, si->ifname) == 0))
 	{
 	  route_unlock_node (rn);
 	  return 0;
 	}
+      else
+	update = si;
     }
+
+  /* Distance changed.  */
+  if (update)
+    static_delete_ipv6 (p, gate, ifname, update->distance, vrf_id);
 
   /* Make new static route structure. */
   si = XCALLOC (MTYPE_STATIC_IPV6, sizeof (struct static_ipv6));
@@ -2770,19 +2781,10 @@ static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
   si->distance = distance;
   si->flags = flags;
 
-  switch (type)
-    {
-    case STATIC_IPV6_GATEWAY:
-      si->ipv6 = *gate;
-      break;
-    case STATIC_IPV6_IFNAME:
-      si->ifname = XSTRDUP (0, ifname);
-      break;
-    case STATIC_IPV6_GATEWAY_IFNAME:
-      si->ipv6 = *gate;
-      si->ifname = XSTRDUP (0, ifname);
-      break;
-    }
+  if (gate)
+    si->ipv6 = *gate;
+  if (ifname)
+    si->ifname = XSTRDUP (0, ifname);
 
   /* Add new static route information to the tree with sort by
      distance value and gateway address. */
@@ -2814,9 +2816,10 @@ static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 
 /* Delete static route from static route configuration. */
 int
-static_delete_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
+static_delete_ipv6 (struct prefix *p, struct in6_addr *gate,
 		    const char *ifname, u_char distance, u_int32_t vrf_id)
 {
+  u_char type;
   struct route_node *rn;
   struct static_ipv6 *si;
   struct route_table *stable;
@@ -2831,10 +2834,16 @@ static_delete_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
   if (! rn)
     return 0;
 
+  if (gate)
+    type = ifname ? STATIC_IPV6_GATEWAY_IFNAME : STATIC_IPV6_GATEWAY;
+  else if (ifname)
+    type = STATIC_IPV6_GATEWAY_IFNAME;
+  else
+    type = STATIC_IPV6_BLACKHOLE;
+
   /* Find same static route is the tree */
   for (si = rn->info; si; si = si->next)
-    if (distance == si->distance 
-	&& type == si->type
+    if (type == si->type
 	&& (! gate || IPV6_ADDR_SAME (gate, &si->ipv6))
 	&& (! ifname || strcmp (ifname, si->ifname) == 0))
       break;
