@@ -550,9 +550,9 @@ vty_show_ip_route_detail (struct vty *vty, struct route_node *rn)
       if (rib->refcnt)
 	vty_out (vty, ", refcnt %ld", rib->refcnt);
       if (CHECK_FLAG (rib->flags, ZEBRA_FLAG_BLACKHOLE))
-       vty_out (vty, ", blackhole");
+	vty_out (vty, ", blackhole");
       if (CHECK_FLAG (rib->flags, ZEBRA_FLAG_REJECT))
-       vty_out (vty, ", reject");
+	vty_out (vty, ", reject");
       vty_out (vty, "%s", VTY_NEWLINE);
 
 #define ONE_DAY_SECOND 60*60*24
@@ -606,10 +606,10 @@ vty_show_ip_route_detail (struct vty *vty, struct route_node *rn)
 	    case NEXTHOP_TYPE_IFNAME:
 	      vty_out (vty, " directly connected, %s", nexthop->ifname);
 	      break;
-      case NEXTHOP_TYPE_BLACKHOLE:
-        vty_out (vty, " directly connected, Null0");
-        break;
-      default:
+	    case NEXTHOP_TYPE_BLACKHOLE:
+	      vty_out (vty, " directly connected, Null0");
+	      break;
+	    default:
 	      break;
 	    }
 	  if (! CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE))
@@ -630,6 +630,9 @@ vty_show_ip_route_detail (struct vty *vty, struct route_node *rn)
 		  vty_out (vty, " is directly connected, %s)",
 			   ifindex2ifname (nexthop->rifindex));
 		  break;
+		case NEXTHOP_TYPE_BLACKHOLE:
+		  vty_out (vty, " directly connected, Null0)");
+		  break;
 		default:
 		  break;
 		}
@@ -642,7 +645,7 @@ vty_show_ip_route_detail (struct vty *vty, struct route_node *rn)
               if (nexthop->src.ipv4.s_addr)
                 {
 		  if (inet_ntop(AF_INET, &nexthop->src.ipv4, addrstr,
-		      sizeof addrstr))
+				sizeof addrstr))
                     vty_out (vty, ", src %s", addrstr);
                 }
               break;
@@ -653,13 +656,13 @@ vty_show_ip_route_detail (struct vty *vty, struct route_node *rn)
               if (!IPV6_ADDR_SAME(&nexthop->src.ipv6, &in6addr_any))
                 {
 		  if (inet_ntop(AF_INET6, &nexthop->src.ipv6, addrstr,
-		      sizeof addrstr))
+				sizeof addrstr))
                     vty_out (vty, ", src %s", addrstr);
                 }
               break;
 #endif /* HAVE_IPV6 */
             default:
-	       break;
+	      break;
             }
 	  vty_out (vty, "%s", VTY_NEWLINE);
 	}
@@ -716,10 +719,10 @@ vty_show_ip_route (struct vty *vty, struct route_node *rn, struct rib *rib)
 	case NEXTHOP_TYPE_IFNAME:
 	  vty_out (vty, " is directly connected, %s", nexthop->ifname);
 	  break;
-  case NEXTHOP_TYPE_BLACKHOLE:
-    vty_out (vty, " is directly connected, Null0");
-    break;
-  default:
+	case NEXTHOP_TYPE_BLACKHOLE:
+	  vty_out (vty, " is directly connected, Null0");
+	  break;
+	default:
 	  break;
 	}
       if (! CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE))
@@ -746,34 +749,34 @@ vty_show_ip_route (struct vty *vty, struct route_node *rn, struct rib *rib)
 	}
       switch (nexthop->type)
         {
-          case NEXTHOP_TYPE_IPV4:
-          case NEXTHOP_TYPE_IPV4_IFINDEX:
-          case NEXTHOP_TYPE_IPV4_IFNAME:
-            if (nexthop->src.ipv4.s_addr)
-              {
-		if (inet_ntop(AF_INET, &nexthop->src.ipv4, buf, sizeof buf))
-                  vty_out (vty, ", src %s", buf);
-              }
-            break;
+	case NEXTHOP_TYPE_IPV4:
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+	case NEXTHOP_TYPE_IPV4_IFNAME:
+	  if (nexthop->src.ipv4.s_addr)
+	    {
+	      if (inet_ntop(AF_INET, &nexthop->src.ipv4, buf, sizeof buf))
+		vty_out (vty, ", src %s", buf);
+	    }
+	  break;
 #ifdef HAVE_IPV6
-          case NEXTHOP_TYPE_IPV6:
-          case NEXTHOP_TYPE_IPV6_IFINDEX:
-          case NEXTHOP_TYPE_IPV6_IFNAME:
-            if (!IPV6_ADDR_SAME(&nexthop->src.ipv6, &in6addr_any))
-              {
-		if (inet_ntop(AF_INET6, &nexthop->src.ipv6, buf, sizeof buf))
-                  vty_out (vty, ", src %s", buf);
-              }
-            break;
+	case NEXTHOP_TYPE_IPV6:
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+	case NEXTHOP_TYPE_IPV6_IFNAME:
+	  if (!IPV6_ADDR_SAME(&nexthop->src.ipv6, &in6addr_any))
+	    {
+	      if (inet_ntop(AF_INET6, &nexthop->src.ipv6, buf, sizeof buf))
+		vty_out (vty, ", src %s", buf);
+	    }
+	  break;
 #endif /* HAVE_IPV6 */
-          default:
-	    break;
+	default:
+	  break;
         }
 
       if (CHECK_FLAG (rib->flags, ZEBRA_FLAG_BLACKHOLE))
-               vty_out (vty, ", bh");
+	vty_out (vty, ", bh");
       if (CHECK_FLAG (rib->flags, ZEBRA_FLAG_REJECT))
-               vty_out (vty, ", rej");
+	vty_out (vty, ", rej");
 
       if (rib->type == ZEBRA_ROUTE_RIP
 	  || rib->type == ZEBRA_ROUTE_OSPF
