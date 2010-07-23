@@ -897,7 +897,7 @@ nexthop_active_check (struct route_node *rn, struct rib *rib,
 
     case NEXTHOP_TYPE_BLACKHOLE:
       SET_FLAG (nexthop->flags, NEXTHOP_FLAG_ACTIVE);
-      break;
+      return 1;
 
     default:
       break;
