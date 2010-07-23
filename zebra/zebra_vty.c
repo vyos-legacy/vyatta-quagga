@@ -1241,8 +1241,6 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
   struct prefix p;
   struct in6_addr *gate = NULL;
   struct in6_addr gate_addr;
-  u_char type = 0;
-  int table = 0;
   u_char flag = 0;
   
   ret = str2prefix (dest_str, &p);
@@ -1254,6 +1252,28 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
 
   /* Apply mask for given prefix. */
   apply_mask (&p);
+
+  /* Administrative distance. */
+  if (distance_str)
+    distance = atoi (distance_str);
+  else
+    distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
+
+  /* Null0 static route.  */
+  if (strncasecmp (gate_str, "Null0", strlen (gate_str)) == 0)
+    {
+      if (flag_str)
+        {
+          vty_out (vty, "%% can not have flag %s with Null0%s", flag_str, VTY_NEWLINE);
+          return CMD_WARNING;
+        }
+
+      if (add_cmd)
+        static_add_ipv6 (&p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE|ZEBRA_FLAG_INTERNAL, distance, 0);
+      else
+        static_delete_ipv6 (&p, NULL, NULL, distance, 0);
+      return CMD_SUCCESS;
+    }
 
   /* Mark static routes as internal so they get evaluated as recursive */
   SET_FLAG (flag, ZEBRA_FLAG_INTERNAL);
@@ -1275,12 +1295,6 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
     }
   }
 
-  /* Administrative distance. */
-  if (distance_str)
-    distance = atoi (distance_str);
-  else
-    distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
-
   /* When gateway is valid IPv6 addrees, then gate is treated as
      nexthop address other case gate is treated as interface name. */
   ret = inet_pton (AF_INET6, gate_str, &gate_addr);
@@ -1294,27 +1308,20 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
 	  vty_out (vty, "%% Malformed address%s", VTY_NEWLINE);
 	  return CMD_WARNING;
 	}
-      type = STATIC_IPV6_GATEWAY_IFNAME;
       gate = &gate_addr;
     }
   else
     {
       if (ret == 1)
-	{
-	  type = STATIC_IPV6_GATEWAY;
 	  gate = &gate_addr;
-	}
       else
-	{
-	  type = STATIC_IPV6_IFNAME;
 	  ifname = gate_str;
-	}
     }
 
   if (add_cmd)
-    static_add_ipv6 (&p, type, gate, ifname, flag, distance, table);
+    static_add_ipv6 (&p, gate, ifname, flag, distance, 0);
   else
-    static_delete_ipv6 (&p, type, gate, ifname, distance, table);
+    static_delete_ipv6 (&p, gate, ifname, distance, 0);
 
   return CMD_SUCCESS;
 }

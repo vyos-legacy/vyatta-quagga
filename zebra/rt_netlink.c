@@ -1345,7 +1345,7 @@ netlink_route_multipath (int cmd, struct prefix *p, struct rib *rib,
       if (discard)
         {
           if (rib->flags & ZEBRA_FLAG_BLACKHOLE)
-            req.r.rtm_type = RTN_BLACKHOLE;
+	      req.r.rtm_type = RTN_BLACKHOLE;
           else if (rib->flags & ZEBRA_FLAG_REJECT)
             req.r.rtm_type = RTN_UNREACHABLE;
           else
@@ -1359,6 +1359,13 @@ netlink_route_multipath (int cmd, struct prefix *p, struct rib *rib,
 
   if (rib->type != ZEBRA_ROUTE_CONNECT)
     addattr32 (&req.n, sizeof req, RTA_PRIORITY, rib->metric);
+
+  /* Linux bug: kernel won't accept blackhole without an interface */
+  if (family == AF_INET6 && (rib->flags & ZEBRA_FLAG_BLACKHOLE))
+    {
+      unsigned int loindex = ifname2ifindex("lo");
+      addattr32 (&req.n, sizeof req, RTA_OIF, loindex);
+    }
 
   if (discard)
     {
