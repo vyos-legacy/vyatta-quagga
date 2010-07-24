@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.16-15+larkspur2) unstable; urgency=low
+
+  * Shortcircuit active check on blackhole
+  * Fix indentation of blackhole related code
+  * Add IPv6 blackhole support
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 23 Jul 2010 22:20:30 -0700
+
 vyatta-quagga (0.99.16-15+larkspur1) unstable; urgency=low
 
   * UNRELEASED
