@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.16-17) unstable; urgency=low
+
+  * Shortcircuit active check on blackhole
+  * Fix indentation of blackhole related code
+  * Add IPv6 blackhole support
+  * Use XCALLOC to allocate bgpd damp array
+  * Fix use of free memory by update_rsclient
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 03 Aug 2010 16:08:23 -0700
+
 vyatta-quagga (0.99.16-16) unstable; urgency=low
 
   * UNRELEASED
