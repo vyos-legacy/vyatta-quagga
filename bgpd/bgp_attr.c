@@ -332,53 +332,63 @@ attr_unknown_count (void)
   return transit_hash->count;
 }
 
+/* Do one round of Fowler/Noll/Vo hash */
+static uint32_t fnv_hash(uint32_t hval, uint32_t data)
+{
+  hval ^= data;
+  hval += (hval<<1) + (hval<<4) + (hval<<7) + (hval<<8) + (hval<<24);
+  return hval;
+}
+
 unsigned int
 attrhash_key_make (void *p)
 {
   struct attr * attr = (struct attr *) p;
-  unsigned int key = 0;
+  uint32_t key = 0;
+#define ADDHASH(x)	key = fnv_hash(key, x)
 
-  key += attr->origin;
-  key += attr->nexthop.s_addr;
-  key += attr->med;
-  key += attr->local_pref;
+  ADDHASH(attr->origin);
+  ADDHASH(attr->nexthop.s_addr);
+  ADDHASH(attr->med);
+  ADDHASH(attr->local_pref);
+
   if (attr->pathlimit.as)
     {
-      key += attr->pathlimit.ttl;
-      key += attr->pathlimit.as;
+      ADDHASH(attr->pathlimit.ttl);
+      ADDHASH(attr->pathlimit.as);
     }
   
   if (attr->extra)
     {
-      key += attr->extra->aggregator_as;
-      key += attr->extra->aggregator_addr.s_addr;
-      key += attr->extra->weight;
-      key += attr->extra->mp_nexthop_global_in.s_addr;
+      ADDHASH(attr->extra->aggregator_as);
+      ADDHASH(attr->extra->aggregator_addr.s_addr);
+      ADDHASH(attr->extra->weight);
+      ADDHASH(attr->extra->mp_nexthop_global_in.s_addr);
     }
   
   if (attr->aspath)
-    key += aspath_key_make (attr->aspath);
+    ADDHASH(aspath_key_make (attr->aspath));
   if (attr->community)
-    key += community_hash_make (attr->community);
+    ADDHASH(community_hash_make (attr->community));
   
   if (attr->extra)
     {
       if (attr->extra->ecommunity)
-        key += ecommunity_hash_make (attr->extra->ecommunity);
+        ADDHASH(ecommunity_hash_make (attr->extra->ecommunity));
       if (attr->extra->cluster)
-        key += cluster_hash_key_make (attr->extra->cluster);
+        ADDHASH(cluster_hash_key_make (attr->extra->cluster));
       if (attr->extra->transit)
-        key += transit_hash_key_make (attr->extra->transit);
+        ADDHASH(transit_hash_key_make (attr->extra->transit));
 
 #ifdef HAVE_IPV6
       {
         int i;
         
-        key += attr->extra->mp_nexthop_len;
-        for (i = 0; i < 16; i++)
-          key += attr->extra->mp_nexthop_global.s6_addr[i];
-        for (i = 0; i < 16; i++)
-          key += attr->extra->mp_nexthop_local.s6_addr[i];
+        ADDHASH(attr->extra->mp_nexthop_len);
+        for (i = 0; i < 4; i++)
+          ADDHASH(attr->extra->mp_nexthop_global.s6_addr32[i]);
+        for (i = 0; i < 4; i++)
+          ADDHASH(attr->extra->mp_nexthop_local.s6_addr32[i]);
       }
 #endif /* HAVE_IPV6 */
     }
