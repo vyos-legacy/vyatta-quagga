@@ -28,6 +28,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "stream.h"
 #include "log.h"
 #include "hash.h"
+#include "jhash.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_attr.h"
@@ -116,18 +117,9 @@ cluster_loop_check (struct cluster_list *cluster, struct in_addr originator)
 static unsigned int
 cluster_hash_key_make (void *p)
 {
-  struct cluster_list * cluster = (struct cluster_list *) p;
-  unsigned int key = 0;
-  int length;
-  caddr_t pnt;
+  const struct cluster_list *cluster = p;
 
-  length = cluster->length;
-  pnt = (caddr_t) cluster->list;
-  
-  while (length)
-    key += pnt[--length];
-
-  return key;
+  return jhash(cluster->list, cluster->length, 0);
 }
 
 static int
@@ -258,18 +250,9 @@ transit_unintern (struct transit *transit)
 static unsigned int
 transit_hash_key_make (void *p)
 {
-  struct transit * transit = (struct transit *) p;
-  unsigned int key = 0;
-  int length;
-  caddr_t pnt;
+  const struct transit * transit = p;
 
-  length = transit->length;
-  pnt = (caddr_t) transit->val;
-  
-  while (length)
-    key += pnt[--length];
-
-  return key;
+  return jhash(transit->val, transit->length, 0);
 }
 
 static int
