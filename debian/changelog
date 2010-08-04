@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.16-18) unstable; urgency=low
+
+  * Change to modified Bernstein hash for interface name
+  * Use Jenkins hash for BGP transit and cluster
+  * Replace BGP attribute hash
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 04 Aug 2010 16:47:16 -0700
+
 vyatta-quagga (0.99.16-17) unstable; urgency=low
 
   * Shortcircuit active check on blackhole
