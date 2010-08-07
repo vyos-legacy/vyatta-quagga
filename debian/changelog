@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.16-20) unstable; urgency=low
+
+  * Fix IPv6 interface route
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Sat, 07 Aug 2010 13:45:31 -0700
+
 vyatta-quagga (0.99.16-19) unstable; urgency=low
 
   * UNRELEASED
