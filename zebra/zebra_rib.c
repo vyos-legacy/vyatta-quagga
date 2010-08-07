@@ -2752,7 +2752,7 @@ static_add_ipv6 (struct prefix *p, struct in6_addr *gate, const char *ifname,
   if (gate)
     type = ifname ? STATIC_IPV6_GATEWAY_IFNAME : STATIC_IPV6_GATEWAY;
   else if (ifname)
-    type = STATIC_IPV6_GATEWAY_IFNAME;
+    type = STATIC_IPV6_IFNAME;
   else
     type = STATIC_IPV6_BLACKHOLE;
 
