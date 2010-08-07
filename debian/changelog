@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.16-19) unstable; urgency=low
+
+  * UNRELEASED
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Sat, 07 Aug 2010 13:43:43 -0700
+
 vyatta-quagga (0.99.16-18) unstable; urgency=low
 
   * Change to modified Bernstein hash for interface name
