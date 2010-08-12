@@ -7592,7 +7592,7 @@ bgp_show_peer (struct vty *vty, struct peer *p)
   if (peer_sort (p) != BGP_PEER_IBGP)
     {
       if (p->gtsm_hops > 0)
-	vty_out (vty, "  External BGP TTL security neighbor must be nearer than %d hops.%s",
+	vty_out (vty, "  External BGP neighbor may be up to %d hops away.%s",
 		 p->gtsm_hops, VTY_NEWLINE);
       else if (p->ttl > 1)
 	vty_out (vty, "  External BGP neighbor may be up to %d hops away.%s",
