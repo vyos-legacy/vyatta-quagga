@@ -110,12 +110,8 @@ static unsigned int
 if_rmap_hash_make (void *data)
 {
   const struct if_rmap *if_rmap = data;
-  unsigned int i, h = 0;
 
-  for (i = 0; i < strlen (if_rmap->ifname); i++)
-    h = 33 * h ^ if_rmap->ifname[i];
-
-  return h;
+  return string_hash_make (if_rmap->ifname);
 }
 
 static int
