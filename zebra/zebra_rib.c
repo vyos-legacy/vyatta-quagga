@@ -1604,8 +1604,7 @@ rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
       /* Duplicate connected route comes in. */
       else if ((nexthop = rib->nexthop) &&
 	       nexthop->type == NEXTHOP_TYPE_IFINDEX &&
-	       nexthop->ifindex == ifindex &&
-	       !CHECK_FLAG (rib->status, RIB_ENTRY_REMOVED))
+	       nexthop->ifindex == ifindex)
 	{
 	  rib->refcnt++;
 	  return 0 ;
