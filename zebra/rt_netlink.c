@@ -409,7 +409,7 @@ netlink_interface (struct sockaddr_nl *snl, struct nlmsghdr *h)
   struct ifinfomsg *ifi;
   struct rtattr *tb[IFLA_MAX + 1];
   struct interface *ifp;
-  char *name;
+  const char *name;
   int i;
 
   ifi = NLMSG_DATA (h);
@@ -437,7 +437,7 @@ netlink_interface (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
   if (tb[IFLA_IFNAME] == NULL)
     return -1;
-  name = (char *) RTA_DATA (tb[IFLA_IFNAME]);
+  name = RTA_DATA (tb[IFLA_IFNAME]);
 
   if (ifi->ifi_index == IFINDEX_INTERNAL)
     return -1;
@@ -496,7 +496,7 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
   void *addr;
   void *broad;
   u_char flags = 0;
-  char *label = NULL;
+  const char *label = NULL;
 
   ifa = NLMSG_DATA (h);
 
@@ -589,7 +589,7 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
   /* Label */
   if (tb[IFA_LABEL])
-    label = (char *) RTA_DATA (tb[IFA_LABEL]);
+    label = RTA_DATA (tb[IFA_LABEL]);
 
   if (ifp && label && strcmp (ifp->name, label) == 0)
     label = NULL;
@@ -774,13 +774,11 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
   int len;
   struct rtmsg *rtm;
   struct rtattr *tb[RTA_MAX + 1];
-
-  char anyaddr[16] = { 0 };
-
   uint32_t index, table, metric;
-  void *dest;
+  const void *dest;
   void *gate;
   void *src;
+  static const uint32_t anyaddr[4];
 
   rtm = NLMSG_DATA (h);
 
@@ -919,7 +917,7 @@ netlink_link_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
   struct ifinfomsg *ifi;
   struct rtattr *tb[IFLA_MAX + 1];
   struct interface *ifp;
-  char *name;
+  const char *name;
 
   ifi = NLMSG_DATA (h);
 
@@ -951,7 +949,7 @@ netlink_link_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
   
   if (tb[IFLA_IFNAME] == NULL)
     return -1;
-  name = (char *) RTA_DATA (tb[IFLA_IFNAME]);
+  name = RTA_DATA (tb[IFLA_IFNAME]);
 
   /* Add interface. */
   if (h->nlmsg_type == RTM_NEWLINK)
