@@ -1,3 +1,14 @@
+vyatta-quagga (0.99.16-22) unstable; urgency=low
+
+  * Remove impossible condition check
+  * Add common string hash function
+  * Make some values const
+  * Use Jhash for BGP attribute mixing
+  * Fix zebra server conditional
+  * BGP: IPv6 use nexthop information provided by Zebra
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 18 Aug 2010 17:36:19 -0700
+
 vyatta-quagga (0.99.16-21) unstable; urgency=low
 
   [ Chris Hall ]
