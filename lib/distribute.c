@@ -118,7 +118,7 @@ distribute_hash_make (void *arg)
 {
   const struct distribute *dist = arg;
 
-  return string_hash_make (dist->ifname);
+  return dist->ifname ? string_hash_make (dist->ifname) : 0;
 }
 
 /* If two distribute-list have same value then return 1 else return
