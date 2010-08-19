@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.16-23) unstable; urgency=low
+
+  * Revert "BGP: IPv6 use nexthop information provided by Zebra"
+  * BGP: store nexthop info for redistributed IPV6 routes
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 18 Aug 2010 19:00:34 -0700
+
 vyatta-quagga (0.99.16-22) unstable; urgency=low
 
   * Remove impossible condition check
