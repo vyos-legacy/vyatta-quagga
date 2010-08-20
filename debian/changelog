@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.16-24) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * Handle distribute hash when no ifname present
+
+ -- An-Cheng Huang <ancheng@vyatta.com>  Fri, 20 Aug 2010 08:41:14 -0700
+
 vyatta-quagga (0.99.16-23) unstable; urgency=low
 
   * Revert "BGP: IPv6 use nexthop information provided by Zebra"
