@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.17-1) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * release: 0.99.17
+
+  [ Stephen Hemminger ]
+  * Zebra zserv: bogus conditional
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Sun, 22 Aug 2010 11:18:49 -0700
+
 vyatta-quagga (0.99.16-24) unstable; urgency=low
 
   [ Stephen Hemminger ]
