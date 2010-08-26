@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.17-2) unstable; urgency=low
+
+  * Change BGP hops message to match other vendor
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 26 Aug 2010 16:38:51 -0700
+
 vyatta-quagga (0.99.17-1) unstable; urgency=low
 
   [ Denis Ovsienko ]
