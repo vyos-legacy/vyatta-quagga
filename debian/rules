@@ -69,6 +69,7 @@ configure	+= --enable-gcc-rdynamic
 configure	+= $(xable_snmp)
 configure	+= --with-libpam
 configure	+= CFLAGS="$(CFLAGS)"
+configure	+= --disable-doc
 
 configure: configure.ac Makefile.am
 	chmod +x debian/autogen.sh

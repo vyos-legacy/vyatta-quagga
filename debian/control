@@ -2,16 +2,12 @@ Source: vyatta-quagga
 Section: contrib/net
 Priority: extra
 Maintainer: Vyatta Package Maintainers <maintainers@vyatta.com>
-Build-Depends: debhelper (>= 5),
+Build-Depends: debhelper (>= 5), gawk,
  autotools-dev,
  libncurses5-dev,
- libreadline5-dev | libreadline-dev,
- texinfo (>= 4.7),
- libpam0g-dev | libpam-dev,
- libcap-dev | libcap2-dev,
- imagemagick,
- ghostscript | gs-gpl,
- groff,
+ libreadline5-dev,
+ libpam0g-dev,
+ libcap-dev,
  po-debconf,
  libsnmp-dev
 Standards-Version: 3.7.2
