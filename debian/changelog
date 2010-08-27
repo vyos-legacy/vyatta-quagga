@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.17-3) unstable; urgency=low
+
+  * fix squeeze build issues
+
+ -- An-Cheng Huang <ancheng@vyatta.com>  Fri, 27 Aug 2010 16:45:48 -0700
+
 vyatta-quagga (0.99.17-2) unstable; urgency=low
 
   * Change BGP hops message to match other vendor
