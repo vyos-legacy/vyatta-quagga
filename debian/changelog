@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.17-6) unstable; urgency=low
+
+  * rebuild to link with new libsnmp/libcap
+
+ -- An-Cheng Huang <ancheng@vyatta.com>  Fri, 03 Sep 2010 15:51:29 -0700
+
 vyatta-quagga (0.99.17-5) unstable; urgency=low
 
   [ Wataru Tanitsu ]
