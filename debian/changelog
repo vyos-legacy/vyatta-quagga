@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.17-5) unstable; urgency=low
+
+  [ Wataru Tanitsu ]
+  * Fix display of unsigned attributes
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 03 Sep 2010 09:10:41 -0700
+
 vyatta-quagga (0.99.17-4) unstable; urgency=low
 
   * UNRELEASED
