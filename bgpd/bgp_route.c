@@ -3485,8 +3485,8 @@ bgp_static_update (struct bgp *bgp, struct prefix *p,
 }
 
 static void
-bgp_static_update_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
-			 u_char safi, struct prefix_rd *prd, u_char *tag)
+bgp_static_update_vpnv4 (struct bgp *bgp, struct prefix *p, afi_t afi,
+			 safi_t safi, struct prefix_rd *prd, u_char *tag)
 {
   struct bgp_node *rn;
   struct bgp_info *new;
@@ -3566,8 +3566,8 @@ bgp_check_local_routes_rsclient (struct peer *rsclient, afi_t afi, safi_t safi)
 }
 
 static void
-bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, u_int16_t afi,
-			   u_char safi, struct prefix_rd *prd, u_char *tag)
+bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, afi_t afi,
+			   safi_t safi, struct prefix_rd *prd, u_char *tag)
 {
   struct bgp_node *rn;
   struct bgp_info *ri;
@@ -3620,7 +3620,7 @@ bgp_pathlimit_update_parents (struct bgp *bgp, struct bgp_node *rn,
    route should be installed as valid.  */
 static int
 bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str, 
-                u_int16_t afi, u_char safi, const char *rmap, int backdoor,
+                afi_t afi, safi_t safi, const char *rmap, int backdoor,
                 u_char ttl)
 {
   int ret;
@@ -3765,7 +3765,7 @@ bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
 /* Configure static BGP network. */
 static int
 bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
-		  u_int16_t afi, u_char safi)
+		  afi_t afi, safi_t safi)
 {
   int ret;
   struct prefix p;
@@ -7605,7 +7605,7 @@ DEFUN (show_ipv6_mbgp_community_all,
 
 static int
 bgp_show_community (struct vty *vty, int argc, const char **argv, int exact,
-                    u_int16_t afi, u_char safi)
+                    afi_t afi, safi_t safi)
 {
   struct community *com;
   struct buffer *b;
@@ -8605,7 +8605,7 @@ ALIAS (show_ipv6_mbgp_community_exact,
 
 static int
 bgp_show_community_list (struct vty *vty, const char *com, int exact,
-			 u_int16_t afi, u_char safi)
+			 afi_t afi, safi_t safi)
 {
   struct community_list *list;
 
