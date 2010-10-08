@@ -1,3 +1,23 @@
+vyatta-quagga (0.99.17-7) unstable; urgency=low
+
+  [ Greg Troxel ]
+  * Set from even if binfo->extra is NULL.
+  * Add pointer to Balaji G. git.
+  * Document rules for zalloc and friends.
+
+  [ Nico Golde ]
+  * lib/vty.c: add missing format string when printing out motd message
+
+  [ Greg Troxel ]
+  * Add MTR repository.
+
+  [ Michael Lambert ]
+  * bgpd, lib: adopt afi_t and safi_t in several places
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 08 Oct 2010 15:43:17 -0700
+
 vyatta-quagga (0.99.17-6) unstable; urgency=low
 
   * rebuild to link with new libsnmp/libcap
