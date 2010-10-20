@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.17-8) unstable; urgency=low
+
+  [ Dmitry Tejblum ]
+  * zclient: fix router-id calculation for IPv6 (#595)
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 20 Oct 2010 11:47:56 -0700
+
 vyatta-quagga (0.99.17-7) unstable; urgency=low
 
   [ Greg Troxel ]
