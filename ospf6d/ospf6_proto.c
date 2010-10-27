@@ -45,8 +45,7 @@ ospf6_prefix_apply_mask (struct ospf6_prefix *op)
   if (index == 16)
     return;
 
-  if (mask)
-    pnt[index] &= mask;
+  pnt[index] &= mask;
   index ++;
 
   while (index < OSPF6_PREFIX_SPACE (op->prefix_length))
