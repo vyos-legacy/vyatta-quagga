@@ -1,3 +1,17 @@
+vyatta-quagga (0.99.17-9) unstable; urgency=low
+
+  [ Stig Thormodsrud ]
+  * ZRevert "Fix out-of-bounds behaviour in ospf6_prefix_apply_mask If
+    prefixlen was /32, /64, or /96, function would write 0x00 to first
+    location outside prefix."
+
+  [ David Lamparter ]
+  * ospf6d: fix out of bounds write in ospf6_prefix_apply_mask
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Wed, 27 Oct 2010 14:44:41 -0700
+
 vyatta-quagga (0.99.17-8) unstable; urgency=low
 
   [ Dmitry Tejblum ]
