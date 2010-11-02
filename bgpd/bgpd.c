@@ -4279,7 +4279,7 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
   zlog_debug ("peer_ttl_security_hops_set: set gtsm_hops to %d for %s", gtsm_hops, peer->host);
 
   if (peer_sort (peer) == BGP_PEER_IBGP)
-    return 0;
+    return BGP_ERR_NO_IBGP_WITH_TTLHACK;
 
   /* We cannot configure ttl-security hops when ebgp-multihop is already
      set.  For non peer-groups, the check is simple.  For peer-groups, it's

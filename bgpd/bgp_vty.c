@@ -216,6 +216,9 @@ bgp_vty_return (struct vty *vty, int ret)
     case BGP_ERR_NO_EBGP_MULTIHOP_WITH_TTLHACK:
       str = "ebgp-multihop and ttl-security cannot be configured together";
       break;
+    case BGP_ERR_NO_IBGP_WITH_TTLHACK:
+      str = "ttl-security only allowed for EBGP peers";
+      break;
     }
   if (str)
     {
