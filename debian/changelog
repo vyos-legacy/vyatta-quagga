@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.17-10) unstable; urgency=low
+
+  [ Vladimir L Ivanov ]
+  * bgpd: fix printed value of last-update timestamp
+
+  [ Stephen Hemminger ]
+  * Do not allow ttl-security with IBGP
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 04 Nov 2010 11:51:33 -0700
+
 vyatta-quagga (0.99.17-9) unstable; urgency=low
 
   [ Stig Thormodsrud ]
