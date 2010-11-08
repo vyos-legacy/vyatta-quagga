@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.17-11) unstable; urgency=low
+
+  [ Greg Troxel ]
+  * Adjust description of tomhenderson repo.
+  * infrastructure: Clarify commit message format.
+  * infrastructure: Whitespace cleanup.
+  * infrastructure: Express preference for published git repos
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 08 Nov 2010 10:58:46 -0800
+
 vyatta-quagga (0.99.17-10) unstable; urgency=low
 
   [ Vladimir L Ivanov ]
