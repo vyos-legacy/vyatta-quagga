@@ -1355,7 +1355,13 @@ netlink_route_multipath (int cmd, struct prefix *p, struct rib *rib,
 
   addattr_l (&req.n, sizeof req, RTA_DST, &p->u.prefix, bytelen);
 
-  if (rib->type != ZEBRA_ROUTE_CONNECT)
+  if (rib->type == ZEBRA_ROUTE_CONNECT)
+    {
+      /* Linux special case connected ipv6 routes have metric of 256 IP6_RT_PRIO_ADDRCONF */
+      if (family == AF_INET6)
+	addattr32 (&req.n, sizeof req, RTA_PRIORITY, 256);
+    }
+  else 
     addattr32 (&req.n, sizeof req, RTA_PRIORITY, rib->metric);
 
   /* Linux bug: kernel won't accept blackhole without an interface */
