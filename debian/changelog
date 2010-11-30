@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.17-12) unstable; urgency=low
+
+  * Add metric when restoring connected routes
+  * Put debug symbols in debug section
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 30 Nov 2010 09:28:54 -0800
+
 vyatta-quagga (0.99.17-11) unstable; urgency=low
 
   [ Greg Troxel ]
