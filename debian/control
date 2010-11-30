@@ -38,6 +38,7 @@ Description: BGP/OSPF/RIP routing daemon
 Package: vyatta-quagga-dbg
 Architecture: any
 Priority: extra
+Section: debug
 Depends: ${shlibs:Depends}
 Description: BGP/OSPF/RIP debug symbols
  Debug symbols for Quagga routing daemons
