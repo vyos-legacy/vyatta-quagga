@@ -130,6 +130,7 @@ binary-arch: build install
 	dh_installdebconf
 	dh_installdocs
 	dh_installexamples
+	dh_installman
 	dh_installinit
 	dh_installpam --name=quagga
 	dh_installlogrotate --name=quagga
