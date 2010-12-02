@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.17-13) unstable; urgency=low
+
+  * Drop non-established sessions when changing ttl-security
+  * Update next hop interface for recursive route
+  * Install man pages for quagga commands
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 01 Dec 2010 16:48:03 -0800
+
 vyatta-quagga (0.99.17-12) unstable; urgency=low
 
   * Add metric when restoring connected routes
