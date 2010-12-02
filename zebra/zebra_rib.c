@@ -519,17 +519,17 @@ nexthop_active (int family,
 	    switch (newhop->type)
 	      {
 	      case NEXTHOP_TYPE_IPV4:
-		nexthop->rifindex = newhop->ifindex;
 	      case NEXTHOP_TYPE_IPV4_IFINDEX:
 	      case NEXTHOP_TYPE_IPV4_IFNAME:
+		nexthop->rifindex = newhop->ifindex;
 		nexthop->rgate.ipv4 = newhop->gate.ipv4;
 		break;
 
 #ifdef HAVE_IPV6
 	      case NEXTHOP_TYPE_IPV6:
-		nexthop->rifindex = newhop->ifindex;
 	      case NEXTHOP_TYPE_IPV6_IFINDEX:
 	      case NEXTHOP_TYPE_IPV6_IFNAME:
+		nexthop->rifindex = newhop->ifindex;
 		nexthop->rgate.ipv6 = newhop->gate.ipv6;
 		break;
 #endif
