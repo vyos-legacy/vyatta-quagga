@@ -10001,7 +10001,7 @@ community_list_perror (struct vty *vty, int ret)
   switch (ret)
     {
     case COMMUNITY_LIST_ERR_CANT_FIND_LIST:
-      vty_out (vty, "%% Can't find communit-list%s", VTY_NEWLINE);
+      vty_out (vty, "%% Can't find community-list%s", VTY_NEWLINE);
       break;
     case COMMUNITY_LIST_ERR_MALFORMED_VAL:
       vty_out (vty, "%% Malformed community-list value%s", VTY_NEWLINE);
@@ -10362,7 +10362,7 @@ DEFUN (show_ip_community_list_arg,
   list = community_list_lookup (bgp_clist, argv[0], COMMUNITY_LIST_MASTER);
   if (! list)
     {
-      vty_out (vty, "%% Can't find communit-list%s", VTY_NEWLINE);
+      vty_out (vty, "%% Can't find community-list%s", VTY_NEWLINE);
       return CMD_WARNING;
     }
 
@@ -10712,7 +10712,7 @@ DEFUN (show_ip_extcommunity_list_arg,
   list = community_list_lookup (bgp_clist, argv[0], EXTCOMMUNITY_LIST_MASTER);
   if (! list)
     {
-      vty_out (vty, "%% Can't find extcommunit-list%s", VTY_NEWLINE);
+      vty_out (vty, "%% Can't find extcommunity-list%s", VTY_NEWLINE);
       return CMD_WARNING;
     }
 
