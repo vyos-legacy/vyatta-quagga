@@ -1725,7 +1725,7 @@ netlink_route_multipath (int cmd, struct prefix *p, struct rib *rib,
     }
 
   /* If there is no useful nexthop then return. */
-  if (nexthop_num == 0)
+  if (cmd == RTM_NEWROUTE && nexthop_num == 0)
     {
       if (IS_ZEBRA_DEBUG_KERNEL)
         zlog_debug ("netlink_route_multipath(): No useful nexthop.");
