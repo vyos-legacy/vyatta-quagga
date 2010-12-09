@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.17-14) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * bgpd: fix community-list error message spelling
+
+  [ Stephen Hemminger ]
+  * Delete route even if there are no next hops
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 09 Dec 2010 10:44:16 -0800
+
 vyatta-quagga (0.99.17-13) unstable; urgency=low
 
   * Drop non-established sessions when changing ttl-security
