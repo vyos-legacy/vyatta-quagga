@@ -25,8 +25,8 @@ BUILD_STAMP=debian/build-stamp
 CFLAGS = -Wall
 WANT_SNMP=1
 
-# IP_MINTTL is not in glibc (yet)
-CFLAGS += -DIP_MINTTL=21
+# minttl is in 2.6.34 or later but Debian headers are still at 2.6.32
+CFLAGS += -DIP_MINTTL=21 -DIPV6_MINHOPCNT=73
 
 ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
 	CFLAGS += -O0 -g
