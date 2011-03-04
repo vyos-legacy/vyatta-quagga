@@ -1,3 +1,19 @@
+vyatta-quagga (0.99.17-17) unstable; urgency=low
+
+  [ Dmitrij Tejblum ]
+  * ospf6d: fix crash in SPF calculation
+  * bgpd: fix handling of "Unsupported Capability"
+
+  [ David Ward ]
+  * bgpd: VTY string fixes for debug commands
+
+  [ Andrew J. Schorr ]
+  * ripd: resolve debug statements issue (bug 442)
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Fri, 04 Mar 2011 12:53:32 -0800
+
 vyatta-quagga (0.99.17-16) unstable; urgency=low
 
   * new branch
