@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.17-18) unstable; urgency=low
+
+  * Add more debug info for RIB_DEBUG
+  * Don't delete connected route to other interface
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 17 Mar 2011 17:56:13 -0700
+
 vyatta-quagga (0.99.17-17) unstable; urgency=low
 
   [ Dmitrij Tejblum ]
