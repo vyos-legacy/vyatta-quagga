@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.17-15+mendocino2) unstable; urgency=low
+
+  [ Paul Jakma ]
+  * bgpd/security: CVE-2010-1674 Fix crash due to extended-community
+    parser error
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 21 Mar 2011 15:24:36 -0700
+
 vyatta-quagga (0.99.17-15+mendocino1) unstable; urgency=low
 
   * new branch
