@@ -314,6 +314,7 @@ if_is_multicast (const struct interface *ifp)
 
 extern void if_add_hook (int, int (*)(struct interface *));
 extern void if_init (void);
+extern void if_terminate (void);
 extern void if_dump_all (void);
 extern const char *if_flag_dump(unsigned long);
 

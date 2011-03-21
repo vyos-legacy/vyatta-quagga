@@ -409,7 +409,7 @@ bgp_damp_parameter_set (int hlife, int reuse, int sup, int maxsup)
 			      * sizeof (struct bgp_reuse_node *));
 
   /* Reuse-array computations */
-  damp->reuse_index = XCALLOC (MTYPE_BGP_DAMP_ARRAY, 
+  damp->reuse_index = XCALLOC (MTYPE_BGP_DAMP_ARRAY,
 			       sizeof(int) * damp->reuse_index_size);
 
   reuse_max_ratio = (double)damp->ceiling/damp->reuse_limit;
