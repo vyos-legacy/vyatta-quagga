@@ -1,3 +1,107 @@
+vyatta-quagga (0.99.18-1) unstable; urgency=low
+
+  [ Paul Jakma ]
+  * bgpd: Simplify process queue init
+  * lib: thread history funcname shouldn't be constant, it's freed
+  * lib: Thread scheduler should be fair and not let events starve I/O
+    and timers
+  * lib: Add a command to clear the thread CPU history data
+  * lib: Make workqueue more conservative about ramping up
+  * lib: prefix.c nano-optimisation
+  * lib: Fix bug in prefix trie lookup
+  * ospfd: Lower level of some common messages from info to debug
+  * ospfd: ospf_if_free can leave dangling references on ISM events -
+    cancel them
+  * ospfd: OSPF_MIN_LS_ARRIVAL compare should be >= to match ospf_flood
+  * ospfd: interface code should leave  network_lsa_self alone
+  * ospfd: fix lsa_refresh_walker unlock before use bug
+  * ospfd: Fix various route_unlock discrepencies
+  * ospfd: the maxage_lsa_remover should check whether it needs to yield
+    the cpu
+  * ospfd: Reset neighbour inactivity timer for any packet arrival
+  * ospfd: Prioritise hellos for sending by queueing to head of output
+    buffer
+  * ospfd: Remember network LSA sequence numbers across up/downs of an
+    interface
+  * ospfd: Unify router and network LSA refresh logic with general
+    refresher
+  * ospfd: Fix maxage/flush to not try flood twice, remember maxages for
+    longer
+  * ospfd: potential fix for router-id change assert on refresh cleanup
+    patch
+  * ospfd: Remove oi field from LSA, have network_lsa_refresh look up
+    when needed
+
+  [ Stephen Hemminger ]
+  * ripngd: copy debug statements fix from ripd
+
+  [ John Kemp ]
+  * bgpd: improve "monotonic" uptime correction
+
+  [ Denis Ovsienko ]
+  * doc: fix "ipv6 address" interface command syntax (#608)
+
+  [ Chris Hall ]
+  * lib: Fix accounting of memory
+
+  [ Chris Caputo ]
+  * bgpd: fix bgp_node locking issues
+
+  [ Stephen Hemminger ]
+  * bgpd: use XCALLOC to allocate bgpd damp array
+
+  [ Robert Bays ]
+  * bgpd: fix errors in aggregate address command
+  * bgpd: unlock node on aggregate error
+
+  [ Stephen Hemminger ]
+  * bgpd: fix use of free memory by update_rsclient
+
+  [ Wataru Tanitsu ]
+  * bgpd: Fix display of unsigned attributes
+
+  [ Barry Friedman ]
+  * bgpd: Remove extra lock on interior table node
+
+  [ Stephen Hemminger ]
+  * lib: Better hashing of string values using Bernstein hash
+  * bgpd: use Jenkins hash for BGP transit, cluster and attr hashes
+
+  [ Tom Goff ]
+  * lib: Add a function to delete all interfaces
+  * lib: zlog should clean up its memory
+  * ospf6d: Fix memory allocation issues in SPF
+  * ospf6d: Remove obsolete code
+  * ospf6d: Have ospf6d cleanup when it terminates normally
+  * ospf6d: Route locking (memory) cleanup
+  * ospf6d: Extend the "[no] debug ospf6 route" vty commands
+
+  [ Paul Jakma ]
+  * bgpd/security: CVE-2010-1674 Fix crash due to extended-community
+    parser error
+  * bgpd: Remove AS Path limit/TTL functionality
+  * release: 0.99.18
+
+  [ Michael Lambert ]
+  * bgpd: New show commands for improved view and address family support
+  * bgpd: "Intern" communities in route maps
+
+  [ Stephen Hemminger ]
+  * bgpd: leave peer socket in non-blocking mode (mostly)
+  * lib: add TCP_CORK wrapper
+  * bgpd: enable TCP corking
+
+  [ Paul Jakma ]
+  * build: change sense of opaque-{lsa,te} enable args to enable by
+    default
+  * ospfd: Compile fix for opaque support
+
+  [ Stephen Hemminger ]
+  * bgpd: attribute jhash call should use a standard interface to
+    in6_addr data
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 22 Mar 2011 11:05:47 -0700
+
 vyatta-quagga (0.99.17-18) unstable; urgency=low
 
   * Add more debug info for RIB_DEBUG
