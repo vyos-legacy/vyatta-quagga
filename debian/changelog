@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.18-2) unstable; urgency=low
+
+  * Restore old timer behaviour
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Wed, 23 Mar 2011 16:25:40 -0700
+
 vyatta-quagga (0.99.18-1) unstable; urgency=low
 
   [ Paul Jakma ]
