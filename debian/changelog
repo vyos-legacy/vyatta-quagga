@@ -1,3 +1,32 @@
+vyatta-quagga (0.99.18-3) unstable; urgency=low
+
+  [ Christian Hammers ]
+  * lib: fix more format warnings (#637)
+
+  [ Paul Jakma ]
+  * bgpd: Fix compile failure if IPv6 build was disabled.
+
+  [ Nick Hilliard ]
+  * bgpd: RFC 5082 Generalized TTL Security Mechanism support
+
+  [ Stephen Hemminger ]
+  * bgpd: Cleanups & fixes for minttl / GTSM
+  * lib: Add support for IPv6 ttl security
+
+  [ Greg Troxel ]
+  * build: treat opaque-lsa default correctly for ospfapi
+
+  [ Stephen Hemminger ]
+  * Revert "Restore old timer behaviour"
+  * Revert "bgpd: "Intern" communities in route maps"
+
+  [ Michael Lambert ]
+  * bgpd: fix memory leak when deleting a community
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Thu, 24 Mar 2011 11:25:28 -0700
+
 vyatta-quagga (0.99.18-2) unstable; urgency=low
 
   * Restore old timer behaviour
