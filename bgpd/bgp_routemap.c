@@ -1297,7 +1297,7 @@ route_set_community (void *rule, struct prefix *prefix,
 	new = community_dup (rcs->com);
       
       /* will be interned by caller if required */
-      attr->community = community_intern (new);
+      attr->community = new;
 
       attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES);
     }
@@ -1311,7 +1311,6 @@ route_set_community_compile (const char *arg)
 {
   struct rmap_com_set *rcs;
   struct community *com = NULL;
-  struct community *comint;
   char *sp;
   int additive = 0;
   int none = 0;
@@ -1338,9 +1337,8 @@ route_set_community_compile (const char *arg)
 	return NULL;
     }
   
-  comint = community_intern (com);
   rcs = XCALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (struct rmap_com_set));
-  rcs->com = comint;
+  rcs->com = com;
   rcs->additive = additive;
   rcs->none = none;
   
@@ -1395,6 +1393,13 @@ route_set_community_delete (void *rule, struct prefix *prefix,
 	  new = community_uniq_sort (merge);
 	  community_free (merge);
 
+	  /* HACK: if the old community is not intern'd,
+	   * we should free it here, or all reference to it may be lost.
+	   * Really need to cleanup attribute caching sometime.
+	   */
+	  if (old->refcnt == 0)
+	    community_free (old);
+
 	  if (new->size == 0)
 	    {
 	      binfo->attr->community = NULL;
@@ -1403,7 +1408,7 @@ route_set_community_delete (void *rule, struct prefix *prefix,
 	    }
 	  else
 	    {
-	      binfo->attr->community = community_intern (new);
+	      binfo->attr->community = new;
 	      binfo->attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES);
 	    }
 	}
