@@ -1011,9 +1011,9 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
   struct thread *thread;
   fd_set readfd;
   fd_set writefd;
-  struct timeval timer_val;
+  struct timeval timer_val = { .tv_sec = 0, .tv_usec = 0 };
   struct timeval timer_val_bg;
-  struct timeval *timer_wait;
+  struct timeval *timer_wait = &timer_val;
   struct timeval *timer_wait_bg;
 
   while (1)
@@ -1040,15 +1040,18 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
       /* Structure copy.  */
       readfd = m->readfd;
       writefd = m->writefd;
-
-      /* Calculate select wait timer if nothing else happens */
-      quagga_get_relative (NULL);
-      timer_wait = thread_timer_wait (&m->timer, &timer_val);
-      timer_wait_bg = thread_timer_wait (&m->background, &timer_val_bg);
       
-      if (timer_wait_bg &&
-	  (!timer_wait || (timeval_cmp (*timer_wait, *timer_wait_bg) > 0)))
-	timer_wait = timer_wait_bg;
+      /* Calculate select wait timer if nothing else to do */
+      if (m->ready.count == 0)
+        {
+          quagga_get_relative (NULL);
+          timer_wait = thread_timer_wait (&m->timer, &timer_val);
+          timer_wait_bg = thread_timer_wait (&m->background, &timer_val_bg);
+          
+          if (timer_wait_bg &&
+              (!timer_wait || (timeval_cmp (*timer_wait, *timer_wait_bg) > 0)))
+            timer_wait = timer_wait_bg;
+        }
       
       num = select (FD_SETSIZE, &readfd, &writefd, NULL, timer_wait);
       
