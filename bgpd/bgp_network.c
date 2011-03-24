@@ -177,8 +177,7 @@ bgp_accept (struct thread *thread)
   if (peer_sort (peer1) == BGP_PEER_EBGP) {
     sockopt_ttl (peer1->su.sa.sa_family, bgp_sock, peer1->ttl);
     if (peer1->gtsm_hops)
-      sockopt_minttl (peer1->su.sa.sa_family, bgp_sock, 
-		      MAXTTL + 1 - peer1->gtsm_hops);
+      sockopt_minttl (peer1->su.sa.sa_family, bgp_sock, MAXTTL + 1 - peer1->gtsm_hops);
   }
 
   /* Make dummy peer until read Open packet. */
@@ -322,8 +321,7 @@ bgp_connect (struct peer *peer)
   if (peer_sort (peer) == BGP_PEER_EBGP) {
     sockopt_ttl (peer->su.sa.sa_family, peer->fd, peer->ttl);
     if (peer->gtsm_hops)
-      sockopt_minttl (peer->su.sa.sa_family, peer->fd,
-		      MAXTTL + 1 - peer->gtsm_hops);
+      sockopt_minttl (peer->su.sa.sa_family, peer->fd, MAXTTL + 1 - peer->gtsm_hops);
   }
 
   sockopt_reuseaddr (peer->fd);
@@ -472,10 +470,10 @@ bgp_socket (unsigned short port, const char *address)
 	  zlog_err ("socket: %s", safe_strerror (errno));
 	  continue;
 	}
-
+	
       /* if we intend to implement ttl-security, this socket needs ttl=255 */
       sockopt_ttl (ainfo->ai_family, sock, MAXTTL);
-
+      
       ret = bgp_listener (sock, ainfo->ai_addr, ainfo->ai_addrlen);
       if (ret == 0)
 	++count;

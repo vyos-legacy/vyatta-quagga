@@ -2642,8 +2642,7 @@ peer_ebgp_multihop_set_vty (struct vty *vty, const char *ip_str,
   else
     VTY_GET_INTEGER_RANGE ("TTL", ttl, ttl_str, 1, 255);
 
-  return bgp_vty_return (vty,
-			 peer_ebgp_multihop_set (peer, ttl) );
+  return bgp_vty_return (vty,  peer_ebgp_multihop_set (peer, ttl));
 }
 
 static int

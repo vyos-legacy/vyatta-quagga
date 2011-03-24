@@ -4267,6 +4267,7 @@ peer_maximum_prefix_unset (struct peer *peer, afi_t afi, safi_t safi)
   return 0;
 }
 
+
 /* Change setting of existing peer
  *   no session then do nothing (will get handled by next connection)
  *   established then change value (may break connectivity)
@@ -4297,6 +4298,8 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
   struct peer *peer1;
   int ret;
 
+  zlog_debug ("peer_ttl_security_hops_set: set gtsm_hops to %d for %s", gtsm_hops, peer->host);
+
   if (peer_sort (peer) == BGP_PEER_IBGP)
     return BGP_ERR_NO_IBGP_WITH_TTLHACK;
 
@@ -4307,6 +4310,7 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
      before actually applying the ttl-security rules.  Cisco really made a
      mess of this configuration parameter, and OpenBGPD got it right.
   */
+
   if (peer->gtsm_hops == 0) {
     if (CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
       {
@@ -4339,8 +4343,8 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
 
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     {
-      if (peer_sort (peer) != BGP_PEER_IBGP)
-	peer_set_minttl (peer);
+      if (peer->fd >= 0 && peer_sort (peer) != BGP_PEER_IBGP)
+	sockopt_minttl (peer->su.sa.sa_family, peer->fd, MAXTTL + 1 - gtsm_hops);
     }
   else
     {
@@ -4353,6 +4357,9 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
 	  peer->gtsm_hops = group->conf->gtsm_hops;
 
 	  peer_set_minttl (peer);
+
+	  if (peer->fd >= 0 && peer->gtsm_hops != 0)
+            sockopt_minttl (peer->su.sa.sa_family, peer->fd, MAXTTL + 1 - peer->gtsm_hops);
 	}
     }
 
@@ -4365,6 +4372,8 @@ peer_ttl_security_hops_unset (struct peer *peer)
   struct peer_group *group;
   struct listnode *node, *nnode;
   struct peer *opeer;
+
+  zlog_debug ("peer_ttl_security_hops_unset: set gtsm_hops to zero for %s", peer->host);
 
   if (peer_sort (peer) == BGP_PEER_IBGP)
       return 0;
@@ -4713,7 +4722,7 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
      /* ttl-security hops */
       if (peer_sort (peer) != BGP_PEER_IBGP && peer->gtsm_hops != 0)
         if (! peer_group_active (peer) || g_peer->gtsm_hops != peer->gtsm_hops)
-          vty_out (vty, " neighbor %s ttl-security hops %d%s", addr, 
+          vty_out (vty, " neighbor %s ttl-security hops %d%s", addr,
                    peer->gtsm_hops, VTY_NEWLINE);
 
       /* disable-connected-check.  */
