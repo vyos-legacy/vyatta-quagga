@@ -132,25 +132,8 @@ ospf_if_drop_alldrouters (struct ospf *top, struct prefix *p, unsigned int
 int
 ospf_if_ipmulticast (struct ospf *top, struct prefix *p, unsigned int ifindex)
 {
-  u_char val;
-  int ret, len;
+  int ret;
   
-  val = 0;
-  len = sizeof (val);
-  
-  /* Prevent receiving self-origined multicast packets. */
-  ret = setsockopt (top->fd, IPPROTO_IP, IP_MULTICAST_LOOP, (void *)&val, len);
-  if (ret < 0)
-    zlog_warn ("can't setsockopt IP_MULTICAST_LOOP(0) for fd %d: %s",
-	       top->fd, safe_strerror(errno));
-  
-  /* Explicitly set multicast ttl to 1 -- endo. */
-  val = 1;
-  ret = setsockopt (top->fd, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&val, len);
-  if (ret < 0)
-    zlog_warn ("can't setsockopt IP_MULTICAST_TTL(1) for fd %d: %s",
-	       top->fd, safe_strerror (errno));
-
   ret = setsockopt_multicast_ipv4 (top->fd, IP_MULTICAST_IF,
                                    p->u.prefix4, 0, ifindex);
   if (ret < 0)
@@ -166,6 +149,7 @@ ospf_sock_init (void)
 {
   int ospf_sock;
   int ret, hincl = 1;
+  int val;
 
   if ( ospfd_privs.change (ZPRIVS_RAISE) )
     zlog_err ("ospf_sock_init: could not raise privs, %s",
@@ -225,6 +209,20 @@ ospf_sock_init (void)
                safe_strerror (errno) );
     }
  
+  /* Prevent receiving self-origined multicast packets. */
+  val = 0;
+  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_MULTICAST_LOOP, (void *)&val, sizeof(val));
+  if (ret < 0)
+    zlog_warn ("can't setsockopt IP_MULTICAST_LOOP(0) for fd %d: %s",
+	       ospf_sock, safe_strerror(errno));
+ 
+  /* Explicitly set multicast ttl to 1 -- endo. */
+  val = 1;
+  ret = setsockopt (ospf_sock, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&val, sizeof(val));
+  if (ret < 0)
+    zlog_warn ("can't setsockopt IP_MULTICAST_TTL(1) for fd %d: %s",
+	       ospf_sock, safe_strerror (errno));
+
   return ospf_sock;
 }
 
