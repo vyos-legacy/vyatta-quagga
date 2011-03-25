@@ -79,14 +79,14 @@ static struct cmd_node smux_node =
 /* thread master */
 static struct thread_master *master;
 
-void *
+static void *
 oid_copy (void *dest, const void *src, size_t size)
 {
   return memcpy (dest, src, size * sizeof (oid));
 }
 
 void
-oid2in_addr (oid oid[], int len, struct in_addr *addr)
+oid2in_addr (const oid oid[], int len, struct in_addr *addr)
 {
   int i;
   u_char *pnt;
@@ -101,10 +101,10 @@ oid2in_addr (oid oid[], int len, struct in_addr *addr)
 }
 
 void
-oid_copy_addr (oid oid[], struct in_addr *addr, int len)
+oid_copy_addr (oid oid[], const struct in_addr *addr, int len)
 {
   int i;
-  u_char *pnt;
+  const u_char *pnt;
   
   if (len == 0)
     return;
@@ -115,8 +115,8 @@ oid_copy_addr (oid oid[], struct in_addr *addr, int len)
     oid[i] = *pnt++;
 }
 
-int
-oid_compare (oid *o1, int o1_len, oid *o2, int o2_len)
+static int
+oid_compare (const oid *o1, int o1_len, const oid *o2, int o2_len)
 {
   int i;
 
