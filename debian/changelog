@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.18-4) unstable; urgency=low
+
+  * ospfd: set multicast sockopt when socket is created
+  * smux: oid optimization
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Sat, 26 Mar 2011 12:07:22 -0700
+
 vyatta-quagga (0.99.18-3) unstable; urgency=low
 
   [ Christian Hammers ]
