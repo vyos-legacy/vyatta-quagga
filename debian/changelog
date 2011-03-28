@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.18-5) unstable; urgency=low
+
+  * Fix read past end of address
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 28 Mar 2011 13:49:17 -0700
+
 vyatta-quagga (0.99.18-4) unstable; urgency=low
 
   * ospfd: set multicast sockopt when socket is created
