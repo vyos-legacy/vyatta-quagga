@@ -4268,27 +4268,6 @@ peer_maximum_prefix_unset (struct peer *peer, afi_t afi, safi_t safi)
 }
 
 
-/* Change setting of existing peer
- *   no session then do nothing (will get handled by next connection)
- *   established then change value (may break connectivity)
- *   not established yet (teardown session and restart)
- */
-static void peer_set_minttl (struct peer *peer)
-{
-  if (peer->fd < 0)
-    return;
-
-  if (peer->status == Established)
-    sockopt_minttl (peer->su.sa.sa_family, peer->fd, 
-		    MAXTTL + 1 - peer->gtsm_hops);
-  else if (peer->status < Established)
-    {
-      if (BGP_DEBUG (events, EVENTS))
-	zlog_debug ("%s Min-ttl changed", peer->host);
-      BGP_EVENT_ADD (peer, BGP_Stop);
-    }
-}
-
 /* Set # of hops between us and BGP peer. */
 int
 peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
@@ -4356,10 +4335,23 @@ peer_ttl_security_hops_set (struct peer *peer, int gtsm_hops)
 
 	  peer->gtsm_hops = group->conf->gtsm_hops;
 
-	  peer_set_minttl (peer);
-
-	  if (peer->fd >= 0 && peer->gtsm_hops != 0)
-            sockopt_minttl (peer->su.sa.sa_family, peer->fd, MAXTTL + 1 - peer->gtsm_hops);
+	  /* Change setting of existing peer
+	   *   established then change value (may break connectivity)
+	   *   not established yet (teardown session and restart)
+	   *   no session then do nothing (will get handled by next connection)
+	   */
+	  if (peer->status == Established)
+	    {
+	      if (peer->fd >= 0 && peer->gtsm_hops != 0)
+		sockopt_minttl (peer->su.sa.sa_family, peer->fd,
+				MAXTTL + 1 - peer->gtsm_hops);
+	    }
+	  else if (peer->status < Established)
+	    {
+	      if (BGP_DEBUG (events, EVENTS))
+		zlog_debug ("%s Min-ttl changed", peer->host);
+	      BGP_EVENT_ADD (peer, BGP_Stop);
+	    }
 	}
     }
 
