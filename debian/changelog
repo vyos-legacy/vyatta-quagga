@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.17-15+mendocino4) unstable; urgency=low
+
+  [ Chris Caputo ]
+  * bgpd: fix bgp_node locking issues
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Tue, 29 Mar 2011 11:13:53 -0700
+
 vyatta-quagga (0.99.17-15+mendocino3) unstable; urgency=low
 
   [ Paul Jakma ]
