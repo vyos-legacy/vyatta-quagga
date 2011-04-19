@@ -1,3 +1,37 @@
+vyatta-quagga (0.99.18-6) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * bgpd: refine the setting up of GTSM
+
+  [ Paul Jakma ]
+  * bgpd: Fix merge error in jhash commit
+
+  [ Stephen Hemminger ]
+  * Merge branch 'upstream' into napa
+
+  [ Paul Jakma ]
+  * doc: Add dependency for quagga.pdf make target
+  * Revert "bgpd: "Intern" communities in route maps"
+
+  [ Michael Lambert ]
+  * bgpd: fix memory leak when deleting a community
+
+  [ Paul Jakma ]
+  * ospf6d: fix crash if zebra_interface_state_read can't find interface
+
+  [ Ingo Flaschberger ]
+  * ospf6d: fix crash if zebra_interface_state_read can't find interface
+
+  [ Paul Jakma ]
+  * ospf: Fix OSPF API and ospf-te LSA refreshers to match recent API
+    change
+  * bgpd: trivial format / warning fixes
+  * zebra: trivial warning fix
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 19 Apr 2011 08:35:35 -0700
+
 vyatta-quagga (0.99.18-5) unstable; urgency=low
 
   * Fix read past end of address
