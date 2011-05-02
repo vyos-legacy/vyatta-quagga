@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.18-7) unstable; urgency=low
+
+  [ Dmitrij Tejblum ]
+  * ospf6d: copy "mtu-ignore" option from ospfd
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Mon, 02 May 2011 11:29:23 -0700
+
 vyatta-quagga (0.99.18-6) unstable; urgency=low
 
   [ Stephen Hemminger ]
