@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.18-7+napa1) unstable; urgency=low
+
+  * new branch
+
+ -- Deepti Kulkarni <deepti@vyatta.com>  Thu, 07 Jul 2011 20:50:36 -0700
+
 vyatta-quagga (0.99.18-7) unstable; urgency=low
 
   [ Dmitrij Tejblum ]
