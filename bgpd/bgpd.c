@@ -1612,8 +1612,12 @@ peer_group_delete (struct peer_group *group)
   for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
     {
       peer->group = NULL;
+      /* if password was set in peer group then delete it */
+      if (strcmp(peer->password, group->conf->password) == 0)
+      	XFREE (MTYPE_PEER_PASSWORD, peer->password);
       peer_delete (peer);
     }
+
   list_delete (group->peer);
 
   free (group->name);
@@ -1794,6 +1798,7 @@ peer_group_bind (struct bgp *bgp, union sockunion *su,
   return 0;
 }
 
+/* no_neighbor_set_peer_group */
 int
 peer_group_unbind (struct bgp *bgp, struct peer *peer,
 		   struct peer_group *group, afi_t afi, safi_t safi)
@@ -1807,6 +1812,10 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
   peer->af_group[afi][safi] = 0;
   peer->afc[afi][safi] = 0;
   peer_af_flag_reset (peer, afi, safi);
+
+  /* if password was set in peer group then delete it */
+  if (strcmp(peer->password, group->conf->password) == 0)
+      	XFREE (MTYPE_PEER_PASSWORD, peer->password);
 
   if (peer->rib[afi][safi])
     peer->rib[afi][safi] = NULL;
@@ -1833,7 +1842,7 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
     }
   else
     BGP_EVENT_ADD (peer, BGP_Stop);
-
+    
   return 0;
 }
 
