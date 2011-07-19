@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.18-7+napa2) unstable; urgency=low
+
+  * fix for bug 6433: BGP Peer configuration becomes out of sync with
+    routing engine when adding or deleting peers to peer-group
+
+ -- Robert Bays <robert@vyatta.com>  Mon, 18 Jul 2011 22:32:34 -0700
+
 vyatta-quagga (0.99.18-7+napa1) unstable; urgency=low
 
   * new branch
