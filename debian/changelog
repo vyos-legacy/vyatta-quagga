@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.18-10) unstable; urgency=low
+
+  * troubleshooting git
+
+ -- Robert Bays <robert@vyatta.com>  Tue, 19 Jul 2011 18:19:05 -0700
+
 vyatta-quagga (0.99.18-9) unstable; urgency=low
 
   * fix for bug 6433: BGP Peer configuration becomes out of sync with
