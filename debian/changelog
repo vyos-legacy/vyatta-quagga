@@ -1,3 +1,25 @@
+vyatta-quagga (0.99.18-12) unstable; urgency=low
+
+  [ David BÉRARD ]
+  * Fix ip_len byte order in DragonFly's raw socket
+
+  [ Paul Jakma ]
+  * bgpd: Rollback some of the changes made for invalid AS_PATH segment fix
+  * tests: Extend aspath_test.c with cases for invalid segments & attributes
+  * bgpd: Try fix extcommunity resource allocation probs, particularly with 'set extcom..'
+  * tools/multiple-bgpd.sh: set some community attributes to help test them
+  * bgpd: Implement revised error handling for partial optional/trans. attributes
+
+  [ Greg Troxel ]
+  * Omit --opaque-lsa from build (now default).
+
+  [ Roman Hoog Antink ]
+  * fix typo
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Tue, 09 Aug 2011 09:49:42 -0700
+
 vyatta-quagga (0.99.18-11) unstable; urgency=low
 
   * fix for bug 6433: BGP Peer configuration becomes out of sync with
