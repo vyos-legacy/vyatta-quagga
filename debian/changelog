@@ -1,3 +1,16 @@
+vyatta-quagga (0.99.18-13) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * Fix incorrect comparison in nexthop_changed
+
+  [ Rick Altherr ]
+  * Set scope for static routes
+
+  [ Stephen Hemminger ]
+  * Fix long lines in debian changelog
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 23 Aug 2011 14:19:03 -0700
+
 vyatta-quagga (0.99.18-12) unstable; urgency=low
 
   [ David BÉRARD ]
