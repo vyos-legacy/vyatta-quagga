@@ -385,7 +385,7 @@ nexthop_changed (const struct nexthop *nexthop, const struct nexthop *newhop)
     {
     case NEXTHOP_TYPE_IFINDEX:
     case NEXTHOP_TYPE_IFNAME:
-      return nexthop->rifindex == newhop->ifindex;
+      return nexthop->rifindex != newhop->ifindex;
 
     case NEXTHOP_TYPE_IPV4_IFNAME:
     case NEXTHOP_TYPE_IPV4_IFINDEX:
@@ -424,7 +424,7 @@ nexthop_active (int family,
   struct nexthop *newhop;
 
   if (set)
-      UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_RECURSIVE);
+    UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_RECURSIVE);
 
   nexthop_to_prefix(nexthop, &p);
 
