@@ -6,9 +6,11 @@ vyatta-quagga (0.99.18-12) unstable; urgency=low
   [ Paul Jakma ]
   * bgpd: Rollback some of the changes made for invalid AS_PATH segment fix
   * tests: Extend aspath_test.c with cases for invalid segments & attributes
-  * bgpd: Try fix extcommunity resource allocation probs, particularly with 'set extcom..'
+  * bgpd: Try fix extcommunity resource allocation probs, particularly with
+    'set extcom..'
   * tools/multiple-bgpd.sh: set some community attributes to help test them
-  * bgpd: Implement revised error handling for partial optional/trans. attributes
+  * bgpd: Implement revised error handling for partial optional/trans.
+    attributes
 
   [ Greg Troxel ]
   * Omit --opaque-lsa from build (now default).
