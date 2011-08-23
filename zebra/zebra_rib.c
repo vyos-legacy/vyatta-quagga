@@ -1618,6 +1618,7 @@ rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
   /* Allocate new rib structure. */
   rib = XCALLOC (MTYPE_RIB, sizeof (struct rib));
   rib->type = type;
+  rib->table = RT_TABLE_MAIN;
   rib->distance = distance;
   rib->flags = flags;
   rib->metric = metric;
@@ -2058,12 +2059,15 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
       switch (si->type)
         {
           case STATIC_IPV4_GATEWAY:
+	    rib->scope = RT_SCOPE_UNIVERSE;
             nexthop_ipv4_add (rib, &si->gate.ipv4, NULL);
             break;
           case STATIC_IPV4_IFNAME:
+	    rib->scope = RT_SCOPE_LINK;
             nexthop_ifname_add (rib, si->gate.ifname);
             break;
           case STATIC_IPV4_BLACKHOLE:
+	    rib->scope = RT_SCOPE_LINK;
             nexthop_blackhole_add (rib);
             break;
         }
@@ -2078,6 +2082,8 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
       rib->distance = si->distance;
       rib->metric = 0;
       rib->nexthop_num = 0;
+      rib->table = RT_TABLE_MAIN;
+      rib->scope = RT_SCOPE_UNIVERSE;
 
       switch (si->type)
         {
@@ -2085,9 +2091,11 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
             nexthop_ipv4_add (rib, &si->gate.ipv4, NULL);
             break;
           case STATIC_IPV4_IFNAME:
+	    rib->scope = RT_SCOPE_LINK;
             nexthop_ifname_add (rib, si->gate.ifname);
             break;
           case STATIC_IPV4_BLACKHOLE:
+	    rib->scope = RT_SCOPE_LINK;
             nexthop_blackhole_add (rib);
             break;
         }
