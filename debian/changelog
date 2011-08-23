@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.18-14) unstable; urgency=low
+
+  * Remove unneeded dependency on libutil.h
+  * Fix set-but-never-used warning in rt_netlink.c
+  * Fix ipv6 route scope
+
+ -- Stephen Hemminger <stephen.hemminger@vyatta.com>  Tue, 23 Aug 2011 15:05:48 -0700
+
 vyatta-quagga (0.99.18-13) unstable; urgency=low
 
   [ Stephen Hemminger ]
