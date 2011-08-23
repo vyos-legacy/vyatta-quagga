@@ -72,6 +72,7 @@ static const struct
   {ZEBRA_ROUTE_ISIS,    115},
   {ZEBRA_ROUTE_BGP,      20  /* IBGP is 200. */}
 };
+
 
 /* Vector for routing table.  */
 static vector vrf_vector;
@@ -2027,6 +2028,13 @@ rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
   return 0;
 }
 
+/* Route scope based on type of static route. */
+static const int static_ipv4_scope[] = {
+  [STATIC_IPV4_GATEWAY] = RT_SCOPE_UNIVERSE,
+  [STATIC_IPV4_IFNAME]  = RT_SCOPE_LINK,
+  [STATIC_IPV4_BLACKHOLE] = RT_SCOPE_LINK,
+};
+
 /* Install static route into rib. */
 static void
 static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
@@ -2056,18 +2064,17 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
       /* Same distance static route is there.  Update it with new
          nexthop. */
       route_unlock_node (rn);
+      rib->scope = static_ipv4_scope[si->type];
+
       switch (si->type)
         {
           case STATIC_IPV4_GATEWAY:
-	    rib->scope = RT_SCOPE_UNIVERSE;
             nexthop_ipv4_add (rib, &si->gate.ipv4, NULL);
             break;
           case STATIC_IPV4_IFNAME:
-	    rib->scope = RT_SCOPE_LINK;
             nexthop_ifname_add (rib, si->gate.ifname);
             break;
           case STATIC_IPV4_BLACKHOLE:
-	    rib->scope = RT_SCOPE_LINK;
             nexthop_blackhole_add (rib);
             break;
         }
@@ -2083,7 +2090,7 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
       rib->metric = 0;
       rib->nexthop_num = 0;
       rib->table = RT_TABLE_MAIN;
-      rib->scope = RT_SCOPE_UNIVERSE;
+      rib->scope = static_ipv4_scope[si->type];
 
       switch (si->type)
         {
@@ -2091,11 +2098,9 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
             nexthop_ipv4_add (rib, &si->gate.ipv4, NULL);
             break;
           case STATIC_IPV4_IFNAME:
-	    rib->scope = RT_SCOPE_LINK;
             nexthop_ifname_add (rib, si->gate.ifname);
             break;
           case STATIC_IPV4_BLACKHOLE:
-	    rib->scope = RT_SCOPE_LINK;
             nexthop_blackhole_add (rib);
             break;
         }
@@ -2593,6 +2598,14 @@ rib_delete_ipv6 (int type, int flags, struct prefix_ipv6 *p,
   return 0;
 }
 
+/* Route scope based on type of static route. */
+static const int static_ipv6_scope[] = {
+  [STATIC_IPV6_GATEWAY]		= RT_SCOPE_UNIVERSE,
+  [STATIC_IPV6_GATEWAY_IFNAME]	= RT_SCOPE_LINK,
+  [STATIC_IPV6_IFNAME] 		= RT_SCOPE_LINK,
+  [STATIC_IPV6_BLACKHOLE]	= RT_SCOPE_LINK,
+};
+
 /* Install static route into rib. */
 static void
 static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
@@ -2622,6 +2635,7 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
       /* Same distance static route is there.  Update it with new
          nexthop. */
       route_unlock_node (rn);
+      rib->scope = static_ipv6_scope[si->type];
 
       switch (si->type)
 	{
@@ -2648,6 +2662,8 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
       rib->distance = si->distance;
       rib->metric = 0;
       rib->nexthop_num = 0;
+      rib->table = RT_TABLE_MAIN;
+      rib->scope = static_ipv6_scope[si->type];
 
       switch (si->type)
 	{
