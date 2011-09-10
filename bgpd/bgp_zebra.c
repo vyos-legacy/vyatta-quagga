@@ -904,10 +904,10 @@ bgp_redistribute_set (struct bgp *bgp, afi_t afi, int type)
   bgp->redist[afi][type] = 1;
 
   /* Return if already redistribute flag is set. */
-  if (zclient->redist[type])
+  if (zclient->redist[type] > 1)
     return CMD_WARNING;
 
-  zclient->redist[type] = 1;
+  zclient->redist[type]++;
 
   /* Return if zebra connection is not established. */
   if (zclient->sock < 0)
@@ -974,7 +974,7 @@ bgp_redistribute_unset (struct bgp *bgp, afi_t afi, int type)
   /* Return if zebra connection is disabled. */
   if (! zclient->redist[type])
     return CMD_WARNING;
-  zclient->redist[type] = 0;
+  zclient->redist[type]--;
 
   if (bgp->redist[AFI_IP][type] == 0 
       && bgp->redist[AFI_IP6][type] == 0 
@@ -982,11 +982,11 @@ bgp_redistribute_unset (struct bgp *bgp, afi_t afi, int type)
     {
       /* Send distribute delete message to zebra. */
       if (BGP_DEBUG(zebra, ZEBRA))
-	zlog_debug("Zebra send: redistribute delete %s",
+	    zlog_debug("Zebra send: redistribute delete %s",
 		   zebra_route_string(type));
       zebra_redistribute_send (ZEBRA_REDISTRIBUTE_DELETE, zclient, type);
     }
-  
+
   /* Withdraw redistributed routes from current BGP's routing table. */
   bgp_redistribute_withdraw (bgp, afi, type);
 
