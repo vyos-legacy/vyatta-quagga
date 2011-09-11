@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.18-15) unstable; urgency=low
+
+  * fix for bug 6030: bgp redistribution doesn't work well when it's set
+    for ipv4 and ipv6
+
+ -- Robert Bays <robert@vyatta.com>  Sun, 11 Sep 2011 16:33:39 -0700
+
 vyatta-quagga (0.99.18-14) unstable; urgency=low
 
   * Remove unneeded dependency on libutil.h
