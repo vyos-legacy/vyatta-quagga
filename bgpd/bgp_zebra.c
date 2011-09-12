@@ -907,7 +907,7 @@ bgp_redistribute_set (struct bgp *bgp, afi_t afi, int type)
   if (zclient->redist[type] > 1)
     return CMD_WARNING;
 
-  if ((type == ZEBRA_ROUTE_CONNECT || type == ZEBRA_ROUTE_STATIC) &
+  if (type <= ZEBRA_ROUTE_STATIC &&
       bgp->redist[AFI_IP][type] && 
       bgp->redist[AFI_IP6][type]) 
   {
