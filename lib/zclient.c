@@ -954,7 +954,7 @@ zclient_redistribute (int command, struct zclient *zclient, int type)
 
   if (command == ZEBRA_REDISTRIBUTE_ADD) 
     {
-      if (zclient->redist[type] && (type != 1))
+      if (zclient->redist[type])
          return;
       zclient->redist[type] = 1;
     }
