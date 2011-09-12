@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.18-16) unstable; urgency=low
+
+  * Updated more Quagga compatible patch for bug 6030.
+  * Bug 6030: Add support for v4 and v6 redistribution for system,
+    static, and kernel as well as connected.
+
+ -- Robert Bays <robert@vyatta.com>  Mon, 12 Sep 2011 13:13:26 -0700
+
 vyatta-quagga (0.99.18-15) unstable; urgency=low
 
   * fix for bug 6030: bgp redistribution doesn't work well when it's set
