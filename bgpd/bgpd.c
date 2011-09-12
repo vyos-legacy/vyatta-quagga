@@ -1813,9 +1813,10 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
   peer->afc[afi][safi] = 0;
   peer_af_flag_reset (peer, afi, safi);
 
-  /* if password was set in peer group then delete it */
-  if (strcmp(peer->password, group->conf->password) == 0)
-      	XFREE (MTYPE_PEER_PASSWORD, peer->password);
+  /* if password was set by peer-group then delete it in peer*/
+  if (group->conf->password != NULL && 
+      strcmp(peer->password, group->conf->password) == 0)
+    XFREE (MTYPE_PEER_PASSWORD, peer->password);
 
   if (peer->rib[afi][safi])
     peer->rib[afi][safi] = NULL;
