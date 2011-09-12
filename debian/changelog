@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.18-17) unstable; urgency=low
+
+  * Bug 7493: bgpd crashed after a bgp neighbor with peer-group is
+    deleted/commited
+
+ -- Robert Bays <robert@vyatta.com>  Mon, 12 Sep 2011 15:38:39 -0700
+
 vyatta-quagga (0.99.18-16) unstable; urgency=low
 
   * Updated more Quagga compatible patch for bug 6030.
