@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.18-7+napa3) unstable; urgency=low
+
+  * fix for bug 6030: bgp redistribution doesn't work well when it's set
+    for ipv4 and ipv6
+  * Updated more Quagga compatible patch for bug 6030.
+  * Bug 6030: Add support for v4 and v6 redistribution for system,
+    static, and kernel as well as connected.
+  * Bug 7493: bgpd crashed after a bgp neighbor with peer-group is
+    deleted/commited
+
+ -- Robert Bays <robert@vyatta.com>  Fri, 16 Sep 2011 12:23:15 -0700
+
 vyatta-quagga (0.99.18-7+napa2) unstable; urgency=low
 
   * fix for bug 6433: BGP Peer configuration becomes out of sync with
