@@ -1,3 +1,29 @@
+vyatta-quagga (0.99.19-1) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * ospf6d: justify some ABR debug code
+  * ospf6d: move named constants to ospf6d.h
+  * ospf6d: add missing include
+
+  [ CROSS ]
+  * bgpd: CVE-2011-3327 (ext. comm. buffer overflow)
+  * ospfd: CVE-2011-3326 (uknown LSA type segfault)
+
+  [ Denis Ovsienko ]
+  * ospfd: CVE-2011-3325 part 1 (OSPF header underrun)
+  * ospfd: CVE-2011-3325 part 2 (OSPF pkt type segv)
+  * ospf6d: CVE-2011-3324 (DD LSA assertion)
+  * ospf6d: CVE-2011-3323 (fortify packet reception)
+  * release: 0.99.19
+
+  [ Stephen Hemminger ]
+  * sockopt: add support for IPv6 transport class option
+  * bgp: set IPv6 transport class
+  * ripng: set IPv6 transport class
+  * ospf6: set IPv6 transport class
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Mon, 26 Sep 2011 16:41:49 -0700
+
 vyatta-quagga (0.99.18-17) unstable; urgency=low
 
   * Bug 7493: bgpd crashed after a bgp neighbor with peer-group is
