@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.19-2) unstable; urgency=low
+
+  * bgpd: remove password set by peer group
+
+ -- Robert Bays <robert@vyatta.com>  Wed, 28 Sep 2011 14:13:11 -0700
+
 vyatta-quagga (0.99.19-1) unstable; urgency=low
 
   [ Denis Ovsienko ]
