@@ -1826,7 +1826,10 @@ peer_group_unbind (struct bgp *bgp, struct peer *peer,
       /* if password was set by peer-group then delete it in peer */
       if (group->conf->password != NULL &&
 	  strcmp(peer->password, group->conf->password) == 0)
-	XFREE (MTYPE_PEER_PASSWORD, peer->password);
+	{
+	  XFREE (MTYPE_PEER_PASSWORD, peer->password);
+	  peer->password = NULL;
+	}
     }
 
   if (peer->status == Established)
