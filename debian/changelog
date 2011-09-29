@@ -1,3 +1,23 @@
+vyatta-quagga (0.99.18-7+napa5) unstable; urgency=low
+
+  [ CROSS ]
+  * bgpd: CVE-2011-3327 (ext. comm. buffer overflow)
+  * ospfd: CVE-2011-3326 (uknown LSA type segfault)
+
+  [ Denis Ovsienko ]
+  * ospfd: CVE-2011-3325 part 1 (OSPF header underrun)
+  * ospfd: CVE-2011-3325 part 2 (OSPF pkt type segv)
+  * ospf6d: CVE-2011-3324 (DD LSA assertion)
+  * ospf6d: move named constants to ospf6d.h (cherry picked from commit ef95122eb214f80700fc79b4a95686eadfea859b)
+  * ospf6d: CVE-2011-3323 (fortify packet reception)
+
+  [ YAMAMOTO Shigeru ]
+  * ospfd: fix regression in recent commit
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 29 Sep 2011 10:06:48 -0700
+
 vyatta-quagga (0.99.18-7+napa4) unstable; urgency=low
 
   * bgpd: remove password set by peer group
