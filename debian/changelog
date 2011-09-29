@@ -1,3 +1,78 @@
+vyatta-quagga (0.99.20-1) unstable; urgency=low
+
+  [ Alexandre Chappuis ]
+  * doc: add missing word
+  * doc: BGP route-flap dampening
+  * ospfd: remove useless RFC1583 check
+
+  [ Dmitry Popov ]
+  * zebra: fix loss of metric for Linux routes
+
+  [ Stephen Hemminger ]
+  * configure: dismiss libutil.h
+
+  [ Fritz Reichmann ]
+  * isisd: fix crash on "no router isis" (BZ#536)
+  * isisd: raise hello rate for DIS (BZ#539)
+
+  [ Peter Szilagyi ]
+  * isisd: include hash.h, not hash.c
+
+  [ Denis Ovsienko ]
+  * configure: fix FreeBSD header detection (BZ#408)
+
+  [ Christian Hammers ]
+  * ospf6d: fix crash on filter-list handling (BZ#530)
+
+  [ Jon Andersson ]
+  * ospf6d: add lost lines to area config block
+
+  [ heasley ]
+  * bgpd: consistent log msg format (BZ#565)
+  * bgpd: add useful notification logs (BZ#616)
+
+  [ Denis Ovsienko ]
+  * bgpd: check LOCAL_PREF attribute flags (BZ#674)
+  * bgpd: check MULTI_EXIT_DISC attr flags (BZ#677)
+  * bgpd: check ATOMIC_AGGREGATE attr flags (BZ#678)
+  * configure: fix OpenPAM detection
+  * delete CVS keywords
+  * lib: remove unused variable
+  * ospf6d: spelling
+
+  [ Dmitrij Tejblum ]
+  * lib: simplify interface of setsockopt_multicast_ipv4().
+  * lib: fix omission in the previous commit to lib/sockopt.c
+  * lib: futher simplification of setsockopt_ipv4_multicast()
+  * lib: use "protocol-independed API" from RFC3678, if that is available
+
+  [ Denis Ovsienko ]
+  * ospfd: sizing macros cleanup
+  * ospf6d: address more trivial compiler warnings
+  * zebra: add missing includes
+  * ospfd: use existing macro for consistency
+  * bgpd: spelling
+  * bgpd: spelling
+  * ospfd: spelling
+
+  [ Dmitrij Tejblum ]
+  * configure: test for glibc backtrace even without glibc.
+  * lib: provide more information in case of failed LOOKUP.
+  * bgpd: don't be confused by "unspecific" subcode in the NOTIFY message.
+
+  [ Denis Ovsienko ]
+  * ospfd: remove unused macro
+
+  [ YAMAMOTO Shigeru ]
+  * ospfd: fix regression in recent commit
+
+  [ Denis Ovsienko ]
+  * release: 0.99.20
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 29 Sep 2011 10:05:16 -0700
+
 vyatta-quagga (0.99.19-4) unstable; urgency=low
 
   * Match Quagga submitted patch.
