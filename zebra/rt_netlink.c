@@ -849,8 +849,8 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
   if (tb[RTA_PREFSRC])
     src = RTA_DATA (tb[RTA_PREFSRC]);
 
-  if (tb[RTA_PRIORITY])
-    metric = *(uint32_t *) RTA_DATA(tb[RTA_PRIORITY]);
+  if (h->nlmsg_type == RTM_NEWROUTE && tb[RTA_PRIORITY])
+    metric = *(int *) RTA_DATA(tb[RTA_PRIORITY]);
 
   if (rtm->rtm_family == AF_INET)
     {
@@ -870,8 +870,8 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
         }
 
       if (h->nlmsg_type == RTM_NEWROUTE)
-        rib_add_ipv4 (ZEBRA_ROUTE_KERNEL, 0, &p, gate, src, index, table,
-		      metric, 0, rtm->rtm_scope, rtm->rtm_protocol);
+        rib_add_ipv4 (ZEBRA_ROUTE_KERNEL, 0, &p, gate, src, index, table, metric, 0,
+		      rtm->rtm_scope, rtm->rtm_protocol);
       else
         rib_delete_ipv4 (ZEBRA_ROUTE_KERNEL, 0, &p, gate, index, table);
     }
