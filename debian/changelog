@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.18-7+napa4) unstable; urgency=low
+
+  * bgpd: remove password set by peer group
+  * bgp: remove password set by peer group
+  * Match Quagga submitted patch.
+
+ -- Robert Bays <robert@vyatta.com>  Wed, 28 Sep 2011 16:33:37 -0700
+
 vyatta-quagga (0.99.18-7+napa3) unstable; urgency=low
 
   * fix for bug 6030: bgp redistribution doesn't work well when it's set
