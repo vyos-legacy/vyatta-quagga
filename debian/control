@@ -5,8 +5,8 @@ Maintainer: Vyatta Package Maintainers <maintainers@vyatta.com>
 Build-Depends: debhelper (>= 5), gawk,
  autotools-dev,
  libncurses5-dev,
- libreadline5-dev,
- libpam0g-dev,
+ libreadline-dev,
+ libpam0g-dev | libpam-dev,
  libcap-dev,
  po-debconf,
  libsnmp-dev
