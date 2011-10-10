@@ -1,3 +1,22 @@
+vyatta-quagga (0.99.20-2) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * bgpd: fix SAFI for for MPLS labeled VPN-IPv6
+  * bgpd: more SAFI fixes
+  * bgpd: rename SAFI 3 according to RFC4760
+  * bgpd: improve NEXT_HOP attribute checks (BZ#680)
+  * bgpd: add missing "partial" flag checks (BZ#676)
+  * bgpd: ignore 4 bits of attribute flags byte
+  * bgpd: improve attr flags checks
+  * bgpd: improve attr length error handling (BZ#679)
+
+  [ Peter Pentchev ]
+  * bgpd: fix parsing of graceful restart cap. (#663)
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Mon, 10 Oct 2011 08:35:14 -0700
+
 vyatta-quagga (0.99.20-1) unstable; urgency=low
 
   [ Alexandre Chappuis ]
