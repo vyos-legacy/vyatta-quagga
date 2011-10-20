@@ -1,3 +1,29 @@
+vyatta-quagga (0.99.20-4) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * bgpd: fix regression in improved attr flag checks
+
+  [ Stephen Hemminger ]
+  * IPv6 transport class suppport
+
+  [ Denis Ovsienko ]
+  * lib: compile even without IPV6_TCLASS
+
+  [ Dmitrij Tejblum ]
+  * vtysh: [build] silence preprocessor errors in some cases
+
+  [ Denis Ovsienko ]
+  * bgpd: check ORIGINATOR_ID attribute flags
+  * bgpd: check CLUSTER_LIST attribute flags
+  * bgpd: fix spelling of CLUSTER_LIST
+  * bgpd: add flag checks for MP_(UN)REACH_NLRI
+  * bgpd: use bgp_attr_malformed()
+  * bgpd: fix more regressions in attr flag checks
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 20 Oct 2011 09:22:24 -0700
+
 vyatta-quagga (0.99.20-3) unstable; urgency=low
 
   * fix build on Debian testing
