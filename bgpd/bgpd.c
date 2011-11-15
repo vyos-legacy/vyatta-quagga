@@ -1978,6 +1978,10 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 	}
     }
 
+  bgp = bgp_create (as, name);
+  bgp_router_id_set(bgp, &router_id_zebra);
+  *bgp_val = bgp;
+
   /* Create BGP server socket, if first instance.  */
   if (list_isempty(bm->bgp))
     {
@@ -1985,10 +1989,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 	return BGP_ERR_INVALID_VALUE;
     }
 
-  bgp = bgp_create (as, name);
   listnode_add (bm->bgp, bgp);
-  bgp_router_id_set(bgp, &router_id_zebra);
-  *bgp_val = bgp;
 
   return 0;
 }
@@ -4925,6 +4926,11 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
   if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT)
       && ! peer->af_group[afi][safi])
     vty_out (vty, " neighbor %s route-server-client%s", addr, VTY_NEWLINE);
+
+  /* Nexthop-local unchanged. */
+  if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_NEXTHOP_LOCAL_UNCHANGED)
+      && ! peer->af_group[afi][safi])
+    vty_out (vty, " neighbor %s nexthop-local unchanged%s", addr, VTY_NEWLINE);
 
   /* Allow AS in.  */
   if (peer_af_flag_check (peer, afi, safi, PEER_FLAG_ALLOWAS_IN))
