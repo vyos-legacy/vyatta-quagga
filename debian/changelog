@@ -1,3 +1,28 @@
+vyatta-quagga (0.99.20-5) unstable; urgency=low
+
+  [ Denis Ovsienko ]
+  * bgpd: check AGGREGATOR attr flags (BZ#678)
+  * bgpd: fix 2 more cases of length error reporting
+
+  [ Sergey Y. Afonin ]
+  * bgpd: revised fix to --dryrun (BZ#622)
+
+  [ Thomas Ries ]
+  * ospfd: improve fix to CVE-2011-3326 (BZ#586)
+
+  [ Chris Luke ]
+  * bgpd: justify capabilities for TOS setting
+
+  [ Dylan Hall ]
+  * bgpd: fix "nexthop-local unchanged" (BZ#350)
+
+  [ Jon Anderson ]
+  * Fix delete of ipv6 interface route
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Tue, 15 Nov 2011 14:08:56 -0800
+
 vyatta-quagga (0.99.20-4) unstable; urgency=low
 
   [ Denis Ovsienko ]
