@@ -1,3 +1,31 @@
+vyatta-quagga (0.99.20-6) unstable; urgency=low
+
+  [ Dmitrij Tejblum ]
+  * ospf6d: check MTU with message header size in mind
+
+  [ David Lamparter ]
+  * lib: prefix2sockunion, prefix_common_bits helper functions
+  * bgpd: fix update-source for IPv6 (BZ#548)
+  * bgpd: remove unused function bgp_bind_address
+
+  [ Roderick Schertler ]
+  * doc: rectify "match ip next-hop" in ripd (BZ#537)
+
+  [ Stephen Hemminger ]
+  * bgp: cleanup privs on termination
+  * sockunion: fix memory leak on connect() failure
+  * zebra: fix warnings in forward proc
+  * ospf6: fix compile warning from falling off end of main
+  * if: fix compile warnings from set-never-used
+  * smux: fix compiler warnings
+
+  [ Oleg A. Arkhangelsky ]
+  * bgpd: fix extra attribuge leak
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Fri, 02 Dec 2011 23:53:45 -0800
+
 vyatta-quagga (0.99.20-5) unstable; urgency=low
 
   [ Denis Ovsienko ]
