@@ -36,4 +36,5 @@ build
 *~
 *.loT
 m4/*.m4
-
+.pc
+patches
