@@ -1,3 +1,14 @@
+vyatta-quagga (0.99.20-7+oxnard1) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * filter: call delete hook before freeing access list
+  * 0.99.20-7
+  * fix set never used warnings
+
+  [ Deepti Kulkarni ]
+
+ -- Deepti Kulkarni <deepti@vyatta.com>  Sat, 03 Mar 2012 02:23:52 -0800
+
 vyatta-quagga (0.99.20-7) unstable; urgency=low
 
   * filter: call delete hook before freeing access list
