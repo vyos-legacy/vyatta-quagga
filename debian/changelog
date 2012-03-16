@@ -1,3 +1,27 @@
+vyatta-quagga (0.99.20.1-1) unstable; urgency=low
+
+  [ Paul Jakma ]
+  * bgpd: Open option parse errors don't NOTIFY, resulting in abort & DoS
+
+  [ Denis Ovsienko ]
+  * ospfd: use LOOKUP() for ospf_packet_type_str
+  * ospfd: fix ospf_packet_add_top() to use LOOKUP()
+  * ospfd: introduce ospf_packet_minlen[] (BZ#705)
+  * ospfd: review ospf_check_auth()
+  * ospfd: review ospf_check_md5_digest()
+  * ospfd: introduce ospf_lsa_minlen[] (BZ#705)
+  * ospfd: fix packet length check for auth/LLS cases
+  * ospfd: introduce ospf_auth_type_str[]
+  * ospfd: bring ospf_check_auth() into focus
+  * ospfd: reduce ospf_verify_header()
+
+  [ David Lamparter ]
+  * release: 0.99.20.1
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Fri, 16 Mar 2012 11:37:50 -0700
+
 vyatta-quagga (0.99.20-8) unstable; urgency=low
 
   [ Stephen Hemminger ]
