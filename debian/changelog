@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-1+oxnard2) unstable; urgency=low
+
+  * BGP router filter related fix
+
+ -- Susheela Vaidya <susheela@debiansv.vyatta.com>  Mon, 21 May 2012 17:02:36 -0700
+
 vyatta-quagga (0.99.20.1-1+oxnard1) unstable; urgency=low
 
   [ Paul Jakma ]
