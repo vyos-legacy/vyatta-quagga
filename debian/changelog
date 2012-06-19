@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.18-7+napa6) unstable; urgency=low
+
+  * Bug 8149 - Patch for CVE-2012-1820
+  * Bug 8150 - fix for CVE-2012-0255
+
+ -- Susheela Vaidya <susheela@debiansv.vyatta.com>  Mon, 18 Jun 2012 17:38:34 -0700
+
 vyatta-quagga (0.99.18-7+napa5) unstable; urgency=low
 
   [ CROSS ]
