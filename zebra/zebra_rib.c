@@ -112,7 +112,7 @@ vrf_init (void)
   struct vrf *default_table;
 
   /* Allocate VRF vector.  */
-  vrf_vector = vector_init (1);
+  vrf_vector = vector_init (256);
 
   /* Allocate default main table.  */
   default_table = vrf_alloc ("Default-IP-Routing-Table");
@@ -2044,9 +2044,11 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
   struct route_table *table;
 
   /* Lookup table.  */
-  table = vrf_table (AFI_IP, SAFI_UNICAST, 0);
-  if (! table)
+  table = vrf_table (AFI_IP, SAFI_UNICAST, si->table);
+  if (! table) {
+    zlog_debug("static_install_ipv4: no stable %d", si->table);
     return;
+  }
 
   /* Lookup existing route */
   rn = route_node_get (table, p);
@@ -2089,7 +2091,7 @@ static_install_ipv4 (struct prefix *p, struct static_ipv4 *si)
       rib->distance = si->distance;
       rib->metric = 0;
       rib->nexthop_num = 0;
-      rib->table = RT_TABLE_MAIN;
+      rib->table = si->table;
       rib->scope = static_ipv4_scope[si->type];
 
       switch (si->type)
@@ -2140,9 +2142,11 @@ static_uninstall_ipv4 (struct prefix *p, struct static_ipv4 *si)
   struct route_table *table;
 
   /* Lookup table.  */
-  table = vrf_table (AFI_IP, SAFI_UNICAST, 0);
-  if (! table)
+  table = vrf_table (AFI_IP, SAFI_UNICAST, si->table);
+  if (! table) {
+    zlog_debug("static_install_ipv4: no stable %d", si->table);
     return;
+  }
   
   /* Lookup existing route with type and distance. */
   rn = route_node_lookup (table, p);
@@ -2203,12 +2207,23 @@ static_add_ipv4 (struct prefix *p, struct in_addr *gate, const char *ifname,
   struct static_ipv4 *cp;
   struct static_ipv4 *update = NULL;
   struct route_table *stable;
+  struct vrf *policy_table;
 
   /* Lookup table.  */
   stable = vrf_static_table (AFI_IP, SAFI_UNICAST, vrf_id);
-  if (! stable)
-    return -1;
-  
+  if (! stable) {
+    zlog_debug("static_add_ipv4: allocating policy table");
+
+    /* Allocate policy table.  */
+    policy_table = vrf_alloc (NULL);
+    vector_set_index (vrf_vector, vrf_id, policy_table);
+    stable = vrf_static_table (AFI_IP, SAFI_UNICAST, vrf_id);
+    if (! stable) {
+      zlog_debug("static_add_ipv4: unable to allocate policy table");
+      return -1;
+    }
+  }
+
   /* Lookup static route prefix. */
   rn = route_node_get (stable, p);
 
@@ -2247,6 +2262,7 @@ static_add_ipv4 (struct prefix *p, struct in_addr *gate, const char *ifname,
   si->type = type;
   si->distance = distance;
   si->flags = flags;
+  si->table = vrf_id;
 
   if (gate)
     si->gate.ipv4 = *gate;
@@ -2934,7 +2950,12 @@ static void rib_update_table (struct route_table *table)
 void
 rib_update (void)
 {
-  rib_update_table (vrf_table (AFI_IP, SAFI_UNICAST, 0));
+  struct route_table *rt;
+  int table;
+
+  for (table = 0; table < 256; table++) {
+    rib_update_table (vrf_table (AFI_IP, SAFI_UNICAST, table));
+  }
 
 #ifdef HAVE_IPV6
   rib_update_table (vrf_table (AFI_IP6, SAFI_UNICAST, 0));
