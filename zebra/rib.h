@@ -120,6 +120,9 @@ struct static_ipv4
   /* Administrative distance. */
   u_char distance;
 
+  /* Route Table */
+  u_char table;
+
   /* Flag for this static route's type. */
   u_char type;
 #define STATIC_IPV4_GATEWAY     1
