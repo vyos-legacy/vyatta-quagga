@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-3) unstable; urgency=low
+
+  * initial support for pbr functionality.  ipv4 static only.
+
+ -- Robert Bays <robert@vyatta.com>  Wed, 05 Sep 2012 14:22:37 -0700
+
 vyatta-quagga (0.99.20.1-2) unstable; urgency=low
 
   [ Susheela Vaidya ]
