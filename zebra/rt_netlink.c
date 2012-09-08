@@ -626,9 +626,14 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
   if (ifa->ifa_family == AF_INET6)
     {
       if (h->nlmsg_type == RTM_NEWADDR)
-	connected_add_ipv6 (ifp, flags,
+      {
+	if (IN6_IS_ADDR_LINKLOCAL ((struct in6_addr *) addr))
+	  return 0;
+	else
+	  connected_add_ipv6 (ifp, flags,
 			    (struct in6_addr *) addr, ifa->ifa_prefixlen,
 			    (struct in6_addr *) broad, label);
+      }
       else
         connected_delete_ipv6 (ifp,
 			       (struct in6_addr *) addr, ifa->ifa_prefixlen,
