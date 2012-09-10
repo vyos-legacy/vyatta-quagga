@@ -998,6 +998,11 @@ rib_uninstall_kernel (struct route_node *rn, struct rib *rib)
       break;
 #ifdef HAVE_IPV6
     case AF_INET6:
+      if (IN6_IS_ADDR_LINKLOCAL(&rn->p.u.prefix6))
+      {
+        /* Don't uninstall LINKLOCAL routes */
+	break;
+      }
       ret = kernel_delete_ipv6 (&rn->p, rib);
       break;
 #endif /* HAVE_IPV6 */
