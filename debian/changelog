@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-6) unstable; urgency=low
+
+  * BGP multipath functionality related commit.
+
+ -- susheela <susheela.vaidya@vyatta.com>  Wed, 12 Sep 2012 14:07:45 -0700
+
 vyatta-quagga (0.99.20.1-5) unstable; urgency=low
 
   * Revert "Bugfix 6087: Ignore IPv6 linklocal routes in zebra, let
