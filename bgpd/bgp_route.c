@@ -54,6 +54,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_advertise.h"
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
+#include "bgpd/bgp_mpath.h"
 
 /* Extern from bgp_dump.c */
 extern const char *bgp_origin_str[];
@@ -140,6 +141,7 @@ bgp_info_free (struct bgp_info *binfo)
     bgp_attr_unintern (&binfo->attr);
   
   bgp_info_extra_free (&binfo->extra);
+  bgp_info_mpath_free (&binfo->mpath);
 
   peer_unlock (binfo->peer); /* bgp_info peer reference */
 
@@ -176,6 +178,7 @@ bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri)
   else
     rn->info = ri->next;
   
+  bgp_info_mpath_dequeue (ri);
   bgp_info_unlock (ri);
   bgp_unlock_node (rn);
 }
@@ -282,7 +285,8 @@ bgp_med_value (struct attr *attr, struct bgp *bgp)
 
 /* Compare two bgp route entity.  br is preferable then return 1. */
 static int
-bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
+bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist,
+	      int *paths_eq)
 {
   u_int32_t new_pref;
   u_int32_t exist_pref;
@@ -297,6 +301,9 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
   int internal_as_route = 0;
   int confed_as_route = 0;
   int ret;
+  uint32_t newm, existm;
+
+  *paths_eq = 0;
 
   /* 0. Null check. */
   if (new == NULL)
@@ -420,18 +427,32 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist)
     return 0;
 
   /* 8. IGP metric check. */
-  if (new->extra || exist->extra)
-    {
-      uint32_t newm = (new->extra ? new->extra->igpmetric : 0);
-      uint32_t existm = (exist->extra ? exist->extra->igpmetric : 0);
-      
-      if (newm < existm)
-        return 1;
-      if (newm > existm)
-        return 0;
-    }
+  newm = (new->extra ? new->extra->igpmetric : 0);
+  existm = (exist->extra ? exist->extra->igpmetric : 0);
+  if (newm < existm)
+    ret = 1;
+  if (newm > existm)
+    ret = 0;
 
   /* 9. Maximum path check. */
+  if (newm == existm)
+    {
+      if ((peer_sort (new->peer) == BGP_PEER_IBGP))
+	{
+	  if (aspath_cmp (new->attr->aspath, exist->attr->aspath))
+	    *paths_eq = 1;
+	}
+      else if (new->peer->as == exist->peer->as)
+	*paths_eq = 1;
+    }
+  else
+    {
+      /*
+       * TODO: If unequal cost ibgp multipath is enabled we can
+       * mark the paths as equal here instead of returning
+       */
+      return ret;
+    }
 
   /* 10. If both paths are external, prefer the path that was received
      first (the oldest one).  This step minimizes route-flap, since a
@@ -730,10 +751,12 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
   struct bgp *bgp;
   int transparent;
   int reflect;
+  struct attr *riattr;
 
   from = ri->peer;
   filter = &peer->filter[afi][safi];
   bgp = peer->bgp;
+  riattr = bgp_info_mpath_count (ri) ? bgp_info_mpath_attr (ri) : ri->attr;
   
   if (DISABLE_BGP_ANNOUNCE)
     return 0;
@@ -748,11 +771,11 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 
   /* If peer's id and route's nexthop are same. draft-ietf-idr-bgp4-23 5.1.3 */
   if (p->family == AF_INET
-      && IPV4_ADDR_SAME(&peer->remote_id, &ri->attr->nexthop))
+      && IPV4_ADDR_SAME(&peer->remote_id, &riattr->nexthop))
     return 0;
 #ifdef HAVE_IPV6
   if (p->family == AF_INET6
-     && IPV6_ADDR_SAME(&peer->remote_id, &ri->attr->nexthop))
+     && IPV6_ADDR_SAME(&peer->remote_id, &riattr->nexthop))
     return 0;
 #endif
 
@@ -780,14 +803,14 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
     transparent = 0;
 
   /* If community is not disabled check the no-export and local. */
-  if (! transparent && bgp_community_filter (peer, ri->attr)) 
+  if (! transparent && bgp_community_filter (peer, riattr))
     return 0;
 
   /* If the attribute has originator-id and it is same as remote
      peer's id. */
-  if (ri->attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
+  if (riattr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
     {
-      if (IPV4_ADDR_SAME (&peer->remote_id, &ri->attr->extra->originator_id))
+      if (IPV4_ADDR_SAME (&peer->remote_id, &riattr->extra->originator_id))
 	{
 	  if (BGP_DEBUG (filter, FILTER))  
 	    zlog (peer->log, LOG_DEBUG,
@@ -810,7 +833,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
       }
 
   /* Output filter check. */
-  if (bgp_output_filter (peer, p, ri->attr, afi, safi) == FILTER_DENY)
+  if (bgp_output_filter (peer, p, riattr, afi, safi) == FILTER_DENY)
     {
       if (BGP_DEBUG (filter, FILTER))
 	zlog (peer->log, LOG_DEBUG,
@@ -823,7 +846,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 
 #ifdef BGP_SEND_ASPATH_CHECK
   /* AS path loop check. */
-  if (aspath_loop_check (ri->attr->aspath, peer->as))
+  if (aspath_loop_check (riattr->aspath, peer->as))
     {
       if (BGP_DEBUG (filter, FILTER))  
         zlog (peer->log, LOG_DEBUG, 
@@ -836,7 +859,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
   /* If we're a CONFED we need to loop check the CONFED ID too */
   if (CHECK_FLAG(bgp->config, BGP_CONFIG_CONFEDERATION))
     {
-      if (aspath_loop_check(ri->attr->aspath, bgp->confed_id))
+      if (aspath_loop_check(riattr->aspath, bgp->confed_id))
 	{
 	  if (BGP_DEBUG (filter, FILTER))  
 	    zlog (peer->log, LOG_DEBUG, 
@@ -877,7 +900,7 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
     }
   
   /* For modify attribute, copy it to temporary structure. */
-  bgp_attr_dup (attr, ri->attr);
+  bgp_attr_dup (attr, riattr);
   
   /* If local-preference is not set. */
   if ((peer_sort (peer) == BGP_PEER_IBGP 
@@ -1036,10 +1059,12 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
   struct bgp_info info;
   struct peer *from;
   struct bgp *bgp;
+  struct attr *riattr;
 
   from = ri->peer;
   filter = &rsclient->filter[afi][safi];
   bgp = rsclient->bgp;
+  riattr = bgp_info_mpath_count (ri) ? bgp_info_mpath_attr (ri) : ri->attr;
 
   if (DISABLE_BGP_ANNOUNCE)
     return 0;
@@ -1067,10 +1092,10 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
 
   /* If the attribute has originator-id and it is same as remote
      peer's id. */
-  if (ri->attr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
+  if (riattr->flag & ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID))
     {
       if (IPV4_ADDR_SAME (&rsclient->remote_id, 
-                          &ri->attr->extra->originator_id))
+                          &riattr->extra->originator_id))
         {
          if (BGP_DEBUG (filter, FILTER))
            zlog (rsclient->log, LOG_DEBUG,
@@ -1093,7 +1118,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
       }
 
   /* Output filter check. */
-  if (bgp_output_filter (rsclient, p, ri->attr, afi, safi) == FILTER_DENY)
+  if (bgp_output_filter (rsclient, p, riattr, afi, safi) == FILTER_DENY)
     {
       if (BGP_DEBUG (filter, FILTER))
        zlog (rsclient->log, LOG_DEBUG,
@@ -1106,7 +1131,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
 
 #ifdef BGP_SEND_ASPATH_CHECK
   /* AS path loop check. */
-  if (aspath_loop_check (ri->attr->aspath, rsclient->as))
+  if (aspath_loop_check (riattr->aspath, rsclient->as))
     {
       if (BGP_DEBUG (filter, FILTER))
         zlog (rsclient->log, LOG_DEBUG,
@@ -1117,7 +1142,7 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
 #endif /* BGP_SEND_ASPATH_CHECK */
 
   /* For modify attribute, copy it to temporary structure. */
-  bgp_attr_dup (attr, ri->attr);
+  bgp_attr_dup (attr, riattr);
 
   /* next-hop-set */
   if ((p->family == AF_INET && attr->nexthop.s_addr == 0)
@@ -1233,7 +1258,9 @@ struct bgp_info_pair
 };
 
 static void
-bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *result)
+bgp_best_selection (struct bgp *bgp, struct bgp_node *rn,
+		    struct bgp_maxpaths_cfg *mpath_cfg,
+		    struct bgp_info_pair *result)
 {
   struct bgp_info *new_select;
   struct bgp_info *old_select;
@@ -1241,7 +1268,13 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
   struct bgp_info *ri1;
   struct bgp_info *ri2;
   struct bgp_info *nextri = NULL;
-  
+  int paths_eq, do_mpath;
+  struct list mp_list;
+
+  bgp_mp_list_init (&mp_list);
+  do_mpath = (mpath_cfg->maxpaths_ebgp != BGP_DEFAULT_MAXPATHS ||
+	      mpath_cfg->maxpaths_ibgp != BGP_DEFAULT_MAXPATHS);
+
   /* bgp deterministic-med */
   new_select = NULL;
   if (bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
@@ -1253,6 +1286,9 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
 	  continue;
 
 	new_select = ri1;
+	if (do_mpath)
+	  bgp_mp_list_add (&mp_list, ri1);
+	old_select = CHECK_FLAG (ri1->flags, BGP_INFO_SELECTED) ? ri1 : NULL;
 	if (ri1->next)
 	  for (ri2 = ri1->next; ri2; ri2 = ri2->next)
 	    {
@@ -1265,17 +1301,30 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
 		  || aspath_cmp_left_confed (ri1->attr->aspath,
 					     ri2->attr->aspath))
 		{
-		  if (bgp_info_cmp (bgp, ri2, new_select))
+		  if (CHECK_FLAG (ri2->flags, BGP_INFO_SELECTED))
+		    old_select = ri2;
+		  if (bgp_info_cmp (bgp, ri2, new_select, &paths_eq))
 		    {
 		      bgp_info_unset_flag (rn, new_select, BGP_INFO_DMED_SELECTED);
 		      new_select = ri2;
+		      if (do_mpath && !paths_eq)
+			{
+			  bgp_mp_list_clear (&mp_list);
+			  bgp_mp_list_add (&mp_list, ri2);
+			}
 		    }
+
+		  if (do_mpath && paths_eq)
+		    bgp_mp_list_add (&mp_list, ri2);
 
 		  bgp_info_set_flag (rn, ri2, BGP_INFO_DMED_CHECK);
 		}
 	    }
 	bgp_info_set_flag (rn, new_select, BGP_INFO_DMED_CHECK);
 	bgp_info_set_flag (rn, new_select, BGP_INFO_DMED_SELECTED);
+
+	bgp_info_mpath_update (rn, new_select, old_select, &mp_list, mpath_cfg);
+	bgp_mp_list_clear (&mp_list);
       }
 
   /* Check old selected route and new selected route. */
@@ -1307,14 +1356,37 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn, struct bgp_info_pair *
       bgp_info_unset_flag (rn, ri, BGP_INFO_DMED_CHECK);
       bgp_info_unset_flag (rn, ri, BGP_INFO_DMED_SELECTED);
 
-      if (bgp_info_cmp (bgp, ri, new_select))
-	new_select = ri;
+      if (bgp_info_cmp (bgp, ri, new_select, &paths_eq))
+	{
+	  if (do_mpath && bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
+	    bgp_mp_dmed_deselect (new_select);
+
+	  new_select = ri;
+
+	  if (do_mpath && !paths_eq)
+	    {
+	      bgp_mp_list_clear (&mp_list);
+	      bgp_mp_list_add (&mp_list, ri);
+	    }
+	}
+      else if (do_mpath && bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
+	bgp_mp_dmed_deselect (ri);
+
+      if (do_mpath && paths_eq)
+	bgp_mp_list_add (&mp_list, ri);
     }
     
-    result->old = old_select;
-    result->new = new_select;
 
-    return;
+  if (!bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
+    bgp_info_mpath_update (rn, new_select, old_select, &mp_list, mpath_cfg);
+
+  bgp_info_mpath_aggregate_update (new_select, old_select);
+  bgp_mp_list_clear (&mp_list);
+
+  result->old = old_select;
+  result->new = new_select;
+
+  return;
 }
 
 static int
@@ -1388,7 +1460,7 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   struct peer *rsclient = rn->table->owner;
   
   /* Best path selection. */
-  bgp_best_selection (bgp, rn, &old_and_new);
+  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new);
   new_select = old_and_new.new;
   old_select = old_and_new.old;
 
@@ -1408,7 +1480,8 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
               {
                 bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
                 bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
-              }
+		UNSET_FLAG (new_select->flags, BGP_INFO_MULTIPATH_CHG);
+             }
 
             bgp_process_announce_selected (rsclient, new_select, rn,
                                            afi, safi);
@@ -1422,6 +1495,7 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
 	{
 	  bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
 	  bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
+	  UNSET_FLAG (new_select->flags, BGP_INFO_MULTIPATH_CHG);
 	}
       bgp_process_announce_selected (rsclient, new_select, rn, afi, safi);
     }
@@ -1449,7 +1523,7 @@ bgp_process_main (struct work_queue *wq, void *data)
   struct peer *peer;
   
   /* Best path selection. */
-  bgp_best_selection (bgp, rn, &old_and_new);
+  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new);
   old_select = old_and_new.old;
   new_select = old_and_new.new;
 
@@ -1458,9 +1532,11 @@ bgp_process_main (struct work_queue *wq, void *data)
     {
       if (! CHECK_FLAG (old_select->flags, BGP_INFO_ATTR_CHANGED))
         {
-          if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED))
+          if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED) ||
+	      CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG))
             bgp_zebra_announce (p, old_select, bgp);
           
+	  UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
           return WQ_SUCCESS;
         }
@@ -1472,6 +1548,7 @@ bgp_process_main (struct work_queue *wq, void *data)
     {
       bgp_info_set_flag (rn, new_select, BGP_INFO_SELECTED);
       bgp_info_unset_flag (rn, new_select, BGP_INFO_ATTR_CHANGED);
+      UNSET_FLAG (new_select->flags, BGP_INFO_MULTIPATH_CHG);
     }
 
 
@@ -5900,6 +5977,11 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
       if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ATOMIC_AGGREGATE))
 	vty_out (vty, ", atomic-aggregate");
 	  
+      if (CHECK_FLAG (binfo->flags, BGP_INFO_MULTIPATH) ||
+	  (CHECK_FLAG (binfo->flags, BGP_INFO_SELECTED) &&
+	   bgp_info_mpath_count (binfo)))
+	vty_out (vty, ", multipath");
+
       if (CHECK_FLAG (binfo->flags, BGP_INFO_SELECTED))
 	vty_out (vty, ", best");
 
