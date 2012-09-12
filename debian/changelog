@@ -1,3 +1,24 @@
+vyatta-quagga (0.99.20.1-5) unstable; urgency=low
+
+  * Revert "Bugfix 6087: Ignore IPv6 linklocal routes in zebra, let
+    Linux manage them on its own"
+  * Don't remove ipv6 link-local routes from the kernel
+
+ -- John Southworth <john.southworth@vyatta.com>  Mon, 10 Sep 2012 14:00:49 -0700
+
+vyatta-quagga (0.99.20.1-4) unstable; urgency=low
+
+  * Bugfix 6087: Ignore IPv6 linklocal routes in zebra, let Linux manage
+    them on its own
+
+ -- John Southworth <john.southworth@vyatta.com>  Fri, 07 Sep 2012 17:23:42 -0700
+
+vyatta-quagga (0.99.20.1-3) unstable; urgency=low
+
+  * initial support for pbr functionality.  ipv4 static only.
+
+ -- Robert Bays <robert@vyatta.com>  Wed, 05 Sep 2012 14:22:37 -0700
+
 vyatta-quagga (0.99.20.1-2) unstable; urgency=low
 
   [ Susheela Vaidya ]
