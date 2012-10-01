@@ -2825,14 +2825,17 @@ static_add_ipv6 (struct prefix *p, struct in6_addr *gate, const char *ifname,
   for (si = rn->info; si; si = si->next)
     {
       if (type == si->type
-	  && (! gate || IPV6_ADDR_SAME (gate, &si->ipv6))
-	  && (! ifname || strcmp (ifname, si->ifname) == 0))
-	{
-	  route_unlock_node (rn);
-	  return 0;
-	}
-      else
-	update = si;
+              && (! gate || IPV6_ADDR_SAME (gate, &si->ipv6))
+              && (! ifname || strcmp (ifname, si->ifname) == 0))
+      {
+          if (distance == si->distance)
+          {
+              route_unlock_node (rn);
+              return 0;
+          }
+          else
+              update = si;
+      }
     }
 
   /* Distance changed.  */
