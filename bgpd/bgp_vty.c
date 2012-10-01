@@ -6893,11 +6893,12 @@ bgp_show_summary (struct vty *vty, struct bgp *bgp, int afi, int safi)
                        "BGP router identifier %s, local AS number %u%s",
                        inet_ntoa (bgp->router_id), bgp->as, VTY_NEWLINE);
 
-              /* vty_out (vty,
-                       "Max multipaths: ebgp %u ibgp %u%s",
-                       bgp->maxpaths[afi][safi].maxpaths_ebgp,
-                       bgp->maxpaths[afi][safi].maxpaths_ibgp, 
-                       VTY_NEWLINE); */ 
+              if (afi == AFI_IP && safi == SAFI_UNICAST)
+                 vty_out (vty,
+                          "IPv4 Unicast - max multipaths: ebgp %u ibgp %u%s",
+                          bgp->maxpaths[afi][safi].maxpaths_ebgp,
+                          bgp->maxpaths[afi][safi].maxpaths_ibgp, 
+                          VTY_NEWLINE);
 
               ents = bgp_table_count (bgp->rib[afi][safi]);
               vty_out (vty, "RIB entries %ld, using %s of memory%s", ents,
