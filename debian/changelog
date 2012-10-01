@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.20.1-8) unstable; urgency=low
+
+  * Bug 5905: Introduced a check to test if the new distance is same as
+    existing one
+
+ -- Bharat <bharat.bandaru@vyatta.com>  Mon, 01 Oct 2012 12:00:42 -0700
+
 vyatta-quagga (0.99.20.1-7) unstable; urgency=low
 
   * Adding multipath info to 'sh ip bgp summary'.
