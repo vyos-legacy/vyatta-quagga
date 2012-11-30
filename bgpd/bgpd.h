@@ -59,7 +59,7 @@ struct bgp_master
 #define BGP_OPT_NO_FIB                   (1 << 0)
 #define BGP_OPT_MULTIPLE_INSTANCE        (1 << 1)
 #define BGP_OPT_CONFIG_CISCO             (1 << 2)
-#define BGP_OPT_IMPORT_CHECK		 (1 << 3)
+#define BGP_OPT_NO_LISTEN                (1 << 3)
 };
 
 /* BGP instance structure.  */
@@ -166,8 +166,8 @@ struct bgp
 
   /* Maximum-paths configuration */
   struct bgp_maxpaths_cfg {
-    u_int32_t maxpaths_ebgp;
-    u_int32_t maxpaths_ibgp;
+    u_int16_t maxpaths_ebgp;
+    u_int16_t maxpaths_ibgp;
   } maxpaths[AFI_MAX][SAFI_MAX];
 };
 
@@ -260,6 +260,16 @@ struct bgp_filter
   } usmap;
 };
 
+/* IBGP/EBGP identifier.  We also have a CONFED peer, which is to say,
+   a peer who's AS is part of our Confederation.  */
+typedef enum
+{
+  BGP_PEER_IBGP = 1,
+  BGP_PEER_EBGP,
+  BGP_PEER_INTERNAL,
+  BGP_PEER_CONFED,
+} bgp_peer_sort_t;
+
 /* BGP neighbor structure. */
 struct peer
 {
@@ -282,6 +292,8 @@ struct peer
 
   /* Peer's local AS number. */
   as_t local_as;
+
+  bgp_peer_sort_t sort;
 
   /* Peer's Change local AS number. */
   as_t change_local_as;
@@ -750,16 +762,6 @@ struct bgp_nlri
 /* Check AS path loop when we send NLRI.  */
 /* #define BGP_SEND_ASPATH_CHECK */
 
-/* IBGP/EBGP identifier.  We also have a CONFED peer, which is to say,
-   a peer who's AS is part of our Confederation.  */
-enum
-{
-  BGP_PEER_IBGP,
-  BGP_PEER_EBGP,
-  BGP_PEER_INTERNAL,
-  BGP_PEER_CONFED
-};
-
 /* Flag for peer_clear_soft().  */
 enum bgp_clear_type
 {
@@ -832,32 +834,13 @@ extern struct peer_group *peer_group_lookup (struct bgp *, const char *);
 extern struct peer_group *peer_group_get (struct bgp *, const char *);
 extern struct peer *peer_lookup_with_open (union sockunion *, as_t, struct in_addr *,
 				    int *);
-extern void peer_free (struct peer *peer);
-extern int peer_sort (struct peer *peer);
+extern struct peer *peer_lock (struct peer *);
+extern struct peer *peer_unlock (struct peer *);
+extern bgp_peer_sort_t peer_sort (struct peer *peer);
 extern int peer_active (struct peer *);
 extern int peer_active_nego (struct peer *);
 extern struct peer *peer_create_accept (struct bgp *);
 extern char *peer_uptime (time_t, char *, size_t);
-
-static inline struct peer *
-peer_lock (struct peer *peer)
-{
-  assert (peer && (peer->lock >= 0));
-  assert (peer->status != Deleted);
-
-  peer->lock++;
-  return peer;
-}
-
-static inline void
-peer_unlock (struct peer *peer)
-{
-  assert (peer && (peer->lock > 0));
-
-  if (--peer->lock == 0)
-      peer_free (peer);
-}
-
 extern int bgp_config_write (struct vty *);
 extern void bgp_config_write_family_header (struct vty *, afi_t, safi_t, int *);
 
@@ -872,61 +855,10 @@ extern int bgp_option_check (int);
 
 extern int bgp_get (struct bgp **, as_t *, const char *);
 extern int bgp_delete (struct bgp *);
-extern void bgp_free (struct bgp *);
 
-/* BGP flag manipulation.  */
-static inline void
-bgp_flag_set (struct bgp *bgp, int flag)
-{
-  SET_FLAG (bgp->flags, flag);
-}
-
-static inline void
-bgp_flag_unset (struct bgp *bgp, int flag)
-{
-  UNSET_FLAG (bgp->flags, flag);
-}
-
-static inline int
-bgp_flag_check (const struct bgp *bgp, int flag)
-{
-  return CHECK_FLAG (bgp->flags, flag);
-}
-
-/* Internal function to set BGP structure configureation flag.  */
-static inline void
-bgp_config_set (struct bgp *bgp, int config)
-{
-  SET_FLAG (bgp->config, config);
-}
-
-static inline void
-bgp_config_unset (struct bgp *bgp, int config)
-{
-  UNSET_FLAG (bgp->config, config);
-}
-
-static inline int
-bgp_config_check (const struct bgp *bgp, int config)
-{
-  return CHECK_FLAG (bgp->config, config);
-}
-
-static inline void
-bgp_lock (struct bgp *bgp)
-{
-  ++bgp->lock;
-}
-
-static inline void
-bgp_unlock (struct bgp *bgp)
-{
-  if (--bgp->lock == 0)
-    bgp_free (bgp);
-}
-
-extern void bgp_lock (struct bgp *);
-extern void bgp_unlock (struct bgp *);
+extern int bgp_flag_set (struct bgp *, int);
+extern int bgp_flag_unset (struct bgp *, int);
+extern int bgp_flag_check (struct bgp *, int);
 
 extern void bgp_lock (struct bgp *);
 extern void bgp_unlock (struct bgp *);

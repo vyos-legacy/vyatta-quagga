@@ -56,10 +56,11 @@ struct bgp_info
   
   /* Extra information */
   struct bgp_info_extra *extra;
+  
 
   /* Multipath information */
   struct bgp_info_mpath *mpath;
-  
+
   /* Uptime.  */
   time_t uptime;
 
@@ -184,25 +185,8 @@ extern void bgp_clear_route_all (struct peer *);
 extern void bgp_clear_adj_in (struct peer *, afi_t, safi_t);
 extern void bgp_clear_stale_route (struct peer *, afi_t, safi_t);
 
-extern void bgp_info_free (struct bgp_info *);
-
-static inline struct bgp_info *
-bgp_info_lock (struct bgp_info *binfo)
-{
-  binfo->lock++;
-  return binfo;
-}
-
-static inline void
-bgp_info_unlock (struct bgp_info *binfo)
-{
-  assert (binfo && binfo->lock > 0);
-  binfo->lock--;
-
-  if (binfo->lock == 0)
-      bgp_info_free (binfo);
-}
-
+extern struct bgp_info *bgp_info_lock (struct bgp_info *);
+extern struct bgp_info *bgp_info_unlock (struct bgp_info *);
 extern void bgp_info_add (struct bgp_node *rn, struct bgp_info *ri);
 extern void bgp_info_delete (struct bgp_node *rn, struct bgp_info *ri);
 extern struct bgp_info_extra *bgp_info_extra_get (struct bgp_info *);

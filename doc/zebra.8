@@ -23,11 +23,6 @@ zebra \- a routing manager for use with associated Quagga components.
 ] [
 .B \-g
 .I group
-] [
-.B \-S
-] [
-.B \-H
-.I hold-time
 ]
 .SH DESCRIPTION
 .B zebra 
@@ -64,13 +59,6 @@ restart zebra.  The likely default is \fB\fI/var/run/zebra.pid\fR.
 .TP
 \fB\-k\fR, \fB\-\-keep_kernel\fR
 On startup, don't delete self inserted routes.
-.TP
-\fB\-S\fR, \fB\-\-set_interface\fR
-Manage connected routes, on link transistion events.
-.TP
-\fB\-H\fR, \fBhold-time\fR
-Specify the hold-time for RIB updates. This limits the frequency
-of RIB changes as the result of routing daemon or link transistions.
 .TP
 \fB\-P\fR, \fB\-\-vty_port \fR\fIport-number\fR 
 Specify the port that the zebra VTY will listen on. This defaults to

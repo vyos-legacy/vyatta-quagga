@@ -224,7 +224,6 @@ extern void ospf6_lsa_show_summary (struct vty *vty, struct ospf6_lsa *lsa);
 extern void ospf6_lsa_show_dump (struct vty *vty, struct ospf6_lsa *lsa);
 extern void ospf6_lsa_show_internal (struct vty *vty, struct ospf6_lsa *lsa);
 extern void ospf6_lsa_show (struct vty *vty, struct ospf6_lsa *lsa);
-extern const char *ospf6_lsa_handler_name (const struct ospf6_lsa_handler *h);
 
 extern struct ospf6_lsa *ospf6_lsa_create (struct ospf6_lsa_header *header);
 extern struct ospf6_lsa *ospf6_lsa_create_headeronly (struct ospf6_lsa_header *header);
@@ -238,6 +237,7 @@ extern int ospf6_lsa_expire (struct thread *);
 extern int ospf6_lsa_refresh (struct thread *);
 
 extern unsigned short ospf6_lsa_checksum (struct ospf6_lsa_header *);
+extern int ospf6_lsa_checksum_valid (struct ospf6_lsa_header *);
 extern int ospf6_lsa_prohibited_duration (u_int16_t type, u_int32_t id,
                                           u_int32_t adv_router, void *scope);
 
@@ -246,7 +246,6 @@ extern struct ospf6_lsa_handler *ospf6_get_lsa_handler (u_int16_t type);
 
 extern void ospf6_lsa_init (void);
 extern void ospf6_lsa_terminate (void);
-extern void ospf6_lsa_cmd_init (void);
 
 extern int config_write_ospf6_debug_lsa (struct vty *vty);
 extern void install_element_ospf6_debug_lsa (void);

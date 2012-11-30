@@ -187,8 +187,7 @@ static const struct message orf_type_str[] =
   { ORF_TYPE_PREFIX,		"Prefixlist"		},
   { ORF_TYPE_PREFIX_OLD,	"Prefixlist (old)"	},
 };
-static const int orf_type_str_max
-	= sizeof(orf_type_str)/sizeof(orf_type_str[0]);
+static const int orf_type_str_max = array_size(orf_type_str);
 
 static const struct message orf_mode_str[] =
 {
@@ -196,8 +195,7 @@ static const struct message orf_mode_str[] =
   { ORF_MODE_SEND,	"Send"		},
   { ORF_MODE_BOTH,	"Both"		},
 };
-static const int orf_mode_str_max
-	 = sizeof(orf_mode_str)/sizeof(orf_mode_str[0]);
+static const int orf_mode_str_max = array_size(orf_mode_str);
 
 static int
 bgp_capability_orf_entry (struct peer *peer, struct capability_header *hdr)
@@ -427,7 +425,7 @@ static const struct message capcode_str[] =
   { CAPABILITY_CODE_REFRESH_OLD,	"Route Refresh (Old)"		},
   { CAPABILITY_CODE_ORF_OLD,		"ORF (Old)"			},
 };
-static const int capcode_str_max = sizeof(capcode_str)/sizeof(capcode_str[0]);
+static const int capcode_str_max = array_size(capcode_str);
 
 /* Minimum sizes for length field of each cap (so not inc. the header) */
 static const size_t cap_minsizes[] = 
@@ -442,11 +440,16 @@ static const size_t cap_minsizes[] =
   [CAPABILITY_CODE_ORF_OLD]	= sizeof (struct capability_orf_entry),
 };
 
-/* Parse given capability.
+/**
+ * Parse given capability.
  * XXX: This is reading into a stream, but not using stream API
+ *
+ * @param[out] mp_capability Set to 1 on return iff one or more Multiprotocol
+ *                           capabilities were encountered.
  */
 static int
-bgp_capability_parse (struct peer *peer, size_t length, u_char **error)
+bgp_capability_parse (struct peer *peer, size_t length, int *mp_capability,
+		      u_char **error)
 {
   int ret;
   struct stream *s = BGP_INPUT (peer);
@@ -518,6 +521,8 @@ bgp_capability_parse (struct peer *peer, size_t length, u_char **error)
         {
           case CAPABILITY_CODE_MP:
             {
+	      *mp_capability = 1;
+
               /* Ignore capability when override-capability is set. */
               if (! CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
                 {
@@ -690,9 +695,13 @@ end:
   return as4;
 }
 
-/* Parse open option */
+/**
+ * Parse open option.
+ *
+ * @param[out] mp_capability @see bgp_capability_parse() for semantics.
+ */
 int
-bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
+bgp_open_option_parse (struct peer *peer, u_char length, int *mp_capability)
 {
   int ret;
   u_char *error;
@@ -745,8 +754,7 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
 	  ret = bgp_auth_parse (peer, opt_length);
 	  break;
 	case BGP_OPEN_OPT_CAP:
-	  ret = bgp_capability_parse (peer, opt_length, &error);
-	  *capability = 1;
+	  ret = bgp_capability_parse (peer, opt_length, mp_capability, &error);
 	  break;
 	default:
 	  bgp_notify_send (peer, 
@@ -789,9 +797,10 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
 	}
     }
 
-  /* Check there is no common capability send Unsupported Capability
+  /* Check there are no common AFI/SAFIs and send Unsupported Capability
      error. */
-  if (*capability && ! CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
+  if (*mp_capability &&
+      ! CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
     {
       if (! peer->afc_nego[AFI_IP][SAFI_UNICAST] 
 	  && ! peer->afc_nego[AFI_IP][SAFI_MULTICAST]
@@ -799,7 +808,9 @@ bgp_open_option_parse (struct peer *peer, u_char length, int *capability)
 	  && ! peer->afc_nego[AFI_IP6][SAFI_UNICAST]
 	  && ! peer->afc_nego[AFI_IP6][SAFI_MULTICAST])
 	{
-	  plog_err (peer->log, "%s [Error] No common capability", peer->host);
+	  plog_err (peer->log, "%s [Error] Configured AFI/SAFIs do not "
+		    "overlap with received MP capabilities",
+		    peer->host);
 
 	  if (error != error_data)
 

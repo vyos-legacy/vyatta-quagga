@@ -146,6 +146,7 @@ extern size_t stream_get_size (struct stream *);
 extern u_char *stream_get_data (struct stream *);
 
 extern void stream_set_getp (struct stream *, size_t);
+extern void stream_set_endp (struct stream *, size_t);
 extern void stream_forward_getp (struct stream *, size_t);
 extern void stream_forward_endp (struct stream *, size_t);
 
@@ -180,6 +181,10 @@ extern u_int32_t stream_get_ipv4 (struct stream *);
 /* Deprecated: assumes blocking I/O.  Will be removed. 
    Use stream_read_try instead.  */
 extern int stream_read (struct stream *, int, size_t);
+
+/* Deprecated: all file descriptors should already be non-blocking.
+   Will be removed.  Use stream_read_try instead. */
+extern int stream_read_unblock (struct stream *, int, size_t);
 
 /* Read up to size bytes into the stream.
    Return code:

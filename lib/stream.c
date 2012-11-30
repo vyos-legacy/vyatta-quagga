@@ -52,7 +52,7 @@
  * using stream_put..._at() functions.
  */
 #define STREAM_WARN_OFFSETS(S) \
-  zlog_warn ("&(struct stream): %p, size: %lu, endp: %lu, getp: %lu\n", \
+  zlog_warn ("&(struct stream): %p, size: %lu, getp: %lu, endp: %lu\n", \
              (S), \
              (unsigned long) (S)->size, \
              (unsigned long) (S)->getp, \
@@ -212,6 +212,30 @@ stream_set_getp (struct stream *s, size_t pos)
     }
 
   s->getp = pos;
+}
+
+void
+stream_set_endp (struct stream *s, size_t pos)
+{
+  STREAM_VERIFY_SANE(s);
+
+  if (!ENDP_VALID(s, pos))
+    {
+      STREAM_BOUND_WARN (s, "set endp");
+      return;
+    }
+
+  /*
+   * Make sure the current read pointer is not beyond the new endp.
+   */
+  if (s->getp > pos)
+    {
+      STREAM_BOUND_WARN(s, "set endp");
+      return;
+    }
+
+  s->endp = pos;
+  STREAM_VERIFY_SANE(s);
 }
 
 /* Forward pointer. */
@@ -711,6 +735,32 @@ stream_read (struct stream *s, int fd, size_t size)
   return nbytes;
 }
 
+/* Read size from fd. */
+int
+stream_read_unblock (struct stream *s, int fd, size_t size)
+{
+  int nbytes;
+  int val;
+  
+  STREAM_VERIFY_SANE(s);
+  
+  if (STREAM_WRITEABLE (s) < size)
+    {
+      STREAM_BOUND_WARN (s, "put");
+      return 0;
+    }
+  
+  val = fcntl (fd, F_GETFL, 0);
+  fcntl (fd, F_SETFL, val|O_NONBLOCK);
+  nbytes = read (fd, s->data + s->endp, size);
+  fcntl (fd, F_SETFL, val);
+
+  if (nbytes > 0)
+    s->endp += nbytes;
+  
+  return nbytes;
+}
+
 ssize_t
 stream_read_try(struct stream *s, int fd, size_t size)
 {
@@ -908,9 +958,9 @@ stream_fifo_pop (struct stream_fifo *fifo)
 
       if (fifo->head == NULL)
 	fifo->tail = NULL;
-    }
 
-  fifo->count--;
+      fifo->count--;
+    }
 
   return s; 
 }

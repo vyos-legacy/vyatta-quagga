@@ -112,7 +112,7 @@ struct prefix_rd
 #define IPV4_NET0(a)    ((((u_int32_t) (a)) & 0xff000000) == 0x00000000)
 #define IPV4_NET127(a)  ((((u_int32_t) (a)) & 0xff000000) == 0x7f000000)
 #define IPV4_LINKLOCAL(a) ((((u_int32_t) (a)) & 0xffff0000) == 0xa9fe0000)
-#define IPV4_CLASS_DE(a) ((u_int32_t) (a) >= 0xe0000000)
+#define IPV4_CLASS_DE(a)  ((((u_int32_t) (a)) & 0xe0000000) == 0xe0000000)
 
 /* Max bit/byte length of IPv6 address. */
 #define IPV6_MAX_BYTELEN    16
@@ -128,25 +128,13 @@ struct prefix_rd
 /* Prefix's family member. */
 #define PREFIX_FAMILY(p)  ((p)->family)
 
-/* Check bit of the prefix. */
-static inline unsigned int
-prefix_bit (const u_char *prefix, const u_char prefixlen)
-{
-  unsigned int offset = prefixlen / 8;
-  unsigned int shift  = 7 - (prefixlen % 8);
-
-  return (prefix[offset] >> shift) & 1;
-}
-
-static inline unsigned int
-prefix6_bit (const struct in6_addr *prefix, const u_char prefixlen)
-{
-  return prefix_bit((const u_char *) &prefix->s6_addr, prefixlen);
-}
-
 /* Prototypes. */
 extern int afi2family (afi_t);
 extern afi_t family2afi (int);
+
+/* Check bit of the prefix. */
+extern unsigned int prefix_bit (const u_char *prefix, const u_char prefixlen);
+extern unsigned int prefix6_bit (const struct in6_addr *prefix, const u_char prefixlen);
 
 extern struct prefix *prefix_new (void);
 extern void prefix_free (struct prefix *);
@@ -178,7 +166,7 @@ extern int prefix_ipv4_any (const struct prefix_ipv4 *);
 extern void apply_classful_mask_ipv4 (struct prefix_ipv4 *);
 
 extern u_char ip_masklen (struct in_addr);
-extern void masklen2ip (int, struct in_addr *);
+extern void masklen2ip (const int, struct in_addr *);
 /* returns the network portion of the host address */
 extern in_addr_t ipv4_network_addr (in_addr_t hostaddr, int masklen);
 /* given the address of a host on a network and the network mask length,
@@ -199,7 +187,7 @@ extern void apply_mask_ipv6 (struct prefix_ipv6 *);
 	*((struct prefix_ipv6 *)(DST)) = *((const struct prefix_ipv6 *)(SRC));
 
 extern int ip6_masklen (struct in6_addr);
-extern void masklen2ip6 (int, struct in6_addr *);
+extern void masklen2ip6 (const int, struct in6_addr *);
 
 extern void str2in6_addr (const char *, struct in6_addr *);
 extern const char *inet6_ntoa (struct in6_addr);

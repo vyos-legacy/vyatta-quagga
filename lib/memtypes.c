@@ -21,7 +21,6 @@ struct memory_list memory_list_lib[] =
   { MTYPE_THREAD,		"Thread"			},
   { MTYPE_THREAD_MASTER,	"Thread master"			},
   { MTYPE_THREAD_STATS,		"Thread stats"			},
-  { MTYPE_THREAD_FUNCNAME,	"Thread function name" 		},
   { MTYPE_VTY,			"VTY"				},
   { MTYPE_VTY_OUT_BUF,		"VTY output buffer"		},
   { MTYPE_VTY_HIST,		"VTY history"			},
@@ -113,7 +112,7 @@ struct memory_list memory_list_bgp[] =
   { MTYPE_BGP_SYNCHRONISE,	"BGP synchronise"		},
   { MTYPE_BGP_ADJ_IN,		"BGP adj in"			},
   { MTYPE_BGP_ADJ_OUT,		"BGP adj out"			},
-  { MTYPE_BGP_MPATH_INFO,       "BGP multipath info"            },
+  { MTYPE_BGP_MPATH_INFO,	"BGP multipath info"		},
   { 0, NULL },
   { MTYPE_AS_LIST,		"BGP AS list"			},
   { MTYPE_AS_FILTER,		"BGP AS filter"			},
@@ -150,6 +149,7 @@ struct memory_list memory_list_bgp[] =
   { MTYPE_BGP_DAMP_ARRAY,	"BGP Dampening array"		},
   { MTYPE_BGP_REGEXP,		"BGP regexp"			},
   { MTYPE_BGP_AGGREGATE,	"BGP aggregate"			},
+  { MTYPE_BGP_ADDR,		"BGP own address"		},
   { -1, NULL }
 };
 
@@ -172,6 +172,13 @@ struct memory_list memory_list_ripng[] =
   { MTYPE_RIPNG_PEER,         "RIPng peer"			},
   { MTYPE_RIPNG_OFFSET_LIST,  "RIPng offset lst"		},
   { MTYPE_RIPNG_RTE_DATA,     "RIPng rte data"			},
+  { -1, NULL }
+};
+
+struct memory_list memory_list_babel[] =
+{
+  { MTYPE_BABEL,              "Babel structure"			},
+  { MTYPE_BABEL_IF,           "Babel interface"			},
   { -1, NULL }
 };
 
@@ -241,6 +248,8 @@ struct memory_list memory_list_isis[] =
   { MTYPE_ISIS_ROUTE_INFO,    "ISIS route info"			},
   { MTYPE_ISIS_NEXTHOP,       "ISIS nexthop"			},
   { MTYPE_ISIS_NEXTHOP6,      "ISIS nexthop6"			},
+  { MTYPE_ISIS_DICT,          "ISIS dictionary"			},
+  { MTYPE_ISIS_DICT_NODE,     "ISIS dictionary node"		},
   { -1, NULL },
 };
 

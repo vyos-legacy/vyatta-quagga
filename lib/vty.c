@@ -699,6 +699,7 @@ vty_end_config (struct vty *vty)
     case ZEBRA_NODE:
     case RIP_NODE:
     case RIPNG_NODE:
+    case BABEL_NODE:
     case BGP_NODE:
     case BGP_VPNV4_NODE:
     case BGP_IPV4_NODE:
@@ -1107,6 +1108,7 @@ vty_stop_input (struct vty *vty)
     case ZEBRA_NODE:
     case RIP_NODE:
     case RIPNG_NODE:
+    case BABEL_NODE:
     case BGP_NODE:
     case RMAP_NODE:
     case OSPF_NODE:
@@ -1610,13 +1612,16 @@ vty_flush (struct thread *thread)
 static struct vty *
 vty_create (int vty_sock, union sockunion *su)
 {
+  char buf[SU_ADDRSTRLEN];
   struct vty *vty;
+
+  sockunion2str(su, buf, SU_ADDRSTRLEN);
 
   /* Allocate new vty structure and set up default values. */
   vty = vty_new ();
   vty->fd = vty_sock;
   vty->type = VTY_TERM;
-  vty->address = sockunion_su2str (su);
+  strcpy (vty->address, buf);
   if (no_password_check)
     {
       if (restricted_mode)
@@ -1685,14 +1690,13 @@ static int
 vty_accept (struct thread *thread)
 {
   int vty_sock;
-  struct vty *vty;
   union sockunion su;
   int ret;
   unsigned int on;
   int accept_sock;
   struct prefix *p = NULL;
   struct access_list *acl = NULL;
-  char *bufp;
+  char buf[SU_ADDRSTRLEN];
 
   accept_sock = THREAD_FD (thread);
 
@@ -1718,10 +1722,8 @@ vty_accept (struct thread *thread)
       if ((acl = access_list_lookup (AFI_IP, vty_accesslist_name)) &&
 	  (access_list_apply (acl, p) == FILTER_DENY))
 	{
-	  char *buf;
 	  zlog (NULL, LOG_INFO, "Vty connection refused from %s",
-		(buf = sockunion_su2str (&su)));
-	  free (buf);
+		sockunion2str (&su, buf, SU_ADDRSTRLEN));
 	  close (vty_sock);
 	  
 	  /* continue accepting connections */
@@ -1740,10 +1742,8 @@ vty_accept (struct thread *thread)
       if ((acl = access_list_lookup (AFI_IP6, vty_ipv6_accesslist_name)) &&
 	  (access_list_apply (acl, p) == FILTER_DENY))
 	{
-	  char *buf;
 	  zlog (NULL, LOG_INFO, "Vty connection refused from %s",
-		(buf = sockunion_su2str (&su)));
-	  free (buf);
+		sockunion2str (&su, buf, SU_ADDRSTRLEN));
 	  close (vty_sock);
 	  
 	  /* continue accepting connections */
@@ -1766,11 +1766,9 @@ vty_accept (struct thread *thread)
 	  safe_strerror (errno));
 
   zlog (NULL, LOG_INFO, "Vty connection from %s",
-    (bufp = sockunion_su2str (&su)));
-  if (bufp)
-    XFREE (MTYPE_TMP, bufp);
+	sockunion2str (&su, buf, SU_ADDRSTRLEN));
 
-  vty = vty_create (vty_sock, &su);
+  vty_create (vty_sock, &su);
 
   return 0;
 }
@@ -1816,6 +1814,7 @@ vty_serv_sock_addrinfo (const char *hostname, unsigned short port)
       if (sock < 0)
 	continue;
 
+      sockopt_v6only (ainfo->ai_family, sock);
       sockopt_reuseaddr (sock);
       sockopt_reuseport (sock);
 
@@ -1840,6 +1839,7 @@ vty_serv_sock_addrinfo (const char *hostname, unsigned short port)
   freeaddrinfo (ainfo_save);
 }
 #else /* HAVE_IPV6 && ! NRL */
+
 /* Make vty server socket. */
 static void
 vty_serv_sock_family (const char* addr, unsigned short port, int family)
@@ -2190,8 +2190,6 @@ vty_close (struct vty *vty)
   if (vty->fd > 0)
     close (vty->fd);
 
-  if (vty->address)
-    XFREE (MTYPE_TMP, vty->address);
   if (vty->buf)
     XFREE (MTYPE_VTY, vty->buf);
 

@@ -1,6 +1,6 @@
 ## Process this file with automake to produce Makefile.in.
 
-INCLUDES = @INCLUDES@ -I.. -I$(top_srcdir) -I$(top_srcdir)/lib @SNMP_INCLUDES@
+INCLUDES = @INCLUDES@ -I.. -I$(top_srcdir) -I$(top_srcdir)/lib -I$(top_builddir)/lib
 DEFS = @DEFS@ -DSYSCONFDIR=\"$(sysconfdir)/\"
 
 lib_LTLIBRARIES = libzebra.la
@@ -11,7 +11,7 @@ libzebra_la_SOURCES = \
 	checksum.c vector.c linklist.c vty.c command.c \
 	sockunion.c prefix.c thread.c if.c memory.c buffer.c table.c hash.c \
 	filter.c routemap.c distribute.c stream.c str.c log.c plist.c \
-	zclient.c sockopt.c smux.c md5.c if_rmap.c keychain.c privs.c \
+	zclient.c sockopt.c smux.c agentx.c snmp.c md5.c if_rmap.c keychain.c privs.c \
 	sigevent.c pqueue.c jhash.c memtypes.c workqueue.c
 
 BUILT_SOURCES = memtypes.h route_types.h
@@ -29,10 +29,10 @@ pkginclude_HEADERS = \
 	privs.h sigevent.h pqueue.h jhash.h zassert.h memtypes.h \
 	workqueue.h route_types.h
 
-EXTRA_DIST = regex.c regex-gnu.h memtypes.awk route_types.awk route_types.txt
+EXTRA_DIST = regex.c regex-gnu.h memtypes.awk route_types.pl route_types.txt
 
 memtypes.h: $(srcdir)/memtypes.c $(srcdir)/memtypes.awk
 	($(GAWK) -f $(srcdir)/memtypes.awk $(srcdir)/memtypes.c > $@)
 
-route_types.h: $(srcdir)/route_types.txt $(srcdir)/route_types.awk
-	($(GAWK) -f $(srcdir)/route_types.awk $(srcdir)/route_types.txt > $@)
+route_types.h: $(srcdir)/route_types.txt $(srcdir)/route_types.pl
+	@PERL@ $(srcdir)/route_types.pl < $(srcdir)/route_types.txt > $@

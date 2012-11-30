@@ -77,6 +77,7 @@ struct option longopts[] =
   { "daemon",      no_argument,       NULL, 'd'},
   { "config_file", required_argument, NULL, 'f'},
   { "pid_file",    required_argument, NULL, 'i'},
+  { "socket",      required_argument, NULL, 'z'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
   { "user",        required_argument, NULL, 'u'},
@@ -115,6 +116,7 @@ Daemon which manages OSPF version 3.\n\n\
 -d, --daemon       Runs in daemon mode\n\
 -f, --config_file  Set configuration file name\n\
 -i, --pid_file     Set process identifier file name\n\
+-z, --socket       Set path of zebra socket\n\
 -A, --vty_addr     Set vty's bind address\n\
 -P, --vty_port     Set vty's port number\n\
 -u, --user         User to run as\n\
@@ -178,6 +180,7 @@ static void
 sigterm (void)
 {
   zlog_notice ("Terminating on signal SIGTERM");
+  ospf6_clean();
   ospf6_exit (0);
 }
 
@@ -231,7 +234,7 @@ main (int argc, char *argv[], char *envp[])
   /* Command line argument treatment. */
   while (1) 
     {
-      opt = getopt_long (argc, argv, "df:i:hp:A:P:u:g:vC", longopts, 0);
+      opt = getopt_long (argc, argv, "df:i:z:hp:A:P:u:g:vC", longopts, 0);
     
       if (opt == EOF)
         break;
@@ -251,6 +254,9 @@ main (int argc, char *argv[], char *envp[])
           break;
         case 'i':
           pid_file = optarg;
+          break;
+        case 'z':
+          zclient_serv_path_set (optarg);
           break;
         case 'P':
          /* Deal with atoi() returning 0 on failure, and ospf6d not
@@ -286,6 +292,13 @@ main (int argc, char *argv[], char *envp[])
         }
     }
 
+  if (geteuid () != 0)
+    {
+      errno = EPERM;
+      perror (progname);
+      exit (1);
+    }
+
   /* thread master */
   master = thread_master_create ();
 
@@ -295,7 +308,7 @@ main (int argc, char *argv[], char *envp[])
                            LOG_DAEMON);
   zprivs_init (&ospf6d_privs);
   /* initialize zebra libraries */
-  signal_init (master, Q_SIGC(ospf6_signals), ospf6_signals);
+  signal_init (master, array_size(ospf6_signals), ospf6_signals);
   cmd_init (1);
   vty_init (master);
   memory_init ();
@@ -326,6 +339,8 @@ main (int argc, char *argv[], char *envp[])
   pid_output (pid_file);
 
   /* Make ospf6 vty socket. */
+  if (!vty_port)
+    vty_port = OSPF6_VTY_PORT;
   vty_serv_sock (vty_addr, vty_port, OSPF6_VTYSH_PATH);
 
   /* Print start message */

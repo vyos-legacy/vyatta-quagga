@@ -7,7 +7,7 @@
 ##
 AC_PREREQ(2.53)
 
-AC_INIT(Quagga, 0.99.20.1, [https://bugzilla.quagga.net])
+AC_INIT(Quagga, 0.99.21, [https://bugzilla.quagga.net])
 AC_CONFIG_SRCDIR(lib/zebra.h)
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -72,6 +72,16 @@ dnl autoconf 2.59 appears not to support AC_PROG_SED
 dnl AC_PROG_SED
 AC_CHECK_PROG([SED],[sed],[sed],[/bin/false])
 
+dnl pdflatex and latexmk are needed to build HACKING.pdf
+AC_CHECK_PROG([PDFLATEX],[pdflatex],[pdflatex],[/bin/false])
+AC_CHECK_PROG([LATEXMK],[latexmk],[latexmk],[/bin/false])
+if test "x$PDFLATEX" = "x/bin/false" -o "x$LATEXMK" = "x/bin/false"; then
+	AC_MSG_WARN([Will not be able to make PDF versions of TeX documents])
+else
+	HAVE_LATEX=true
+fi
+AM_CONDITIONAL([HAVE_LATEX], [test "x$HAVE_LATEX" = "xtrue"])
+
 dnl ------------------------------------------------------------------
 dnl Intel compiler check. Although Intel tries really hard to make icc
 dnl look like gcc, there are some differences. It's very verbose with
@@ -127,12 +137,7 @@ if test "x${cflags_specified}" = "x" ; then
   	CFLAGS="${CFLAGS} -Wbad-function-cast -Wwrite-strings"
   	CFLAGS="${CFLAGS} -Wmissing-prototypes -Wmissing-declarations"
   	CFLAGS="${CFLAGS} -Wchar-subscripts -Wcast-qual"
- 
-  	CXXFLAGS="-Os -fno-omit-frame-pointer -g -Wall"
-  	CXXFLAGS="${CFLAGS} -Wsign-compare -Wpointer-arith"
-  	CXXFLAGS="${CFLAGS} -Wwrite-strings"
-  	CXXFLAGS="${CFLAGS} -Wchar-subscripts -Wcast-qual"
- 	# TODO: conditionally addd -Wpacked if handled
+  	# TODO: conditionally addd -Wpacked if handled
   	AC_MSG_RESULT([gcc default])
   	;;
     "SUNPRO")
@@ -184,12 +189,17 @@ AC_PROG_LIBTOOL
 dnl ----------------------
 dnl Packages configuration
 dnl ----------------------
+AC_ARG_WITH(pkg-extra-version,
+	AS_HELP_STRING([--with-pkg-extra-version=VER], [add extra version field, for packagers/distributions]),
+	[EXTRAVERSION=$withval],)
 AC_ARG_ENABLE(vtysh,
 [  --enable-vtysh          include integrated vty shell for Quagga])
 AC_ARG_ENABLE(ipv6,
 [  --disable-ipv6          turn off IPv6 related features and daemons])
 AC_ARG_ENABLE(doc,
 [  --disable-doc           do not build docs])
+AC_ARG_ENABLE(tests,
+[  --disable-tests         do not build tests])
 AC_ARG_ENABLE(zebra,
 [  --disable-zebra         do not build zebra daemon])
 AC_ARG_ENABLE(bgpd,
@@ -202,6 +212,8 @@ AC_ARG_ENABLE(ospfd,
 [  --disable-ospfd         do not build ospfd])
 AC_ARG_ENABLE(ospf6d,
 [  --disable-ospf6d        do not build ospf6d])
+AC_ARG_ENABLE(babeld,
+[  --disable-babeld        do not build babeld])
 AC_ARG_ENABLE(watchquagga,
 [  --disable-watchquagga   do not build watchquagga])
 AC_ARG_ENABLE(isisd,
@@ -214,10 +226,8 @@ AC_ARG_ENABLE(netlink,
 [  --enable-netlink        force to use Linux netlink interface])
 AC_ARG_ENABLE(broken-aliases,
 [  --enable-broken-aliases enable aliases as distinct interfaces for Linux 2.2.X])
-AC_ARG_WITH(crypto,
-[  --without-crypto        do not use libcrypto in SNMP])
 AC_ARG_ENABLE(snmp,
-[  --enable-snmp           enable SNMP support])
+[  --enable-snmp=ARG       enable SNMP support (smux or agentx)])
 AC_ARG_WITH(libpam,
 [  --with-libpam           use libpam for PAM support in vtysh])
 AC_ARG_ENABLE(tcp-zebra,
@@ -322,7 +332,7 @@ fi
 
 if test "${enable_isisd}" = "yes" && test "${enable_isis_topology}" = yes; then
   AC_DEFINE(TOPOLOGY_GENERATE,,Enable IS-IS topology generator code)
-  ISIS_TOPOLOGY_INCLUDES="-I./topology"
+  ISIS_TOPOLOGY_INCLUDES="-I\$(srcdir)/topology"
   ISIS_TOPOLOGY_DIR="topology"
   ISIS_TOPOLOGY_LIB="./topology/libtopology.a"
 fi
@@ -376,6 +386,16 @@ case "${enable_multipath}" in
 esac
 
 AC_SUBST(MULTIPATH_NUM)
+
+dnl -----------------------------------
+dnl Add extra version string to package
+dnl name, string and version fields.
+dnl -----------------------------------
+if test "x${EXTRAVERSION}" != "x" ; then
+  VERSION=${VERSION}${EXTRAVERSION}
+  PACKAGE_VERSION=${PACKAGE_VERSION}${EXTRAVERSION}
+  PACKAGE_STRING=${PACKAGE_STRING}${EXTRAVERSION}
+fi
 
 dnl ------------------------------------
 dnl Check C keywords and standard  types
@@ -617,6 +637,7 @@ dnl	 [TODO] on Linux, and in [TODO] on Solaris.
   *    ) ;;
 esac
 AC_SUBST(LIBREADLINE)
+AM_CONDITIONAL(VTYSH, test "x$VTYSH" = "xvtysh")
 
 dnl ----------
 dnl PAM module
@@ -697,11 +718,9 @@ dnl ----------------------------
 AC_FUNC_CHOWN
 AC_FUNC_FNMATCH
 AC_FUNC_FORK
-AC_FUNC_MALLOC
 AC_FUNC_MEMCMP
 AC_FUNC_MKTIME
 AC_FUNC_STRFTIME
-AC_FUNC_REALLOC
 AC_FUNC_STAT
 AC_FUNC_SELECT_ARGTYPES
 AC_FUNC_STRFTIME
@@ -940,7 +959,7 @@ AC_CHECK_MEMBERS([struct ip_mreqn.imr_ifindex], [], [], QUAGGA_INCLUDES)
 AC_MSG_CHECKING([for BSD struct ip_mreq hack])
 AC_TRY_COMPILE([#ifdef HAVE_SYS_PARAM_H
 #include <sys/param.h>
-#endif],[#if (defined(__FreeBSD__) && ((__FreeBSD_version >= 500022 && __FreeBSD_version < 700000) || (__FreeBSD_version < 500000 && __FreeBSD_version >= 440000))) || (defined(__NetBSD__) && defined(__NetBSD_Version__) && __NetBSD_Version__ >= 106010000)
+#endif],[#if (defined(__FreeBSD__) && ((__FreeBSD_version >= 500022 && __FreeBSD_version < 700000) || (__FreeBSD_version < 500000 && __FreeBSD_version >= 440000))) || (defined(__NetBSD__) && defined(__NetBSD_Version__) && __NetBSD_Version__ >= 106010000) || defined(__OpenBSD__)
   return (0);
 #else
   #error No support for BSD struct ip_mreq hack detected
@@ -972,6 +991,16 @@ AC_CHECK_HEADER([net/if.h],
     [],
     QUAGGA_INCLUDES)], 
   [], QUAGGA_INCLUDES )
+
+dnl ---------------------------------------------------------------
+dnl Additional, newer way to check link-state using ifi_link_state.
+dnl Not available in all BSD's when ifmediareq available
+dnl ---------------------------------------------------------------
+AC_CHECK_HEADER([net/if.h],
+    AC_CHECK_MEMBERS([struct if_data.ifi_link_state],
+      AC_DEFINE(HAVE_BSD_IFI_LINK_STATE,,[BSD ifi_link_state available]),
+      [], QUAGGA_INCLUDES),
+    ,)
 
 dnl ------------------------
 dnl TCP_MD5SIG socket option
@@ -1013,10 +1042,18 @@ dnl -----------------------------
 dnl check ipforward detect method
 dnl -----------------------------
 AC_CACHE_CHECK([ipforward method], [quagga_cv_ipforward_method],
-[for quagga_cv_ipforward_method in /proc/net/snmp /dev/ip /dev/null;
-do
-  test x`ls $quagga_cv_ipforward_method 2>/dev/null` = x"$quagga_cv_ipforward_method" && break
-done
+[if test x$cross_compiling = xyes; then
+  if test x"$opsys" = x"gnu-linux"; then
+    quagga_cv_ipforward_method=/proc/net/snmp
+  else
+    quagga_cv_ipforward_method=/dev/ip
+  fi
+else
+  for quagga_cv_ipforward_method in /proc/net/snmp /dev/ip /dev/null;
+  do
+    test x`ls $quagga_cv_ipforward_method 2>/dev/null` = x"$quagga_cv_ipforward_method" && break
+  done
+fi
 case $quagga_cv_ipforward_method in
   "/proc/net/snmp")  quagga_cv_ipforward_method="proc";;
   "/dev/ip")         
@@ -1207,6 +1244,13 @@ else
   DOC="doc"
 fi
 
+dnl can't use TESTS as name, that's special with automake
+if test "${enable_tests}" = "no";then
+  BUILD_TESTS=""
+else
+  BUILD_TESTS="tests"
+fi
+
 dnl --------------------
 dnl Daemon disable check
 dnl --------------------
@@ -1215,30 +1259,42 @@ if test "${enable_zebra}" = "no";then
 else
   ZEBRA="zebra"
 fi
+AM_CONDITIONAL(ZEBRA, test "x$ZEBRA" = "xzebra")
 
 if test "${enable_bgpd}" = "no";then
   BGPD=""
 else
   BGPD="bgpd"
 fi
+AM_CONDITIONAL(BGPD, test "x$BGPD" = "xbgpd")
 
 if test "${enable_ripd}" = "no";then
   RIPD=""
 else
   RIPD="ripd"
 fi
+AM_CONDITIONAL(RIPD, test "x$RIPD" = "xripd")
 
 if test "${enable_ospfd}" = "no";then
   OSPFD=""
 else
   OSPFD="ospfd"
 fi
+AM_CONDITIONAL(OSPFD, test "x$OSPFD" = "xospfd")
+
+if test "${enable_babeld}" = "no";then
+  BABELD=""
+else
+  BABELD="babeld"
+fi
+AM_CONDITIONAL(BABELD, test "x$BABELD" = "xbabeld")
 
 if test "${enable_watchquagga}" = "no";then
   WATCHQUAGGA=""
 else
   WATCHQUAGGA="watchquagga"
 fi
+AM_CONDITIONAL(WATCHQUAGGA, test "x$WATCHQUAGGA" = "xwatchquagga")
 
 OSPFCLIENT=""
 if test "${enable_opaque_lsa}" != "no"; then
@@ -1251,24 +1307,28 @@ if test "${enable_opaque_lsa}" != "no"; then
   fi
 
 fi
+AM_CONDITIONAL(OSPFCLIENT, test "x$OSPFCLIENT" = "xospfclient")
 
 case "${enable_ripngd}" in
   "yes") RIPNGD="ripngd";;
   "no" ) RIPNGD="";;
   *    ) ;;
 esac
+AM_CONDITIONAL(RIPNGD, test "x$RIPNGD" = "xripngd")
 
 case "${enable_ospf6d}" in
   "yes") OSPF6D="ospf6d";;
   "no" ) OSPF6D="";;
   *    ) ;;
 esac
+AM_CONDITIONAL(OSPF6D, test "x$OSPF6D" = "xospf6d")
 
 case "${enable_isisd}" in
   "yes") ISISD="isisd";;
   "no" ) ISISD="";;
   *    ) ;;
 esac
+AM_CONDITIONAL(ISISD, test "x$ISISD" = "xisisd")
 
 # XXX Perhaps auto-enable on Solaris, but that's messy for cross builds.
 case "${enable_solaris}" in
@@ -1284,12 +1344,14 @@ else
 fi
 
 AC_SUBST(DOC)
+AC_SUBST(BUILD_TESTS)
 AC_SUBST(ZEBRA)
 AC_SUBST(BGPD)
 AC_SUBST(RIPD)
 AC_SUBST(RIPNGD)
 AC_SUBST(OSPFD)
 AC_SUBST(OSPF6D)
+AC_SUBST(BABELD)
 AC_SUBST(WATCHQUAGGA)
 AC_SUBST(ISISD)
 AC_SUBST(SOLARIS)
@@ -1334,21 +1396,39 @@ AC_SUBST(LIB_REGEX)
 dnl ------------------
 dnl check Net-SNMP library
 dnl ------------------
-if test "${enable_snmp}" = "yes"; then
-    if test "$with_crypto" != "no"; then
-        LIBS="${LIBS} -lcrypto";
-    fi
-    AC_CHECK_LIB(netsnmp, asn_parse_int,
-    	[AC_DEFINE(HAVE_NETSNMP,,Net SNMP) 
-    	 AC_DEFINE(HAVE_SNMP,,SNMP)
-    	 LIBS="${LIBS} -lnetsnmp"],
-    	[AC_MSG_ERROR([--enable-snmp given, but cannot find support for SNMP])])
-
-    AC_CHECK_HEADER([net-snmp/net-snmp-config.h],
-        [],
-        [AC_MSG_ERROR([--enable-snmp given, but cannot find net-snmp-config.h])],
-	QUAGGA_INCLUDES)
-    AC_SUBST(SNMP_INCLUDES)
+if test "${enable_snmp}" != ""; then
+   AC_PATH_TOOL([NETSNMP_CONFIG], [net-snmp-config], [no])
+   if test x"$NETSNMP_CONFIG" = x"no"; then
+      AC_MSG_ERROR([--enable-snmp given but unable to find net-snmp-config])
+   fi
+   LIBS="$LIBS `${NETSNMP_CONFIG} --agent-libs`"
+   CFLAGS="`${NETSNMP_CONFIG} --base-cflags` $CFLAGS"
+   AC_MSG_CHECKING([whether we can link to Net-SNMP])
+   AC_LINK_IFELSE([AC_LANG_PROGRAM([
+int main(void);
+],
+[
+{
+  return 0;
+}
+])],[AC_MSG_RESULT(yes)],[
+     AC_MSG_RESULT(no)
+     AC_MSG_ERROR([--enable-snmp given but not usable])])
+   AC_DEFINE(HAVE_SNMP,,SNMP)
+   case "${enable_snmp}" in
+     yes)
+      SNMP_METHOD=agentx
+      ;;
+     smux|agentx)
+      SNMP_METHOD="${enable_snmp}"
+      ;;
+     *)
+      AC_MSG_ERROR([--enable-snmp given with an unknown method (${enable_snmp}). Use smux or agentx])
+      ;;
+   esac
+   AH_TEMPLATE([SNMP_SMUX], [Use SNMP SMUX to interface with snmpd])
+   AH_TEMPLATE([SNMP_AGENTX], [Use SNMP AgentX to interface with snmpd])
+   AC_DEFINE_UNQUOTED(AS_TR_CPP(SNMP_${SNMP_METHOD}),,SNMP method to interface with snmpd)
 fi
 
 dnl ---------------------------
@@ -1533,6 +1613,7 @@ AC_DEFINE_UNQUOTED(PATH_RIPNGD_PID, "$quagga_statedir/ripngd.pid",ripngd PID)
 AC_DEFINE_UNQUOTED(PATH_BGPD_PID, "$quagga_statedir/bgpd.pid",bgpd PID)
 AC_DEFINE_UNQUOTED(PATH_OSPFD_PID, "$quagga_statedir/ospfd.pid",ospfd PID)
 AC_DEFINE_UNQUOTED(PATH_OSPF6D_PID, "$quagga_statedir/ospf6d.pid",ospf6d PID)
+AC_DEFINE_UNQUOTED(PATH_BABELD_PID, "$quagga_statedir/babeld.pid",babeld PID)
 AC_DEFINE_UNQUOTED(PATH_ISISD_PID, "$quagga_statedir/isisd.pid",isisd PID)
 AC_DEFINE_UNQUOTED(PATH_WATCHQUAGGA_PID, "$quagga_statedir/watchquagga.pid",watchquagga PID)
 AC_DEFINE_UNQUOTED(ZEBRA_SERV_PATH, "$quagga_statedir/zserv.api",zebra api socket)
@@ -1542,6 +1623,7 @@ AC_DEFINE_UNQUOTED(RIPNG_VTYSH_PATH, "$quagga_statedir/ripngd.vty",ripng vty soc
 AC_DEFINE_UNQUOTED(BGP_VTYSH_PATH, "$quagga_statedir/bgpd.vty",bgpd vty socket)
 AC_DEFINE_UNQUOTED(OSPF_VTYSH_PATH, "$quagga_statedir/ospfd.vty",ospfd vty socket)
 AC_DEFINE_UNQUOTED(OSPF6_VTYSH_PATH, "$quagga_statedir/ospf6d.vty",ospf6d vty socket)
+AC_DEFINE_UNQUOTED(BABEL_VTYSH_PATH, "$quagga_statedir/babeld.vty",babeld vty socket)
 AC_DEFINE_UNQUOTED(ISIS_VTYSH_PATH, "$quagga_statedir/isisd.vty",isisd vty socket)
 AC_DEFINE_UNQUOTED(DAEMON_VTY_DIR, "$quagga_statedir",daemon vty directory)
 
@@ -1566,8 +1648,9 @@ AC_MSG_RESULT($ac_cv_htonl_works)
 
 AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile 
 	  ripngd/Makefile bgpd/Makefile ospfd/Makefile watchquagga/Makefile
-	  ospf6d/Makefile isisd/Makefile vtysh/Makefile doc/Makefile 
-	  ospfclient/Makefile tests/Makefile m4/Makefile redhat/Makefile
+	  ospf6d/Makefile isisd/Makefile babeld/Makefile vtysh/Makefile
+          doc/Makefile ospfclient/Makefile tests/Makefile m4/Makefile
+          redhat/Makefile
 	  pkgsrc/Makefile
 	  redhat/quagga.spec 
 	  lib/version.h
@@ -1586,12 +1669,12 @@ echo "
 Quagga configuration
 --------------------
 quagga version          : ${PACKAGE_VERSION}
-host operating system  : ${host_os}
+host operating system   : ${host_os}
 source code location    : ${srcdir}
 compiler                : ${CC}
 compiler flags          : ${CFLAGS}
 make                    : ${MAKE-make}
-includes                : ${INCLUDES} ${SNMP_INCLUDES}
+includes                : ${INCLUDES}
 linker flags            : ${LDFLAGS} ${LIBS} ${LIBCAP} ${LIBREADLINE} ${LIBM}
 state file directory    : ${quagga_statedir}
 config file directory   : `eval echo \`echo ${sysconfdir}\``

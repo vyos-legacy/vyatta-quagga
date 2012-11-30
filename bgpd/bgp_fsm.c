@@ -597,8 +597,6 @@ bgp_stop_with_error (struct peer *peer)
 static int
 bgp_connect_success (struct peer *peer)
 {
-  char buf1[BUFSIZ];
-
   if (peer->fd < 0)
     {
       zlog_err ("bgp_connect_success peer's fd is negative value %d",
@@ -612,6 +610,8 @@ bgp_connect_success (struct peer *peer)
 
   if (BGP_DEBUG (normal, NORMAL))
     {
+      char buf1[SU_ADDRSTRLEN];
+
       if (! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
 	zlog_debug ("%s open active, local address %s", peer->host,
 		    sockunion2str (peer->su_local, buf1, SU_ADDRSTRLEN));
@@ -704,7 +704,7 @@ bgp_start (struct peer *peer)
 		    peer->fd);
 	  return -1;
 	}
-
+      BGP_READ_ON (peer->t_read, bgp_read, peer->fd);
       BGP_WRITE_ON (peer->t_write, bgp_write, peer->fd);
       break;
     }

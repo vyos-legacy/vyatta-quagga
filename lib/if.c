@@ -117,25 +117,21 @@ if_create (const char *name, int namelen)
 {
   struct interface *ifp;
 
-  ifp = if_lookup_by_name(name);
-  if (ifp) {
-    if (ifp->ifindex != IFINDEX_INTERNAL)
-      zlog_err("if_create(%s): corruption detected -- interface with this "
-	       "name exists already!", ifp->name);
-  } else {
-    ifp = XCALLOC (MTYPE_IF, sizeof (struct interface));
-    ifp->ifindex = IFINDEX_INTERNAL;
+  ifp = XCALLOC (MTYPE_IF, sizeof (struct interface));
+  ifp->ifindex = IFINDEX_INTERNAL;
   
-    assert (namelen <= INTERFACE_NAMSIZ);	/* Need space for '\0' at end. */
-    strncpy (ifp->name, name, namelen);
-    ifp->name[namelen] = '\0';
-
+  assert (name);
+  assert (namelen <= INTERFACE_NAMSIZ);	/* Need space for '\0' at end. */
+  strncpy (ifp->name, name, namelen);
+  ifp->name[namelen] = '\0';
+  if (if_lookup_by_name(ifp->name) == NULL)
     listnode_add_sort (iflist, ifp);
-  }
-
+  else
+    zlog_err("if_create(%s): corruption detected -- interface with this "
+	     "name exists already!", ifp->name);
   ifp->connected = list_new ();
   ifp->connected->del = (void (*) (void *)) connected_free;
-  
+
   if (if_master.if_new_hook)
     (*if_master.if_new_hook) (ifp);
 
@@ -150,11 +146,7 @@ if_delete_retain (struct interface *ifp)
     (*if_master.if_delete_hook) (ifp);
 
   /* Free connected address list */
-  if (ifp->connected)
-    {
-      list_delete (ifp->connected);
-      ifp->connected = NULL;
-    }
+  list_delete_all_node (ifp->connected);
 }
 
 /* Delete and free interface structure. */
@@ -164,6 +156,8 @@ if_delete (struct interface *ifp)
   listnode_delete (iflist, ifp);
 
   if_delete_retain(ifp);
+
+  list_free (ifp->connected);
 
   XFREE (MTYPE_IF, ifp);
 }
@@ -330,6 +324,60 @@ if_get_by_name_len(const char *name, size_t namelen)
 	 if_create(name, namelen);
 }
 
+/* Does interface up ? */
+int
+if_is_up (struct interface *ifp)
+{
+  return ifp->flags & IFF_UP;
+}
+
+/* Is interface running? */
+int
+if_is_running (struct interface *ifp)
+{
+  return ifp->flags & IFF_RUNNING;
+}
+
+/* Is the interface operative, eg. either UP & RUNNING
+   or UP & !ZEBRA_INTERFACE_LINK_DETECTION */
+int
+if_is_operative (struct interface *ifp)
+{
+  return ((ifp->flags & IFF_UP) &&
+	  (ifp->flags & IFF_RUNNING || !CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_LINKDETECTION)));
+}
+
+/* Is this loopback interface ? */
+int
+if_is_loopback (struct interface *ifp)
+{
+  /* XXX: Do this better, eg what if IFF_WHATEVER means X on platform M
+   * but Y on platform N?
+   */
+  return (ifp->flags & (IFF_LOOPBACK|IFF_NOXMIT|IFF_VIRTUAL));
+}
+
+/* Does this interface support broadcast ? */
+int
+if_is_broadcast (struct interface *ifp)
+{
+  return ifp->flags & IFF_BROADCAST;
+}
+
+/* Does this interface support broadcast ? */
+int
+if_is_pointopoint (struct interface *ifp)
+{
+  return ifp->flags & IFF_POINTOPOINT;
+}
+
+/* Does this interface support multicast ? */
+int
+if_is_multicast (struct interface *ifp)
+{
+  return ifp->flags & IFF_MULTICAST;
+}
+
 /* Printout flag information into log */
 const char *
 if_flag_dump (unsigned long flag)
@@ -380,16 +428,20 @@ if_flag_dump (unsigned long flag)
 static void
 if_dump (const struct interface *ifp)
 {
-  zlog_info ("Interface %s index %d metric %d mtu %d "
+  struct listnode *node;
+  struct connected *c;
+
+  for (ALL_LIST_ELEMENTS_RO (ifp->connected, node, c))
+    zlog_info ("Interface %s index %d metric %d mtu %d "
 #ifdef HAVE_IPV6
-             "mtu6 %d "
+               "mtu6 %d "
 #endif /* HAVE_IPV6 */
-             "%s",
-	     ifp->name, ifp->ifindex, ifp->metric, ifp->mtu, 
+               "%s",
+               ifp->name, ifp->ifindex, ifp->metric, ifp->mtu, 
 #ifdef HAVE_IPV6
-	     ifp->mtu6,
+               ifp->mtu6,
 #endif /* HAVE_IPV6 */
-	     if_flag_dump (ifp->flags));
+               if_flag_dump (ifp->flags));
 }
 
 /* Interface printing for all interface. */

@@ -64,6 +64,8 @@ struct ospf6_interface
   u_int16_t dead_interval;
   u_int32_t rxmt_interval;
 
+  u_int32_t state_change;
+
   /* Cost */
   u_int32_t cost;
 
@@ -123,6 +125,15 @@ extern const char *ospf6_interface_state_str[];
 /* flags */
 #define OSPF6_INTERFACE_DISABLE      0x01
 #define OSPF6_INTERFACE_PASSIVE      0x02
+
+/* default values */
+#define OSPF6_INTERFACE_HELLO_INTERVAL 10
+#define OSPF6_INTERFACE_DEAD_INTERVAL  40
+#define OSPF6_INTERFACE_RXMT_INTERVAL  5
+#define OSPF6_INTERFACE_COST           1
+#define OSPF6_INTERFACE_PRIORITY       1
+#define OSPF6_INTERFACE_TRANSDELAY     1
+#define OSPF6_INTERFACE_INSTANCE_ID    0
 
 
 /* Function Prototypes */

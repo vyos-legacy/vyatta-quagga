@@ -192,6 +192,18 @@ ospf_lsa_checksum (struct lsa_header *lsa)
   return fletcher_checksum(buffer, len, checksum_offset);
 }
 
+int
+ospf_lsa_checksum_valid (struct lsa_header *lsa)
+{
+  u_char *buffer = (u_char *) &lsa->options;
+  int options_offset = buffer - (u_char *) &lsa->ls_age; /* should be 2 */
+
+  /* Skip the AGE field */
+  u_int16_t len = ntohs(lsa->length) - options_offset;
+
+  return(fletcher_checksum(buffer, len, FLETCHER_CHECKSUM_VALIDATE) == 0);
+}
+
 
 
 /* Create OSPF LSA. */
@@ -670,6 +682,7 @@ router_lsa_link_set (struct stream *s, struct ospf_area *area)
 	{
 	  if (oi->state != ISM_Down)
 	    {
+	      oi->lsa_pos_beg = links;
 	      /* Describe each link. */
 	      switch (oi->type)
 		{
@@ -691,6 +704,7 @@ router_lsa_link_set (struct stream *s, struct ospf_area *area)
 		case OSPF_IFTYPE_LOOPBACK:
 		  links += lsa_link_loopback_set (s, oi); 
 		}
+	      oi->lsa_pos_end = links;
 	    }
 	}
     }
@@ -746,7 +760,7 @@ ospf_stub_router_timer (struct thread *t)
   return 0;
 }
 
-inline static void
+static void
 ospf_stub_router_check (struct ospf_area *area)
 {
   /* area must either be administratively configured to be stub
@@ -1637,7 +1651,7 @@ ospf_external_lsa_new (struct ospf *ospf,
   if (ei == NULL)
     {
       if (IS_DEBUG_OSPF (lsa, LSA_GENERATE))
-	zlog_debug ("LSA[Type5]: External info is NULL, could not originated");
+	zlog_debug ("LSA[Type5]: External info is NULL, can't originate");
       return NULL;
     }
 
@@ -1852,7 +1866,7 @@ ospf_translated_nssa_originate (struct ospf *ospf, struct ospf_lsa *type7)
   
   if ( (new = ospf_lsa_install (ospf, NULL, new)) == NULL)
     {
-      if (IS_DEBUG_OSPF_NSSA);
+      if (IS_DEBUG_OSPF_NSSA)
         zlog_debug ("ospf_lsa_translated_nssa_originate(): "
                    "Could not install LSA "
                    "id %s", inet_ntoa (type7->data->id));
@@ -2838,9 +2852,9 @@ ospf_maxage_lsa_remover (struct thread *thread)
           OSPF_TIMER_ON (ospf->t_maxage, ospf_maxage_lsa_remover, 0);
           
         /* Remove LSA from the LSDB */
-        if (CHECK_FLAG (lsa->flags, OSPF_LSA_SELF))
+        if (IS_LSA_SELF (lsa))
           if (IS_DEBUG_OSPF (lsa, LSA_FLOODING))
-            zlog_debug ("LSA[Type%d:%s]: LSA 0x%lx is self-oririnated: ",
+            zlog_debug ("LSA[Type%d:%s]: LSA 0x%lx is self-originated: ",
                        lsa->data->type, inet_ntoa (lsa->data->id), (u_long)lsa);
 
         if (IS_DEBUG_OSPF (lsa, LSA_FLOODING))
@@ -3389,7 +3403,7 @@ ospf_lsa_is_self_originated (struct ospf *ospf, struct ospf_lsa *lsa)
 
   /* This LSA is already checked. */
   if (CHECK_FLAG (lsa->flags, OSPF_LSA_SELF_CHECKED))
-    return CHECK_FLAG (lsa->flags, OSPF_LSA_SELF);
+    return IS_LSA_SELF (lsa);
 
   /* Make sure LSA is self-checked. */
   SET_FLAG (lsa->flags, OSPF_LSA_SELF_CHECKED);
@@ -3414,11 +3428,11 @@ ospf_lsa_is_self_originated (struct ospf *ospf, struct ospf_lsa *lsa)
 	      {
 		/* to make it easier later */
 		SET_FLAG (lsa->flags, OSPF_LSA_SELF);
-		return CHECK_FLAG (lsa->flags, OSPF_LSA_SELF);
+		return IS_LSA_SELF (lsa);
 	      }
       }
 
-  return CHECK_FLAG (lsa->flags, OSPF_LSA_SELF);
+  return IS_LSA_SELF (lsa);
 }
 
 /* Get unique Link State ID. */
@@ -3541,6 +3555,7 @@ ospf_lsa_refresh (struct ospf *ospf, struct ospf_lsa *lsa)
   struct external_info *ei;
   struct ospf_lsa *new = NULL;
   assert (CHECK_FLAG (lsa->flags, OSPF_LSA_SELF));
+  assert (IS_LSA_SELF (lsa));
   assert (lsa->lock > 0);
 
   switch (lsa->data->type)
@@ -3589,7 +3604,7 @@ ospf_refresher_register_lsa (struct ospf *ospf, struct ospf_lsa *lsa)
   u_int16_t index, current_index;
   
   assert (lsa->lock > 0);
-  assert (CHECK_FLAG (lsa->flags, OSPF_LSA_SELF));
+  assert (IS_LSA_SELF (lsa));
 
   if (lsa->refresh_list < 0)
     {
@@ -3632,7 +3647,7 @@ void
 ospf_refresher_unregister_lsa (struct ospf *ospf, struct ospf_lsa *lsa)
 {
   assert (lsa->lock > 0);
-  assert (CHECK_FLAG (lsa->flags, OSPF_LSA_SELF));
+  assert (IS_LSA_SELF (lsa));
   if (lsa->refresh_list >= 0)
     {
       struct list *refresh_list = ospf->lsa_refresh_queue.qs[lsa->refresh_list];

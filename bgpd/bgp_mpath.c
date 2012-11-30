@@ -46,7 +46,7 @@
  */
 int
 bgp_maximum_paths_set (struct bgp *bgp, afi_t afi, safi_t safi,
-                       int peertype, u_int32_t maxpaths)
+                       int peertype, u_int16_t maxpaths)
 {
   if (!bgp || (afi >= AFI_MAX) || (safi >= SAFI_MAX))
     return -1;
@@ -397,7 +397,7 @@ bgp_info_mpath_update (struct bgp_node *rn, struct bgp_info *new_best,
                        struct bgp_info *old_best, struct list *mp_list,
                        struct bgp_maxpaths_cfg *mpath_cfg)
 {
-  u_int32_t maxpaths, mpath_count, old_mpath_count;
+  u_int16_t maxpaths, mpath_count, old_mpath_count;
   struct listnode *mp_node, *mp_next_node;
   struct bgp_info *cur_mpath, *new_mpath, *next_mpath, *prev_mpath;
   int mpath_changed, debug;
@@ -420,7 +420,7 @@ bgp_info_mpath_update (struct bgp_node *rn, struct bgp_info *new_best,
       mpath_count++;
       if (new_best != old_best)
         bgp_info_mpath_dequeue (new_best);
-      maxpaths = (peer_sort (new_best->peer) == BGP_PEER_IBGP) ?
+      maxpaths = (new_best->peer->sort == BGP_PEER_IBGP) ?
         mpath_cfg->maxpaths_ibgp : mpath_cfg->maxpaths_ebgp;
     }
 

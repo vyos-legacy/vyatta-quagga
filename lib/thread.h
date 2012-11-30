@@ -1,5 +1,6 @@
 /* Thread management routine header.
  * Copyright (C) 1998 Kunihiro Ishiguro
+ * Portions Copyright (c) 2008 Everton da Silva Marques <everton.marques@gmail.com>
  *
  * This file is part of GNU Zebra.
  *
@@ -21,6 +22,8 @@
 
 #ifndef _ZEBRA_THREAD_H
 #define _ZEBRA_THREAD_H
+
+#include <zebra.h>
 
 struct rusage_t
 {
@@ -53,10 +56,14 @@ struct thread_master
   struct thread_list background;
   fd_set readfd;
   fd_set writefd;
+  fd_set exceptfd;
   unsigned long alloc;
 };
 
 typedef unsigned char thread_type;
+
+/* ISO C99 maximum function name length is 63 */
+#define FUNCNAME_LEN	64
 
 /* Thread itself. */
 struct thread
@@ -73,15 +80,14 @@ struct thread
     int fd;			/* file descriptor in case of read/write. */
     struct timeval sands;	/* rest of time sands value. */
   } u;
-  RUSAGE_T ru;			/* Indepth usage info.  */
+  struct timeval real;
   struct cpu_thread_history *hist; /* cache pointer to cpu_history */
-  char* funcname;
+  char funcname[FUNCNAME_LEN];
 };
 
 struct cpu_thread_history 
 {
   int (*func)(struct thread *);
-  char *funcname;
   unsigned int total_calls;
   struct time_stats
   {
@@ -91,6 +97,7 @@ struct cpu_thread_history
   struct time_stats cpu;
 #endif
   thread_type types;
+  char funcname[FUNCNAME_LEN];
 };
 
 /* Clocks supported by Quagga */
@@ -134,6 +141,12 @@ enum quagga_clkid {
   do { \
     if (! thread) \
       thread = thread_add_timer (master, func, arg, time); \
+  } while (0)
+
+#define THREAD_TIMER_MSEC_ON(master,thread,func,arg,time) \
+  do { \
+    if (! thread) \
+      thread = thread_add_timer_msec (master, func, arg, time); \
   } while (0)
 
 #define THREAD_OFF(thread) \

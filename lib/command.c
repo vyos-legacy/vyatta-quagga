@@ -868,86 +868,7 @@ cmd_ipv6_match (const char *str)
   if (ret == 1)
     return exact_match;
 
-  while (*str != '\0')
-    {
-      switch (state)
-	{
-	case STATE_START:
-	  if (*str == ':')
-	    {
-	      if (*(str + 1) != ':' && *(str + 1) != '\0')
-		return no_match;
-     	      colons--;
-	      state = STATE_COLON;
-	    }
-	  else
-	    {
-	      sp = str;
-	      state = STATE_ADDR;
-	    }
-
-	  continue;
-	case STATE_COLON:
-	  colons++;
-	  if (*(str + 1) == ':')
-	    state = STATE_DOUBLE;
-	  else
-	    {
-	      sp = str + 1;
-	      state = STATE_ADDR;
-	    }
-	  break;
-	case STATE_DOUBLE:
-	  if (double_colon)
-	    return no_match;
-
-	  if (*(str + 1) == ':')
-	    return no_match;
-	  else
-	    {
-	      if (*(str + 1) != '\0')
-		colons++;
-	      sp = str + 1;
-	      state = STATE_ADDR;
-	    }
-
-	  double_colon++;
-	  nums++;
-	  break;
-	case STATE_ADDR:
-	  if (*(str + 1) == ':' || *(str + 1) == '\0')
-	    {
-	      if (str - sp > 3)
-		return no_match;
-
-	      nums++;
-	      state = STATE_COLON;
-	    }
-	  if (*(str + 1) == '.')
-	    state = STATE_DOT;
-	  break;
-	case STATE_DOT:
-	  state = STATE_ADDR;
-	  break;
-	default:
-	  break;
-	}
-
-      if (nums > 8)
-	return no_match;
-
-      if (colons > 7)
-	return no_match;
-
-      str++;
-    }
-
-#if 0
-  if (nums < 11)
-    return partly_match;
-#endif /* 0 */
-
-  return exact_match;
+  return no_match;
 }
 
 static enum match_type
@@ -1033,7 +954,12 @@ cmd_ipv6_prefix_match (const char *str)
 	      if (*(str + 1) == ':')
 		state = STATE_COLON;
 	      else if (*(str + 1) == '.')
-		state = STATE_DOT;
+		{
+		  if (colons || double_colon)
+		    state = STATE_DOT;
+		  else
+		    return no_match;
+		}
 	      else if (*(str + 1) == '/')
 		state = STATE_SLASH;
 	    }
@@ -2400,6 +2326,7 @@ DEFUN (config_exit,
     case BGP_NODE:
     case RIP_NODE:
     case RIPNG_NODE:
+    case BABEL_NODE:
     case OSPF_NODE:
     case OSPF6_NODE:
     case ISIS_NODE:
@@ -2449,6 +2376,7 @@ DEFUN (config_end,
     case ZEBRA_NODE:
     case RIP_NODE:
     case RIPNG_NODE:
+    case BABEL_NODE:
     case BGP_NODE:
     case BGP_VPNV4_NODE:
     case BGP_IPV4_NODE:

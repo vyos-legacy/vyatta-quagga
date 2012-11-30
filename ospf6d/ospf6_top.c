@@ -302,7 +302,7 @@ DEFUN (ospf6_router_id,
   if (ret == 0)
     {
       vty_out (vty, "malformed OSPF Router-ID: %s%s", argv[0], VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   o->router_id_static = router_id;
@@ -338,14 +338,14 @@ DEFUN (ospf6_interface_area,
     {
       vty_out (vty, "%s already attached to Area %s%s",
                oi->interface->name, oi->area->name, VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   /* parse Area-ID */
   if (inet_pton (AF_INET, argv[1], &area_id) != 1)
     {
       vty_out (vty, "Invalid Area-ID: %s%s", argv[1], VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   /* find/create ospf6 area */
@@ -391,35 +391,35 @@ DEFUN (no_ospf6_interface_area,
   if (ifp == NULL)
     {
       vty_out (vty, "No such interface %s%s", argv[0], VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   oi = (struct ospf6_interface *) ifp->info;
   if (oi == NULL)
     {
       vty_out (vty, "Interface %s not enabled%s", ifp->name, VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   /* parse Area-ID */
   if (inet_pton (AF_INET, argv[1], &area_id) != 1)
     {
       vty_out (vty, "Invalid Area-ID: %s%s", argv[1], VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   /* Verify Area */
   if (oi->area == NULL)
     {
       vty_out (vty, "No such Area-ID: %s%s", argv[1], VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   if (oi->area->area_id != area_id)
     {
       vty_out (vty, "Wrong Area-ID: %s is attached to area %s%s",
                oi->interface->name, oi->area->name, VNL);
-      return CMD_WARNING;
+      return CMD_SUCCESS;
     }
 
   thread_execute (master, interface_down, oi, 0);

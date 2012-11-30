@@ -50,13 +50,11 @@ extern void ospf_zebra_delete (struct prefix_ipv4 *, struct ospf_route *);
 extern void ospf_zebra_add_discard (struct prefix_ipv4 *);
 extern void ospf_zebra_delete_discard (struct prefix_ipv4 *);
 
-extern int ospf_default_originate_timer (struct thread *);
-
 extern int ospf_redistribute_check (struct ospf *, struct external_info *,
 				    int *);
 extern int ospf_distribute_check_connected (struct ospf *,
 					    struct external_info *);
-extern void ospf_distribute_list_update (struct ospf *, unsigned long);
+extern void ospf_distribute_list_update (struct ospf *, int);
 
 extern int ospf_is_type_redistributed (int);
 extern void ospf_distance_reset (struct ospf *);

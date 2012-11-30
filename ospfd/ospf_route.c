@@ -429,7 +429,7 @@ ospf_intra_add_transit (struct route_table *rt, struct vertex *v,
 void
 ospf_intra_add_stub (struct route_table *rt, struct router_lsa_link *link,
 		     struct vertex *v, struct ospf_area *area,
-		     int parent_is_root)
+		     int parent_is_root, int lsa_pos)
 {
   u_int32_t cost;
   struct route_node *rn;
@@ -577,7 +577,7 @@ ospf_intra_add_stub (struct route_table *rt, struct router_lsa_link *link,
       if (IS_DEBUG_OSPF_EVENT)
 	zlog_debug ("ospf_intra_add_stub(): this network is on this router");
 
-      if ((oi = ospf_if_lookup_by_prefix (area->ospf, &p)))
+      if ((oi = ospf_if_lookup_by_lsa_pos (area, lsa_pos)))
 	{
 	  if (IS_DEBUG_OSPF_EVENT)
 	    zlog_debug ("ospf_intra_add_stub(): the interface is %s",
@@ -954,6 +954,10 @@ ospf_add_discard_route (struct route_table *rt, struct ospf_area *area,
       ospf_route_free (rn->info);
   }
 
+  if (IS_DEBUG_OSPF_EVENT)
+    zlog_debug ("ospf_add_discard_route(): "
+		"adding %s/%d", inet_ntoa (p->prefix), p->prefixlen);
+
   new_or = ospf_route_new ();
   new_or->type = OSPF_DESTINATION_DISCARD;
   new_or->id.s_addr = 0;
@@ -969,8 +973,52 @@ ospf_add_discard_route (struct route_table *rt, struct ospf_area *area,
 }
 
 void
-ospf_delete_discard_route (struct prefix_ipv4 *p)
+ospf_delete_discard_route (struct route_table *rt, struct prefix_ipv4 *p)
 {
+  struct route_node *rn;
+  struct ospf_route *or;
+
+  if (IS_DEBUG_OSPF_EVENT)
+    zlog_debug ("ospf_delete_discard_route(): "
+		"deleting %s/%d", inet_ntoa (p->prefix), p->prefixlen);
+
+  rn = route_node_lookup (rt, (struct prefix*)p);
+
+  if (rn == NULL)
+    {
+      if (IS_DEBUG_OSPF_EVENT)
+	zlog_debug("ospf_delete_discard_route(): no route found");
+      return;
+    }
+
+  or = rn->info;
+
+  if (or->path_type == OSPF_PATH_INTRA_AREA)
+    {
+      if (IS_DEBUG_OSPF_EVENT)
+	zlog_debug ("ospf_delete_discard_route(): "
+		    "an intra-area route exists");
+      return;
+    }
+
+  if (or->type != OSPF_DESTINATION_DISCARD)
+    {
+      if (IS_DEBUG_OSPF_EVENT)
+	zlog_debug ("ospf_delete_discard_route(): "
+		    "not a discard entry");
+      return;
+    }
+
+  /* free the route entry and the route node */
+  ospf_route_free (rn->info);
+
+  rn->info = NULL;
+  route_unlock_node (rn);
+  route_unlock_node (rn);
+
+  /* remove the discard entry from the rib */
   ospf_zebra_delete_discard(p);
+
+  return;
 }
 

@@ -21,15 +21,9 @@
 
 #include <zebra.h>
 
-#ifdef HAVE_SNMP
-#ifdef HAVE_NETSNMP
+#if defined HAVE_SNMP && defined SNMP_SMUX
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
-#else
-#include <asn1.h>
-#include <snmp.h>
-#include <snmp_impl.h>
-#endif
 
 #include "log.h"
 #include "thread.h"
@@ -39,6 +33,45 @@
 #include "memory.h"
 #include "sockunion.h"
 #include "smux.h"
+
+#define SMUX_PORT_DEFAULT 199
+
+#define SMUXMAXPKTSIZE    1500
+#define SMUXMAXSTRLEN      256
+
+#define SMUX_OPEN       (ASN_APPLICATION | ASN_CONSTRUCTOR | 0)
+#define SMUX_CLOSE      (ASN_APPLICATION | ASN_PRIMITIVE | 1)
+#define SMUX_RREQ       (ASN_APPLICATION | ASN_CONSTRUCTOR | 2)
+#define SMUX_RRSP       (ASN_APPLICATION | ASN_PRIMITIVE | 3)
+#define SMUX_SOUT       (ASN_APPLICATION | ASN_PRIMITIVE | 4)
+
+#define SMUX_GET        (ASN_CONTEXT | ASN_CONSTRUCTOR | 0)
+#define SMUX_GETNEXT    (ASN_CONTEXT | ASN_CONSTRUCTOR | 1)
+#define SMUX_GETRSP     (ASN_CONTEXT | ASN_CONSTRUCTOR | 2)
+#define SMUX_SET	(ASN_CONTEXT | ASN_CONSTRUCTOR | 3)
+#define SMUX_TRAP	(ASN_CONTEXT | ASN_CONSTRUCTOR | 4)
+
+#define SMUX_MAX_FAILURE 3
+
+/* SNMP tree. */
+struct subtree
+{
+  /* Tree's oid. */
+  oid name[MAX_OID_LEN];
+  u_char name_len;
+
+  /* List of the variables. */
+  struct variable *variables;
+
+  /* Length of the variables list. */
+  int variables_num;
+
+  /* Width of the variables list. */
+  int variables_width;
+
+  /* Registered flag. */
+  int registered;
+};
 
 #define min(A,B) ((A) < (B) ? (A) : (B))
 
@@ -69,6 +102,9 @@ struct thread *smux_connect_thread;
 /* SMUX debug flag. */
 int debug_smux = 0;
 
+/* SMUX failure count. */
+int fail = 0;
+
 /* SMUX node. */
 static struct cmd_node smux_node =
 {
@@ -79,62 +115,6 @@ static struct cmd_node smux_node =
 /* thread master */
 static struct thread_master *master;
 
-static void *
-oid_copy (void *dest, const void *src, size_t size)
-{
-  return memcpy (dest, src, size * sizeof (oid));
-}
-
-void
-oid2in_addr (const oid oid[], int len, struct in_addr *addr)
-{
-  int i;
-  u_char *pnt;
-  
-  if (len == 0)
-    return;
-
-  pnt = (u_char *) addr;
-
-  for (i = 0; i < len; i++)
-    *pnt++ = oid[i];
-}
-
-void
-oid_copy_addr (oid oid[], const struct in_addr *addr, int len)
-{
-  int i;
-  const u_char *pnt;
-  
-  if (len == 0)
-    return;
-
-  pnt = (u_char *) addr;
-
-  for (i = 0; i < len; i++)
-    oid[i] = *pnt++;
-}
-
-static int
-oid_compare (const oid *o1, int o1_len, const oid *o2, int o2_len)
-{
-  int i;
-
-  for (i = 0; i < min (o1_len, o2_len); i++)
-    {
-      if (o1[i] < o2[i])
-	return -1;
-      else if (o1[i] > o2[i])
-	return 1;
-    }
-  if (o1_len < o2_len)
-    return -1;
-  if (o1_len > o2_len)
-    return 1;
-
-  return 0;
-}
-
 static int
 oid_compare_part (oid *o1, int o1_len, oid *o2, int o2_len)
 {
@@ -224,7 +204,7 @@ smux_socket (void)
       break;
     }
   freeaddrinfo(res0);
-  if (sock < 0 && debug_smux)
+  if (sock < 0)
     zlog_warn ("Can't connect to SNMP agent with SMUX");
 #else
   sock = socket (AF_INET, SOCK_STREAM, 0);
@@ -256,8 +236,7 @@ smux_socket (void)
     {
       close (sock);
       smux_sock = -1;
-      if (debug_smux)
-	zlog_warn ("Can't connect to SNMP agent with SMUX");
+      zlog_warn ("Can't connect to SNMP agent with SMUX");
       return -1;
     }
 #endif
@@ -477,7 +456,7 @@ smux_set (oid *reqid, size_t *reqid_len,
                   if (write_method)
                     {
                       return (*write_method)(action, val, val_type, val_len,
-					     statP, suffix, suffix_len, v);
+					     statP, suffix, suffix_len);
                     }
                   else
                     {
@@ -989,11 +968,18 @@ smux_open (int sock)
   return send (sock, buf, (ptr - buf), 0);
 }
 
+/* `ename` is ignored. Instead of using the provided enterprise OID,
+   the SMUX peer is used. This keep compatibility with the previous
+   versions of Quagga.
+
+   All other fields are used as they are intended. */
 int
-smux_trap (const oid *name, size_t namelen,
+smux_trap (struct variable *vp, size_t vp_len,
+	   const oid *ename, size_t enamelen,
+	   const oid *name, size_t namelen,
 	   const oid *iname, size_t inamelen,
 	   const struct trap_object *trapobj, size_t trapobjlen,
-	   unsigned int tick, u_char sptrap)
+	   u_char sptrap)
 {
   unsigned int i;
   u_char buf[BUFSIZ];
@@ -1176,10 +1162,9 @@ static int
 smux_connect (struct thread *t)
 {
   int ret;
-  static int fail;
 
   if (debug_smux)
-    zlog_debug ("SMUX connect try %d", ++fail);
+    zlog_debug ("SMUX connect try %d", fail + 1);
 
   /* Clear thread poner of myself. */
   smux_connect_thread = NULL;
@@ -1188,7 +1173,8 @@ smux_connect (struct thread *t)
   smux_sock = smux_socket ();
   if (smux_sock < 0)
     {
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return 0;
     }
 
@@ -1199,7 +1185,8 @@ smux_connect (struct thread *t)
       zlog_warn ("SMUX open message send failed: %s", safe_strerror (errno));
       close (smux_sock);
       smux_sock = -1;
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return -1;
     }
 
@@ -1210,7 +1197,8 @@ smux_connect (struct thread *t)
       zlog_warn ("SMUX register message send failed: %s", safe_strerror (errno));
       close (smux_sock);
       smux_sock = -1;
-      smux_event (SMUX_CONNECT, 0);
+      if (++fail < SMUX_MAX_FAILURE)
+	smux_event (SMUX_CONNECT, 0);
       return -1;
     }
 
@@ -1354,32 +1342,6 @@ smux_peer_oid (struct vty *vty, const char *oid_str, const char *passwd_str)
     smux_passwd = strdup ("");
 
   return 0;
-}
-
-int
-smux_header_generic (struct variable *v, oid *name, size_t *length, int exact,
-		     size_t *var_len, WriteMethod **write_method)
-{
-  oid fulloid[MAX_OID_LEN];
-  int ret;
-
-  oid_copy (fulloid, v->name, v->namelen);
-  fulloid[v->namelen] = 0;
-  /* Check against full instance. */
-  ret = oid_compare (name, *length, fulloid, v->namelen + 1);
-
-  /* Check single instance. */
-  if ((exact && (ret != 0)) || (!exact && (ret >= 0)))
-	return MATCH_FAILED;
-
-  /* In case of getnext, fill in full instance. */
-  memcpy (name, fulloid, (v->namelen + 1) * sizeof (oid));
-  *length = v->namelen + 1;
-
-  *write_method = 0;
-  *var_len = sizeof(long);    /* default to 'long' results */
-
-  return MATCH_SUCCEEDED;
 }
 
 static int

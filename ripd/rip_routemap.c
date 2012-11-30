@@ -580,10 +580,7 @@ route_set_metric_compile (const char *arg)
 
   if (metric == LONG_MAX || *endptr != '\0')
     return NULL;
-
-  /* The check for RIP_METRIC_INFINITY has been
-     removed to match ripng behavior */
-  if (metric < 0)
+  if (metric < 0 || metric > RIP_METRIC_INFINITY)
     return NULL;
 
   mod = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, 
@@ -1003,7 +1000,7 @@ DEFUN (no_set_metric,
 
 ALIAS (no_set_metric,
        no_set_metric_val_cmd,
-       "no set metric <0-4294967295>",
+       "no set metric (<0-4294967295>|<+/-metric>)",
        NO_STR
        SET_STR
        "Metric value for destination routing protocol\n"
