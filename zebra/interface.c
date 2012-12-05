@@ -76,9 +76,9 @@ if_zebra_new_hook (struct interface *ifp)
     rtadv->AdvReachableTime = 0;
     rtadv->AdvRetransTimer = 0;
     rtadv->AdvCurHopLimit = 0;
-    rtadv->AdvDefaultLifetime = RTADV_ADV_DEFAULT_LIFETIME;
+    rtadv->AdvDefaultLifetime = -1; /* derive from MaxRtrAdvInterval */
     rtadv->HomeAgentPreference = 0;
-    rtadv->HomeAgentLifetime = RTADV_ADV_DEFAULT_LIFETIME;
+    rtadv->HomeAgentLifetime = -1; /* derive from AdvDefaultLifetime */
     rtadv->AdvIntervalOption = 0;
     rtadv->DefaultPreference = RTADV_PREF_MEDIUM;
 
@@ -108,7 +108,6 @@ if_zebra_delete_hook (struct interface *ifp)
 	route_table_finish (zebra_if->ipv4_subnets);
 
       XFREE (MTYPE_TMP, zebra_if);
-      ifp->info = NULL;
     }
 
   return 0;
@@ -217,7 +216,7 @@ if_subnet_delete (struct interface *ifp, struct connected *ifc)
  * interface will affect only the primary interface/address on Solaris.
  ************************End Solaris flags hacks ***********************
  */
-static inline void
+static void
 if_flags_mangle (struct interface *ifp, uint64_t *newflags)
 {
 #ifdef SUNOS_5
@@ -494,54 +493,6 @@ if_delete_update (struct interface *ifp)
   ifp->ifindex = IFINDEX_INTERNAL;
 }
 
-/* Interfaces can only be renamed when DOWN */
-void
-if_rename (struct interface *ifp, const char *name)
-{
-  struct interface *oifp;
-
-  UNSET_FLAG (ifp->status, ZEBRA_INTERFACE_ACTIVE);
-  zebra_interface_delete_update (ifp);
-  listnode_delete (iflist, ifp);
-
-  /* rename overlaps earlier interface */
-  oifp = if_lookup_by_name(name);
-  if (oifp)
-    {
-      ifp->status |= oifp->status; /* inherit config bits */
-      if (oifp->ifindex != IFINDEX_INTERNAL)
-	{
-	  zlog_err ("interface %s rename to %s overlaps with index %d",
-		    ifp->name, name, oifp->ifindex);
-	  if_delete_update (oifp);
-	}
-      else if (IS_ZEBRA_DEBUG_KERNEL)
-	zlog_debug ("interface %s index %d superseded by rename of %s",
-		    oifp->name, oifp->ifindex, ifp->name);
-
-      listnode_delete (iflist, oifp);
-      XFREE (MTYPE_IF, oifp);
-    }
-
-  strncpy(ifp->name, name, INTERFACE_NAMSIZ);
-  ifp->name[INTERFACE_NAMSIZ] = 0;
-  listnode_add_sort (iflist, ifp);
-
-  zebra_interface_add_update (ifp);
-
-  SET_FLAG (ifp->status, ZEBRA_INTERFACE_ACTIVE);
-
-  if (ifp->connected)
-    {
-      struct connected *ifc;
-      struct listnode *node;
-      for (ALL_LIST_ELEMENTS_RO (ifp->connected, node, ifc))
-	zebra_interface_address_add_update (ifp, ifc);
-    }
-
-  rib_update ();
-}
-
 /* Interface is up. */
 void
 if_up (struct interface *ifp)
@@ -595,14 +546,7 @@ if_down (struct interface *ifp)
 	  p = ifc->address;
 
 	  if (p->family == AF_INET)
-	    {
-	      connected_down_ipv4 (ifp, ifc);
-
-	      /* Taking interface to admin down causes kernel
-		 to do an implicit flush */
-	      if (!if_is_up (ifp))
-		rib_flush_interface (AFI_IP, ifc->ifp);
-	    }
+	    connected_down_ipv4 (ifp, ifc);
 #ifdef HAVE_IPV6
 	  else if (p->family == AF_INET6)
 	    connected_down_ipv6 (ifp, ifc);
@@ -686,8 +630,12 @@ nd_dump_vty (struct vty *vty, struct interface *ifp)
         vty_out (vty, "  ND router advertisements are sent every "
 			"%d seconds%s", interval / 1000,
 		 VTY_NEWLINE);
-      vty_out (vty, "  ND router advertisements live for %d seconds%s",
-	       rtadv->AdvDefaultLifetime, VTY_NEWLINE);
+      if (rtadv->AdvDefaultLifetime != -1)
+	vty_out (vty, "  ND router advertisements live for %d seconds%s",
+		 rtadv->AdvDefaultLifetime, VTY_NEWLINE);
+      else
+	vty_out (vty, "  ND router advertisements lifetime tracks ra-interval%s",
+		 VTY_NEWLINE);
       vty_out (vty, "  ND router advertisement default router preference is "
 			"%s%s", rtadv_pref_strs[rtadv->DefaultPreference],
 		 VTY_NEWLINE);
@@ -698,9 +646,19 @@ nd_dump_vty (struct vty *vty, struct interface *ifp)
 	vty_out (vty, "  Hosts use stateless autoconfig for addresses.%s",
 		 VTY_NEWLINE);
       if (rtadv->AdvHomeAgentFlag)
+      {
       	vty_out (vty, "  ND router advertisements with "
 				"Home Agent flag bit set.%s",
 		 VTY_NEWLINE);
+	if (rtadv->HomeAgentLifetime != -1)
+	  vty_out (vty, "  Home Agent lifetime is %u seconds%s",
+	           rtadv->HomeAgentLifetime, VTY_NEWLINE);
+	else
+	  vty_out (vty, "  Home Agent lifetime tracks ra-lifetime%s",
+	           VTY_NEWLINE);
+	vty_out (vty, "  Home Agent preference is %u%s",
+	         rtadv->HomeAgentPreference, VTY_NEWLINE);
+      }
       if (rtadv->AdvIntervalOption)
       	vty_out (vty, "  ND router advertisements with Adv. Interval option.%s",
 		 VTY_NEWLINE);
@@ -1339,13 +1297,28 @@ ip_address_uninstall (struct vty *vty, struct interface *ifp,
 	       safe_strerror(errno), VTY_NEWLINE);
       return CMD_WARNING;
     }
+  /* success! call returned that the address deletion went through.
+   * this is a synchronous operation, so we know it succeeded and can
+   * now update all internal state. */
 
-#if 0
-  /* Redistribute this information. */
-  zebra_interface_address_delete_update (ifp, ifc);
+  /* the HAVE_NETLINK check is only here because, on BSD, although the
+   * call above is still synchronous, we get a second confirmation later
+   * through the route socket, and we don't want to touch that behaviour
+   * for now.  It should work without the #ifdef, but why take the risk...
+   * -- equinox 2012-07-13 */
+#ifdef HAVE_NETLINK
 
   /* Remove connected route. */
   connected_down_ipv4 (ifp, ifc);
+
+  /* Redistribute this information. */
+  zebra_interface_address_delete_update (ifp, ifc);
+
+  /* IP address propery set. */
+  UNSET_FLAG (ifc->conf, ZEBRA_IFC_REAL);
+
+  /* remove from interface, remark secondaries */
+  if_subnet_delete (ifp, ifc);
 
   /* Free address information. */
   listnode_delete (ifp->connected, ifc);

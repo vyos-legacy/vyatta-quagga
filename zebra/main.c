@@ -63,10 +63,6 @@ int keep_kernel_mode = 0;
 u_int32_t nl_rcvbufsize = 0;
 #endif /* HAVE_NETLINK */
 
-
-extern int set_interface_mode;		/* Manage connected routes */
-extern int rib_process_hold_time;	/* Delay for RIB updates */
-
 /* Command line options. */
 struct option longopts[] = 
 {
@@ -75,6 +71,7 @@ struct option longopts[] =
   { "keep_kernel", no_argument,       NULL, 'k'},
   { "config_file", required_argument, NULL, 'f'},
   { "pid_file",    required_argument, NULL, 'i'},
+  { "socket",      required_argument, NULL, 'z'},
   { "help",        no_argument,       NULL, 'h'},
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
@@ -86,8 +83,6 @@ struct option longopts[] =
   { "user",        required_argument, NULL, 'u'},
   { "group",       required_argument, NULL, 'g'},
   { "version",     no_argument,       NULL, 'v'},
-  { "set_interface",  no_argument,       NULL, 'S'},
-  { "hold_time",   required_argument, NULL, 'H' },
   { 0 }
 };
 
@@ -109,7 +104,7 @@ struct zebra_privs_t zserv_privs =
   .vty_group = VTY_GROUP,
 #endif
   .caps_p = _caps_p,
-  .cap_num_p = sizeof(_caps_p)/sizeof(_caps_p[0]),
+  .cap_num_p = array_size(_caps_p),
   .cap_num_i = 0
 };
 
@@ -134,12 +129,12 @@ usage (char *progname, int status)
 	      "-d, --daemon       Runs in daemon mode\n"\
 	      "-f, --config_file  Set configuration file name\n"\
 	      "-i, --pid_file     Set process identifier file name\n"\
+	      "-z, --socket       Set path of zebra socket\n"\
 	      "-k, --keep_kernel  Don't delete old routes which installed by "\
 				  "zebra.\n"\
 	      "-C, --dryrun       Check configuration for validity and exit\n"\
 	      "-A, --vty_addr     Set vty's bind address\n"\
 	      "-P, --vty_port     Set vty's port number\n"\
-	      "-S, --system       Manage all routes on link transitions\n" \
 	      "-r, --retain       When program terminates, retain added route "\
 				  "by zebra.\n"\
 	      "-u, --user         User to run as\n"\
@@ -221,6 +216,7 @@ main (int argc, char **argv)
   char *config_file = NULL;
   char *progname;
   struct thread thread;
+  char *zserv_path = NULL;
 
   /* Set umask before anything for security */
   umask (0027);
@@ -235,7 +231,12 @@ main (int argc, char **argv)
     {
       int opt;
   
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:CSH:", longopts, 0);
+#ifdef HAVE_NETLINK  
+      opt = getopt_long (argc, argv, "bdkf:i:z:hA:P:ru:g:vs:C", longopts, 0);
+#else
+      opt = getopt_long (argc, argv, "bdkf:i:z:hA:P:ru:g:vC", longopts, 0);
+#endif /* HAVE_NETLINK */
+
       if (opt == EOF)
 	break;
 
@@ -251,9 +252,6 @@ main (int argc, char **argv)
 	case 'k':
 	  keep_kernel_mode = 1;
 	  break;
-	case 'S':
-	  set_interface_mode = 1;
-	  break;
 	case 'C':
 	  dryrun = 1;
 	  break;
@@ -263,12 +261,12 @@ main (int argc, char **argv)
 	case 'A':
 	  vty_addr = optarg;
 	  break;
-	case 'H':
-	  rib_process_hold_time = atoi(optarg);
-	  break;
         case 'i':
           pid_file = optarg;
           break;
+	case 'z':
+	  zserv_path = optarg;
+	  break;
 	case 'P':
 	  /* Deal with atoi() returning 0 on failure, and zebra not
 	     listening on zebra port... */
@@ -284,11 +282,11 @@ main (int argc, char **argv)
 	case 'r':
 	  retain_mode = 1;
 	  break;
-	case 's':
 #ifdef HAVE_NETLINK
+	case 's':
 	  nl_rcvbufsize = atoi (optarg);
-#endif /* HAVE_NETLINK */
 	  break;
+#endif /* HAVE_NETLINK */
 	case 'u':
 	  zserv_privs.user = optarg;
 	  break;
@@ -311,11 +309,11 @@ main (int argc, char **argv)
   /* Make master thread emulator. */
   zebrad.master = thread_master_create ();
 
-  /* privs initialize */
+  /* privs initialise */
   zprivs_init (&zserv_privs);
 
   /* Vty related initialize. */
-  signal_init (zebrad.master, Q_SIGC(zebra_signals), zebra_signals);
+  signal_init (zebrad.master, array_size(zebra_signals), zebra_signals);
   cmd_init (1);
   vty_init (zebrad.master);
   memory_init ();
@@ -329,7 +327,9 @@ main (int argc, char **argv)
   zebra_vty_init ();
   access_list_init ();
   prefix_list_init ();
+#ifdef RTADV
   rtadv_init ();
+#endif
 #ifdef HAVE_IRDP
   irdp_init();
 #endif
@@ -394,7 +394,7 @@ main (int argc, char **argv)
   pid = getpid ();
 
   /* This must be done only after locking pidfile (bug #403). */
-  zebra_zserv_socket_init ();
+  zebra_zserv_socket_init (zserv_path);
 
   /* Make vty server socket. */
   vty_serv_sock (vty_addr, vty_port, ZEBRA_VTYSH_PATH);

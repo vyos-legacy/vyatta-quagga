@@ -210,28 +210,6 @@ static void log_it(const char *line)
   fprintf(logfile, "%s:%s %s\n", tod, user, line);
 }
 
-static int echo_command = 0;
-static int no_error = 0;
-
-/* Execute one command line doing logging and exit if fails */
-static void vtysh_cmdline(const char *line)
-{
-  int ret;
-
-  if (echo_command)
-    printf("%s%s\n", vtysh_prompt(), line);
-
-  if (logfile)
-    log_it(line);
-
-  ret = vtysh_execute_no_pager(line);
-  if (no_error)
-    return;
-
-  if ( !(ret == CMD_SUCCESS || ret == CMD_SUCCESS_DAEMON) )
-    exit(1);
-}
-
 /* VTY shell main routine. */
 int
 main (int argc, char **argv, char **env)
@@ -246,6 +224,8 @@ main (int argc, char **argv, char **env)
     struct cmd_rec *next;
   } *cmd = NULL;
   struct cmd_rec *tail = NULL;
+  int echo_command = 0;
+  int no_error = 0;
 
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
@@ -350,17 +330,41 @@ main (int argc, char **argv, char **env)
 
       while (cmd != NULL)
         {
+	  int ret;
 	  char *eol;
 
 	  while ((eol = strchr(cmd->line, '\n')) != NULL)
 	    {
 	      *eol = '\0';
 
-	      vtysh_cmdline(cmd->line);
+	      if (echo_command)
+		printf("%s%s\n", vtysh_prompt(), cmd->line);
+	      
+	      if (logfile)
+		log_it(cmd->line);
+
+	      ret = vtysh_execute_no_pager(cmd->line);
+	      if (!no_error &&
+		  ! (ret == CMD_SUCCESS ||
+		     ret == CMD_SUCCESS_DAEMON ||
+		     ret == CMD_WARNING))
+		exit(1);
+
 	      cmd->line = eol+1;
 	    }
 
-	  vtysh_cmdline(cmd->line);
+	  if (echo_command)
+	    printf("%s%s\n", vtysh_prompt(), cmd->line);
+
+	  if (logfile)
+	    log_it(cmd->line);
+
+	  ret = vtysh_execute_no_pager(cmd->line);
+	  if (!no_error &&
+	      ! (ret == CMD_SUCCESS ||
+		 ret == CMD_SUCCESS_DAEMON ||
+		 ret == CMD_WARNING))
+	    exit(1);
 
 	  {
 	    struct cmd_rec *cr;

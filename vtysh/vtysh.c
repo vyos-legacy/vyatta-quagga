@@ -58,9 +58,9 @@ struct vtysh_client
   { .fd = -1, .name = "ospf6d", .flag = VTYSH_OSPF6D, .path = OSPF6_VTYSH_PATH},
   { .fd = -1, .name = "bgpd", .flag = VTYSH_BGPD, .path = BGP_VTYSH_PATH},
   { .fd = -1, .name = "isisd", .flag = VTYSH_ISISD, .path = ISIS_VTYSH_PATH},
+  { .fd = -1, .name = "babeld", .flag = VTYSH_BABELD, .path = BABEL_VTYSH_PATH},
 };
 
-#define VTYSH_INDEX_MAX (sizeof(vtysh_client)/sizeof(vtysh_client[0]))
 
 /* We need direct access to ripd to implement vtysh_exit_ripd_only. */
 static struct vtysh_client *ripd_client = NULL;
@@ -373,7 +373,7 @@ vtysh_execute_func (const char *line, int pager)
 
 	if (! strcmp(cmd->string,"configure terminal"))
 	  {
-	    for (i = 0; i < VTYSH_INDEX_MAX; i++)
+	    for (i = 0; i < array_size(vtysh_client); i++)
 	      {
 	        cmd_stat = vtysh_client_execute(&vtysh_client[i], line, fp);
 		if (cmd_stat == CMD_WARNING)
@@ -412,7 +412,7 @@ vtysh_execute_func (const char *line, int pager)
 	  }
 
 	cmd_stat = CMD_SUCCESS;
-	for (i = 0; i < VTYSH_INDEX_MAX; i++)
+	for (i = 0; i < array_size(vtysh_client); i++)
 	  {
 	    if (cmd->daemon & vtysh_client[i].flag)
 	      {
@@ -524,7 +524,7 @@ vtysh_config_from_file (struct vty *vty, FILE *fp)
 	    u_int i;
 	    int cmd_stat = CMD_SUCCESS;
 
-	    for (i = 0; i < VTYSH_INDEX_MAX; i++)
+	    for (i = 0; i < array_size(vtysh_client); i++)
 	      {
 	        if (cmd->daemon & vtysh_client[i].flag)
 		  {
@@ -797,6 +797,12 @@ static struct cmd_node ospf6_node =
   "%s(config-ospf6)# "
 };
 
+static struct cmd_node babel_node =
+{
+  BABEL_NODE,
+  "%s(config-babel)# "
+};
+
 static struct cmd_node keychain_node =
 {
   KEYCHAIN_NODE,
@@ -1009,6 +1015,17 @@ DEFUNSH (VTYSH_OSPF6D,
   return CMD_SUCCESS;
 }
 
+DEFUNSH (VTYSH_BABELD,
+	 router_babel,
+	 router_babel_cmd,
+	 "router babel",
+	 ROUTER_STR
+	 "Babel")
+{
+  vty->node = BABEL_NODE;
+  return CMD_SUCCESS;
+}
+
 DEFUNSH (VTYSH_ISISD,
 	 router_isis,
 	 router_isis_cmd,
@@ -1097,6 +1114,7 @@ vtysh_exit (struct vty *vty)
     case RIPNG_NODE:
     case OSPF_NODE:
     case OSPF6_NODE:
+    case BABEL_NODE:
     case ISIS_NODE:
     case MASC_NODE:
     case RMAP_NODE:
@@ -1335,7 +1353,7 @@ DEFUN (vtysh_show_memory,
   int ret = CMD_SUCCESS;
   char line[] = "show memory\n";
   
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     if ( vtysh_client[i].fd >= 0 )
       {
         fprintf (stdout, "Memory statistics for %s:\n", 
@@ -1358,7 +1376,7 @@ DEFUN (vtysh_show_logging,
   int ret = CMD_SUCCESS;
   char line[] = "show logging\n";
   
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     if ( vtysh_client[i].fd >= 0 )
       {
         fprintf (stdout,"Logging configuration for %s:\n", 
@@ -1714,7 +1732,7 @@ DEFUN (vtysh_write_terminal,
 	   VTY_NEWLINE);
   vty_out (vty, "!%s", VTY_NEWLINE);
 
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     ret = vtysh_client_config (&vtysh_client[i], line);
 
   /* Integrate vtysh specific configuration. */
@@ -1788,7 +1806,7 @@ write_config_integrated(void)
       return CMD_SUCCESS;
     }
 
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     ret = vtysh_client_config (&vtysh_client[i], line);
 
   vtysh_config_dump (fp);
@@ -1825,7 +1843,7 @@ DEFUN (vtysh_write_memory,
 
   fprintf (stdout,"Building Configuration...\n");
 	  
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     ret = vtysh_client_execute (&vtysh_client[i], line, stdout);
   
   fprintf (stdout,"[OK]\n");
@@ -1915,7 +1933,7 @@ DEFUN (vtysh_show_daemons,
 {
   u_int i;
 
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     if ( vtysh_client[i].fd >= 0 )
       vty_out(vty, " %s", vtysh_client[i].name);
   vty_out(vty, "%s", VTY_NEWLINE);
@@ -2165,7 +2183,7 @@ vtysh_connect_all(const char *daemon_name)
   int rc = 0;
   int matches = 0;
 
-  for (i = 0; i < VTYSH_INDEX_MAX; i++)
+  for (i = 0; i < array_size(vtysh_client); i++)
     {
       if (!daemon_name || !strcmp(daemon_name, vtysh_client[i].name))
 	{
@@ -2252,6 +2270,7 @@ vtysh_init_vty (void)
   install_node (&ripng_node, NULL);
   install_node (&ospf6_node, NULL);
 /* #endif */
+  install_node (&babel_node, NULL);
   install_node (&keychain_node, NULL);
   install_node (&keychain_key_node, NULL);
   install_node (&isis_node, NULL);
@@ -2273,6 +2292,7 @@ vtysh_init_vty (void)
   vtysh_install_default (OSPF_NODE);
   vtysh_install_default (RIPNG_NODE);
   vtysh_install_default (OSPF6_NODE);
+  vtysh_install_default (BABEL_NODE);
   vtysh_install_default (ISIS_NODE);
   vtysh_install_default (KEYCHAIN_NODE);
   vtysh_install_default (KEYCHAIN_KEY_NODE);
@@ -2327,6 +2347,7 @@ vtysh_init_vty (void)
   install_element (RIPNG_NODE, &vtysh_end_all_cmd);
   install_element (OSPF_NODE, &vtysh_end_all_cmd);
   install_element (OSPF6_NODE, &vtysh_end_all_cmd);
+  install_element (BABEL_NODE, &vtysh_end_all_cmd);
   install_element (BGP_NODE, &vtysh_end_all_cmd);
   install_element (BGP_IPV4_NODE, &vtysh_end_all_cmd);
   install_element (BGP_IPV4M_NODE, &vtysh_end_all_cmd);
@@ -2352,6 +2373,7 @@ vtysh_init_vty (void)
 #ifdef HAVE_IPV6
   install_element (CONFIG_NODE, &router_ospf6_cmd);
 #endif
+  install_element (CONFIG_NODE, &router_babel_cmd);
   install_element (CONFIG_NODE, &router_isis_cmd);
   install_element (CONFIG_NODE, &router_bgp_cmd);
   install_element (CONFIG_NODE, &router_bgp_view_cmd);
