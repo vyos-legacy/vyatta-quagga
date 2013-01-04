@@ -1122,7 +1122,7 @@ int
 thread_should_yield (struct thread *thread)
 {
   quagga_get_relative (NULL);
-  return (timeval_elapsed(relative_time, thread->ru.real) >
+  return (timeval_elapsed(relative_time, thread->real) >
   	  THREAD_YIELD_TIME_SLOT);
 }
 
@@ -1151,7 +1151,7 @@ void
 thread_call (struct thread *thread)
 {
   unsigned long realtime, cputime;
-  RUSAGE_T ru;
+  RUSAGE_T before, after;
 
  /* Cache a pointer to the relevant cpu history thread, if the thread
   * does not have it yet.
@@ -1170,13 +1170,14 @@ thread_call (struct thread *thread)
                     (void * (*) (void *))cpu_record_hash_alloc);
     }
 
-  GETRUSAGE (&thread->ru);
+  GETRUSAGE (&before);
+  thread->real = before.real;
 
   (*thread->func) (thread);
 
-  GETRUSAGE (&ru);
+  GETRUSAGE (&after);
 
-  realtime = thread_consumed_time (&ru, &thread->ru, &cputime);
+  realtime = thread_consumed_time (&after, &before, &cputime);
   thread->hist->real.total += realtime;
   if (thread->hist->real.max < realtime)
     thread->hist->real.max = realtime;
