@@ -1,3 +1,22 @@
+vyatta-quagga (0.99.20.1-16) unstable; urgency=low
+
+  [ Stephen Hemminger ]
+  * hash: force size to be a power of 2
+  * configure: allow building without getrusage
+  * Turn off getrusage in product
+
+  [ Jorge Boncompte [DTI2] ]
+  * lib: remove RUSAGE_T from struct thread
+
+  [ Jorge Boncompte [DTI2] ]
+  * bgpd: optimize aspath string representation and assegments handling
+
+  [ Jorge Boncompte [DTI2] ]
+  * bgpd: debug buffers cleanup and optimization
+  * bgpd: use recent monotonic time for readtime
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Fri, 04 Jan 2013 14:31:50 -0800
+
 vyatta-quagga (0.99.20.1-15) unstable; urgency=low
 
   [ Jorge Boncompte [DTI2] ]
