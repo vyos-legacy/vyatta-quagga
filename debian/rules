@@ -66,6 +66,7 @@ configure	+= --enable-configfile-mask=0640
 configure	+= --enable-logfile-mask=0640
 configure	+= --enable-rtadv
 configure	+= --enable-gcc-rdynamic
+configure	+= --disable-rusage
 configure	+= $(xable_snmp)
 configure	+= --with-libpam
 configure	+= CFLAGS="$(CFLAGS)"
