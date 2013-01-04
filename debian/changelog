@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-14) unstable; urgency=low
+
+  * bgpd: mark route nodes scheduled into work queue
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 03 Jan 2013 18:23:03 -0800
+
 vyatta-quagga (0.99.20.1-13) unstable; urgency=low
 
   * new branch
