@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-15) unstable; urgency=low
+
+  [ Jorge Boncompte [DTI2] ]
+  * bgpd: optimize bgp_nexthop_self()
+
+  [ Stephen Hemminger ]
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 03 Jan 2013 18:43:42 -0800
+
 vyatta-quagga (0.99.20.1-14) unstable; urgency=low
 
   * bgpd: mark route nodes scheduled into work queue
