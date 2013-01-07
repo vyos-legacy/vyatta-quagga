@@ -1,3 +1,11 @@
+vyatta-quagga (0.99.20.1-17) unstable; urgency=low
+
+  * hash: dynamically grow hash index
+  * bgp: add mixing to community hash
+  * bgp: uncork after each bunch of packets
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Mon, 07 Jan 2013 12:59:27 -0800
+
 vyatta-quagga (0.99.20.1-16) unstable; urgency=low
 
   [ Stephen Hemminger ]
