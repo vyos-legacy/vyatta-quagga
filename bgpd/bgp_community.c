@@ -402,7 +402,7 @@ community_hash_make (struct community *com)
   pnt = (unsigned char *)com->val;
   
   for(c = 0; c < com->size * 4; c++)
-    key += pnt[c];
+    key = key * 17 + pnt[c];
       
   return key;
 }
