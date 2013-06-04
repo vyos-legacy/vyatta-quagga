@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-13+daisy3) unstable; urgency=low
+
+  * change init script to provide vyatta-unicast
+
+ -- Robert Bays <robert@vyatta.com>  Mon, 03 Jun 2013 17:39:11 -0700
+
 vyatta-quagga (0.99.20.1-13+daisy2) unstable; urgency=low
 
   * Rebuild against new net-snmp
