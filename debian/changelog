@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.20.1-13+daisy4) unstable; urgency=medium
+
+  * Integrate patch to fix ASBR summaries from
+    https://github.com/opensourcerouting/quagga/commit/1b8b2471c8c45aefcaf83aaeda8ee00869b72ddf.patch
+
+ -- Paul Gear <vyos@libertysys.com.au>  Tue, 29 Oct 2013 09:15:00 +1000
+
 vyatta-quagga (0.99.20.1-13+daisy3) unstable; urgency=low
 
   * change init script to provide vyatta-unicast
