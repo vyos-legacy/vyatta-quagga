@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.20.1-13+hydrogen2) unstable; urgency=low
+
+  * Force release, branch fix
+
+ -- Daniil Baturin <daniil@baturin.org>  Sat, 16 Nov 2013 14:04:46 +0100
+
+vyatta-quagga (0.99.20.1-13+hydrogen1) unstable; urgency=low
+
+  * Fix branch name.
+
+ -- Daniil Baturin <daniil@baturin.org>  Sat, 16 Nov 2013 14:03:35 +0100
+
 vyatta-quagga (0.99.20.1-13+daisy5) unstable; urgency=low
 
   [ Super User ]
