@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-13+daisy5) unstable; urgency=low
+
+  [ Super User ]
+  * cherry-pick ae32b25a3d4d88e890b18a10dfa6173d2440041a
+
+  [ Daniil Baturin ]
+
+ -- Daniil Baturin <daniil@baturin.org>  Sat, 16 Nov 2013 14:02:35 +0100
+
 vyatta-quagga (0.99.20.1-13+daisy4) unstable; urgency=medium
 
   * Integrate patch to fix ASBR summaries from
