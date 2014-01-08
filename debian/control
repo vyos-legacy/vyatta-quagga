@@ -9,7 +9,7 @@ Build-Depends: debhelper (>= 5), gawk,
  libpam0g-dev | libpam-dev,
  libcap-dev,
  po-debconf,
- libsnmp-dev
+ libsnmp-dev (>=5.7.2)
 Standards-Version: 3.7.2
 Vcs-Git: http://suva.vyatta.com/git/vyatta-quagga.git
 
