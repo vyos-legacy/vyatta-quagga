@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-13+vyos1+helium1) unstable; urgency=low
+
+  * Fix dependency on libsnmp-dev, must be >=5.7.2
+
+ -- Daniil Baturin <daniil@baturin.org>  Sat, 15 Feb 2014 20:18:46 +0100
+
 vyatta-quagga (0.99.20.1-13+hydrogen2) unstable; urgency=low
 
   * Force release, branch fix
