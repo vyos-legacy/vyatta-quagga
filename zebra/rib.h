@@ -152,6 +152,9 @@ struct static_ipv6
   /* Administrative distance. */
   u_char distance;
 
+  /* Route Table */
+  u_char table;
+
   /* Flag for this static route's type. */
   u_char type;
 #define STATIC_IPV6_GATEWAY          1
