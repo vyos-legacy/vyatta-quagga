@@ -1,3 +1,15 @@
+vyatta-quagga (0.99.20.1-14+vyos2+lithium2) unstable; urgency=low
+
+  * New branch
+
+ -- Daniil Baturin <dmbaturin@squeeze32devel.multi.eu>  Tue, 18 Nov 2014 18:54:07 +0100
+
+vyatta-quagga (0.99.20.1-14+vyos2+lithium1) unstable; urgency=low
+
+  * Fix branch name.
+
+ -- Daniil Baturin <daniil@baturin.org>  Tue, 18 Nov 2014 18:53:09 +0100
+
 vyatta-quagga (0.99.20.1-13+vyos1+helium1) unstable; urgency=low
 
   * Fix dependency on libsnmp-dev, must be >=5.7.2
