@@ -1484,10 +1484,11 @@ DEFUN (show_ip_protocol,
 static int
 static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
 		  const char *gate_str, const char *ifname,
-		  const char *flag_str, const char *distance_str)
+		  const char *flag_str, const char *distance_str, const char *table_str)
 {
   int ret;
   u_char distance;
+  u_char table;
   struct prefix p;
   struct in6_addr *gate = NULL;
   struct in6_addr gate_addr;
@@ -1509,6 +1510,15 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
   else
     distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
 
+  /* route table */
+  if (table_str) {
+    table = atoi (table_str);
+  } else {
+    /* RT_TABLE_MAIN is redefined to 254 sometime before here somehow?? */
+    /* table = RT_TABLE_MAIN; */
+    table = 0;
+  }
+
   /* Null0 static route.  */
   if (strncasecmp (gate_str, "Null0", strlen (gate_str)) == 0)
     {
@@ -1519,9 +1529,9 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
         }
 
       if (add_cmd)
-        static_add_ipv6 (&p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE|ZEBRA_FLAG_INTERNAL, distance, 0);
+        static_add_ipv6 (&p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE|ZEBRA_FLAG_INTERNAL, distance, table);
       else
-        static_delete_ipv6 (&p, NULL, NULL, distance, 0);
+        static_delete_ipv6 (&p, NULL, NULL, distance, table);
       return CMD_SUCCESS;
     }
 
@@ -1569,9 +1579,9 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
     }
 
   if (add_cmd)
-    static_add_ipv6 (&p, gate, ifname, flag, distance, 0);
+    static_add_ipv6 (&p, gate, ifname, flag, distance, table);
   else
-    static_delete_ipv6 (&p, gate, ifname, distance, 0);
+    static_delete_ipv6 (&p, gate, ifname, distance, table);
 
   return CMD_SUCCESS;
 }
@@ -1585,7 +1595,7 @@ DEFUN (ipv6_route,
        "IPv6 gateway address\n"
        "IPv6 gateway interface name\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, NULL);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, NULL, NULL);
 }
 
 DEFUN (ipv6_route_flags,
@@ -1599,7 +1609,70 @@ DEFUN (ipv6_route_flags,
        "Emit an ICMP unreachable when matched\n"
        "Silently discard pkts when matched\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[2], NULL);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[2], NULL, NULL);
+}
+
+/* inject static route into specific Linux table */
+DEFUN (ipv6_route_table,
+       ipv6_route_table_cmd,
+       "ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250>",
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n")
+{
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, NULL, argv[2]);
+}
+
+DEFUN (ipv6_route_table_flags,
+       ipv6_route_table_flags_cmd,
+       "ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> (reject|blackhole)",
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Emit an ICMP unreachable when matched\n"
+       "Silently discard pkts when matched\n")
+{
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[3], NULL, argv[2]);
+}
+
+DEFUN (ipv6_route_table_pref,
+       ipv6_route_table_pref_cmd,
+       "ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> <1-255>",
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Distance value for this prefix\n")
+{
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, argv[3], argv[2]);
+}
+
+DEFUN (ipv6_route_table_flags_pref,
+       ipv6_route_table_flags_pref_cmd,
+       "ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> (reject|blackhole) <1-255>",
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Emit an ICMP unreachable when matched\n"
+       "Silently discard pkts when matched\n"
+       "Distance value for this prefix\n")
+{
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[3], argv[4], argv[2]);
 }
 
 DEFUN (ipv6_route_ifname,
@@ -1611,7 +1684,7 @@ DEFUN (ipv6_route_ifname,
        "IPv6 gateway address\n"
        "IPv6 gateway interface name\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], NULL, NULL);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], NULL, NULL, NULL);
 }
 
 DEFUN (ipv6_route_ifname_flags,
@@ -1625,7 +1698,7 @@ DEFUN (ipv6_route_ifname_flags,
        "Emit an ICMP unreachable when matched\n"
        "Silently discard pkts when matched\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], argv[3], NULL);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], argv[3], NULL, NULL);
 }
 
 DEFUN (ipv6_route_pref,
@@ -1638,7 +1711,7 @@ DEFUN (ipv6_route_pref,
        "IPv6 gateway interface name\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, argv[2]);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, NULL, argv[2], NULL);
 }
 
 DEFUN (ipv6_route_flags_pref,
@@ -1653,7 +1726,7 @@ DEFUN (ipv6_route_flags_pref,
        "Silently discard pkts when matched\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[2], argv[3]);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], NULL, argv[2], argv[3], NULL);
 }
 
 DEFUN (ipv6_route_ifname_pref,
@@ -1666,7 +1739,7 @@ DEFUN (ipv6_route_ifname_pref,
        "IPv6 gateway interface name\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], NULL, argv[3]);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], NULL, argv[3], NULL);
 }
 
 DEFUN (ipv6_route_ifname_flags_pref,
@@ -1681,7 +1754,7 @@ DEFUN (ipv6_route_ifname_flags_pref,
        "Silently discard pkts when matched\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], argv[3], argv[4]);
+  return static_ipv6_func (vty, 1, argv[0], argv[1], argv[2], argv[3], argv[4], NULL);
 }
 
 DEFUN (no_ipv6_route,
@@ -1694,7 +1767,7 @@ DEFUN (no_ipv6_route,
        "IPv6 gateway address\n"
        "IPv6 gateway interface name\n")
 {
-  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, NULL);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, NULL, NULL);
 }
 
 ALIAS (no_ipv6_route,
@@ -1709,6 +1782,74 @@ ALIAS (no_ipv6_route,
        "Emit an ICMP unreachable when matched\n"
        "Silently discard pkts when matched\n")
 
+/* remove static route from specific Linux table */
+DEFUN (no_ipv6_route_table,
+       no_ipv6_route_table_cmd,
+       "no ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250>",
+       NO_STR
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n")
+{
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, NULL, argv[2]);
+}
+
+DEFUN (no_ipv6_route_table_flags,
+       no_ipv6_route_table_flags_cmd,
+       "no ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> (reject|blackhole)",
+       NO_STR
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Emit an ICMP unreachable when matched\n"
+       "Silently discard pkts when matched\n")
+{
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, argv[3], NULL, argv[2]);
+}
+
+DEFUN (no_ipv6_route_table_pref,
+       no_ipv6_route_table_pref_cmd,
+       "no ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> <1-255>",
+       NO_STR
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Distance value for this prefix\n")
+{
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, argv[3], argv[2]);
+}
+
+DEFUN (no_ipv6_route_table_flags_pref,
+       no_ipv6_route_table_flags_pref_cmd,
+       "no ipv6 route X:X::X:X/M (X:X::X:X|INTERFACE) table <1-250> (reject|blackhole) <1-255>",
+       NO_STR
+       IP_STR
+       "Establish static routes\n"
+       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+       "IPv6 gateway address\n"
+       "IPv6 gateway interface name\n"
+       "Linux route table\n"
+       "Route table\n"
+       "Emit an ICMP unreachable when matched\n"
+       "Silently discard pkts when matched\n"
+       "Distance value for this prefix\n")
+{
+  /* We do not care about argv[3] */
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, argv[3], argv[4], argv[2]);
+}
+
 DEFUN (no_ipv6_route_ifname,
        no_ipv6_route_ifname_cmd,
        "no ipv6 route X:X::X:X/M X:X::X:X INTERFACE",
@@ -1719,7 +1860,7 @@ DEFUN (no_ipv6_route_ifname,
        "IPv6 gateway address\n"
        "IPv6 gateway interface name\n")
 {
-  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], NULL, NULL);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], NULL, NULL, NULL);
 }
 
 ALIAS (no_ipv6_route_ifname,
@@ -1745,7 +1886,7 @@ DEFUN (no_ipv6_route_pref,
        "IPv6 gateway interface name\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, argv[2]);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, NULL, argv[2], NULL);
 }
 
 DEFUN (no_ipv6_route_flags_pref,
@@ -1762,7 +1903,7 @@ DEFUN (no_ipv6_route_flags_pref,
        "Distance value for this prefix\n")
 {
   /* We do not care about argv[2] */
-  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, argv[2], argv[3]);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], NULL, argv[2], argv[3], NULL);
 }
 
 DEFUN (no_ipv6_route_ifname_pref,
@@ -1776,7 +1917,7 @@ DEFUN (no_ipv6_route_ifname_pref,
        "IPv6 gateway interface name\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], NULL, argv[3]);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], NULL, argv[3], NULL);
 }
 
 DEFUN (no_ipv6_route_ifname_flags_pref,
@@ -1792,7 +1933,7 @@ DEFUN (no_ipv6_route_ifname_flags_pref,
        "Silently discard pkts when matched\n"
        "Distance value for this prefix\n")
 {
-  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], argv[3], argv[4]);
+  return static_ipv6_func (vty, 0, argv[0], argv[1], argv[2], argv[3], argv[4], NULL);
 }
 
 /* New RIB.  Detailed information for IPv6 route. */
@@ -2047,6 +2188,45 @@ DEFUN (show_ipv6_route,
   int first = 1;
 
   table = vrf_table (AFI_IP6, SAFI_UNICAST, 0);
+  if (! table)
+    return CMD_SUCCESS;
+
+  /* Show all IPv6 route. */
+  for (rn = route_top (table); rn; rn = route_next (rn))
+    for (rib = rn->info; rib; rib = rib->next)
+      {
+	if (first)
+	  {
+	    vty_out (vty, SHOW_ROUTE_V6_HEADER, VTY_NEWLINE, VTY_NEWLINE, VTY_NEWLINE);
+	    first = 0;
+	  }
+	vty_show_ipv6_route (vty, rn, rib);
+      }
+  return CMD_SUCCESS;
+}
+
+DEFUN (show_ipv6_route_table,
+       show_ipv6_route_table_cmd,
+       "show ipv6 route table <1-250>",
+       SHOW_STR
+       IP_STR
+       "IPv6 routing table\n"
+       "Table number")
+{
+  struct route_table *table;
+  struct route_node *rn;
+  struct rib *rib;
+  int first = 1;
+  u_char tn;
+
+  /* route table */
+  if (argv[0])
+    tn = atoi (argv[0]);
+  else
+    tn = RT_TABLE_MAIN;
+
+  vty_out (vty, "table %d:%s%s", tn, VTY_NEWLINE, VTY_NEWLINE);
+  table = vrf_table (AFI_IP6, SAFI_UNICAST, tn);
   if (! table)
     return CMD_SUCCESS;
 
@@ -2420,10 +2600,18 @@ zebra_vty_init (void)
 #ifdef HAVE_IPV6
   install_element (CONFIG_NODE, &ipv6_route_cmd);
   install_element (CONFIG_NODE, &ipv6_route_flags_cmd);
+  install_element (CONFIG_NODE, &ipv6_route_table_cmd);
+  install_element (CONFIG_NODE, &ipv6_route_table_flags_cmd);
+  install_element (CONFIG_NODE, &ipv6_route_table_pref_cmd);
+  install_element (CONFIG_NODE, &ipv6_route_table_flags_pref_cmd);
   install_element (CONFIG_NODE, &ipv6_route_ifname_cmd);
   install_element (CONFIG_NODE, &ipv6_route_ifname_flags_cmd);
   install_element (CONFIG_NODE, &no_ipv6_route_cmd);
   install_element (CONFIG_NODE, &no_ipv6_route_flags_cmd);
+  install_element (CONFIG_NODE, &no_ipv6_route_table_cmd);
+  install_element (CONFIG_NODE, &no_ipv6_route_table_flags_cmd);
+  install_element (CONFIG_NODE, &no_ipv6_route_table_pref_cmd);
+  install_element (CONFIG_NODE, &no_ipv6_route_table_flags_pref_cmd);
   install_element (CONFIG_NODE, &no_ipv6_route_ifname_cmd);
   install_element (CONFIG_NODE, &no_ipv6_route_ifname_flags_cmd);
   install_element (CONFIG_NODE, &ipv6_route_pref_cmd);
@@ -2435,12 +2623,14 @@ zebra_vty_init (void)
   install_element (CONFIG_NODE, &no_ipv6_route_ifname_pref_cmd);
   install_element (CONFIG_NODE, &no_ipv6_route_ifname_flags_pref_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_cmd);
+  install_element (VIEW_NODE, &show_ipv6_route_table_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_summary_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_protocol_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_addr_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_prefix_cmd);
   install_element (VIEW_NODE, &show_ipv6_route_prefix_longer_cmd);
   install_element (ENABLE_NODE, &show_ipv6_route_cmd);
+  install_element (ENABLE_NODE, &show_ipv6_route_table_cmd);
   install_element (ENABLE_NODE, &show_ipv6_route_protocol_cmd);
   install_element (ENABLE_NODE, &show_ipv6_route_addr_cmd);
   install_element (ENABLE_NODE, &show_ipv6_route_prefix_cmd);
