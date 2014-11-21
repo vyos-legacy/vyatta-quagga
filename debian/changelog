@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-14+vyos2+lithium3) unstable; urgency=low
+
+  [ William Steve Applegate ]
+  * Add policy routing support for IPv6.
+
+  [ Daniil Baturin ]
+
+ -- Daniil Baturin <daniil@baturin.org>  Fri, 21 Nov 2014 18:42:01 +0100
+
 vyatta-quagga (0.99.20.1-14+vyos2+lithium2) unstable; urgency=low
 
   * New branch
