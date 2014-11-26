@@ -2450,47 +2450,55 @@ static_config_ipv6 (struct vty *vty)
   int write;
   char buf[BUFSIZ];
   struct route_table *stable;
+  int table;
 
   write = 0;
 
-  /* Lookup table.  */
-  stable = vrf_static_table (AFI_IP6, SAFI_UNICAST, 0);
-  if (! stable)
-    return -1;
-
-  for (rn = route_top (stable); rn; rn = route_next (rn))
-    for (si = rn->info; si; si = si->next)
+  for (table = 0; table < 256; table++) {
+    /* Lookup table.  */
+    stable = vrf_static_table (AFI_IP6, SAFI_UNICAST, table);
+    /* No table found, keep on searching */
+    if (! stable)
+      continue;
+  
+    for (rn = route_top (stable); rn; rn = route_next (rn))
+      for (si = rn->info; si; si = si->next)
       {
-	vty_out (vty, "ipv6 route %s/%d",
-		 inet_ntop (AF_INET6, &rn->p.u.prefix6, buf, BUFSIZ),
-		 rn->p.prefixlen);
+  	vty_out (vty, "ipv6 route %s/%d",
+  		 inet_ntop (AF_INET6, &rn->p.u.prefix6, buf, BUFSIZ),
+  		 rn->p.prefixlen);
+  
+  	switch (si->type)
+  	{
+  	  case STATIC_IPV6_GATEWAY:
+  	    vty_out (vty, " %s", inet_ntop (AF_INET6, &si->ipv6, buf, BUFSIZ));
+  	    break;
+  	  case STATIC_IPV6_IFNAME:
+  	    vty_out (vty, " %s", si->ifname);
+  	    break;
+  	  case STATIC_IPV6_GATEWAY_IFNAME:
+  	    vty_out (vty, " %s %s",
+  		     inet_ntop (AF_INET6, &si->ipv6, buf, BUFSIZ), si->ifname);
+  	    break;
+  	}
 
-	switch (si->type)
-	  {
-	  case STATIC_IPV6_GATEWAY:
-	    vty_out (vty, " %s", inet_ntop (AF_INET6, &si->ipv6, buf, BUFSIZ));
-	    break;
-	  case STATIC_IPV6_IFNAME:
-	    vty_out (vty, " %s", si->ifname);
-	    break;
-	  case STATIC_IPV6_GATEWAY_IFNAME:
-	    vty_out (vty, " %s %s",
-		     inet_ntop (AF_INET6, &si->ipv6, buf, BUFSIZ), si->ifname);
-	    break;
-	  }
+        if (si->table) /* non-zero table */
+          vty_out (vty, " table %d", si->table);
+	 
+        if (CHECK_FLAG(si->flags, ZEBRA_FLAG_REJECT))
+          vty_out (vty, " %s", "reject");
+  
+        if (CHECK_FLAG(si->flags, ZEBRA_FLAG_BLACKHOLE))
+          vty_out (vty, " %s", "blackhole");
+  
+  	if (si->distance != ZEBRA_STATIC_DISTANCE_DEFAULT)
+  	  vty_out (vty, " %d", si->distance);
 
-       if (CHECK_FLAG(si->flags, ZEBRA_FLAG_REJECT))
-               vty_out (vty, " %s", "reject");
-
-       if (CHECK_FLAG(si->flags, ZEBRA_FLAG_BLACKHOLE))
-               vty_out (vty, " %s", "blackhole");
-
-	if (si->distance != ZEBRA_STATIC_DISTANCE_DEFAULT)
-	  vty_out (vty, " %d", si->distance);
-	vty_out (vty, "%s", VTY_NEWLINE);
-
-	write = 1;
+  	vty_out (vty, "%s", VTY_NEWLINE);
+  
+  	write = 1;
       }
+  }
   return write;
 }
 #endif /* HAVE_IPV6 */
