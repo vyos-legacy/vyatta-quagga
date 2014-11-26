@@ -2959,7 +2959,7 @@ static_delete_ipv6 (struct prefix *p, struct in6_addr *gate,
   return 1;
 }
 #endif /* HAVE_IPV6 */
-
+
 /* RIB update function. */
 static void rib_update_table (struct route_table *table)
 {
@@ -2979,13 +2979,13 @@ rib_update (void)
 
   for (table = 0; table < 256; table++) {
     rib_update_table (vrf_table (AFI_IP, SAFI_UNICAST, table));
+#ifdef HAVE_IPV6
+    rib_update_table (vrf_table (AFI_IP6, SAFI_UNICAST, table));
+#endif
   }
 
-#ifdef HAVE_IPV6
-  rib_update_table (vrf_table (AFI_IP6, SAFI_UNICAST, 0));
-#endif
 }
-
+
 /* Remove all routes which comes from non main table.  */
 static void
 rib_weed_table (struct route_table *table)
