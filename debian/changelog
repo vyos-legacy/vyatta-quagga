@@ -1,3 +1,13 @@
+vyatta-quagga (0.99.20.1-14+vyos2+lithium4) unstable; urgency=low
+
+  [ Benjamin Beret ]
+  * Make non default table ipv6 routes appear in zebra conf (Bug #168)
+  * Fix non default table ipv6 routes not being updated on interface up/down (Bug #168)
+
+  [ Alex Harpin ]
+
+ -- Alex Harpin <development@landsofshadow.co.uk>  Mon, 15 Dec 2014 07:59:56 +0000
+ 
 vyatta-quagga (0.99.20.1-14+vyos2+lithium3) unstable; urgency=low
 
   [ William Steve Applegate ]
