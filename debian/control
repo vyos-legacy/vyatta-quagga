@@ -1,7 +1,7 @@
 Source: vyatta-quagga
 Section: contrib/net
 Priority: extra
-Maintainer: Vyatta Package Maintainers <maintainers@vyatta.com>
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
 Build-Depends: debhelper (>= 5), gawk,
  autotools-dev,
  libncurses5-dev,
