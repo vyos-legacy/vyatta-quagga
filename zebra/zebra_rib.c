@@ -391,20 +391,20 @@ nexthop_changed (const struct nexthop *nexthop, const struct nexthop *newhop)
     case NEXTHOP_TYPE_IPV4_IFNAME:
     case NEXTHOP_TYPE_IPV4_IFINDEX:
       return nexthop->rifindex != newhop->ifindex ||
-	     ! IPV4_ADDR_SAME(&newhop->rgate.ipv4, &nexthop->gate.ipv4);
+	     ! IPV4_ADDR_SAME(&newhop->gate.ipv4, &nexthop->rgate.ipv4);
 
     case NEXTHOP_TYPE_IPV4:
       return nexthop->rifindex != newhop->ifindex ||
-	     ! IPV4_ADDR_SAME(&newhop->rgate.ipv4, &nexthop->gate.ipv4);
+	     ! IPV4_ADDR_SAME(&newhop->gate.ipv4, &nexthop->rgate.ipv4);
 
     case NEXTHOP_TYPE_IPV6_IFINDEX:
     case NEXTHOP_TYPE_IPV6_IFNAME:
       return nexthop->rifindex != newhop->ifindex ||
-	     ! IPV6_ADDR_SAME(&nexthop->rgate.ipv6, &newhop->gate.ipv6);
+	     ! IPV6_ADDR_SAME(&nexthop->gate.ipv6, &newhop->rgate.ipv6);
 
     case NEXTHOP_TYPE_IPV6:
       return nexthop->rifindex != newhop->ifindex ||
-	     ! IPV6_ADDR_SAME(&nexthop->rgate.ipv6, &newhop->gate.ipv6);
+	     ! IPV6_ADDR_SAME(&nexthop->gate.ipv6, &newhop->rgate.ipv6);
     default:
       return 0;
     }
