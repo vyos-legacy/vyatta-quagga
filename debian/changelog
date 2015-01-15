@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-14+vyos2+lithium6) unstable; urgency=low
+
+  [ Oleg A. Arkhangelsky ]
+  * Zebra reinstalls every recursive route even if they didn't change
+  
+  [ Alex Harpin ]
+
+ -- Alex Harpin <development@landsofshadow.co.uk>  Thu, 15 Jan 2015 19:59:48 +0000
+ 
 vyatta-quagga (0.99.20.1-14+vyos2+lithium5) unstable; urgency=low
 
   * Update maintainer address
