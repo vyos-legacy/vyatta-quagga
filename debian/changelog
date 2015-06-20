@@ -1,3 +1,9 @@
+vyatta-quagga (0.99.20.1-14+vyos2+lithium9) unstable; urgency=low
+
+  * vyatta-quagga: update dh_gencontrol with new development build flag
+
+ -- Alex Harpin <development@landsofshadow.co.uk>  Sat, 20 Jun 2015 07:11:52 +0100
+ 
 vyatta-quagga (0.99.20.1-14+vyos2+lithium8) unstable; urgency=low
 
   * Force release
