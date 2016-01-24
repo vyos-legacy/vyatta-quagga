@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-14+vyos2+current1) unstable; urgency=medium
+
+  [ Thomas Jepp ]
+  * Add missing build dependencies for Jessie.
+
+  [ Kim Hagen ]
+
+ -- Kim Hagen <kim.sidney@gmail.com>  Sun, 24 Jan 2016 15:24:26 -0500
+
 vyatta-quagga (0.99.20.1-14+vyos2+lithium9) unstable; urgency=low
 
   * vyatta-quagga: update dh_gencontrol with new development build flag
