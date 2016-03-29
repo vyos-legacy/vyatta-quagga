@@ -18,7 +18,7 @@ Vcs-Git: http://suva.vyatta.com/git/vyatta-quagga.git
 
 Package: vyatta-quagga
 Architecture: any
-Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), iproute, ${misc:Depends}
+Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), iproute2, ${misc:Depends}
 Pre-Depends: adduser
 Conflicts: zebra, zebra-pj, quagga
 Replaces: zebra, zebra-pj, quagga
