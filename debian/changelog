@@ -1,3 +1,10 @@
+vyatta-quagga (0.99.20.1-14+vyos2+current2) unstable; urgency=medium
+
+  [ Mihail Vasilev ]
+  * Ported upstream fix for CVE-2016-1245
+
+ -- Mihail Vasilev <mickvav@gmail.com>  Mon, 9 Jan 2017 17:30:00 +0300
+
 vyatta-quagga (0.99.20.1-14+vyos2+current1) unstable; urgency=medium
 
   [ Thomas Jepp ]
