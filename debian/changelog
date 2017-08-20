@@ -1,3 +1,12 @@
+vyatta-quagga (0.99.20.1-13+vyos1+helium2) unstable; urgency=low
+
+  [David Lamparter]
+  * zebra: stack overrun in IPv6 RA receive code (CVE-2016-1245)
+
+  [Yuya Kusakabe]
+
+ -- Yuya Kusakabe <yuya.kusakabe@gmail.com>  Sun, 20 Aug 2017 22:09:50 +0900
+
 vyatta-quagga (0.99.20.1-13+vyos1+helium1) unstable; urgency=low
 
   * Fix dependency on libsnmp-dev, must be >=5.7.2
