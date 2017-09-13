@@ -392,6 +392,7 @@ struct peer
 #define PEER_FLAG_MAX_PREFIX                (1 << 14) /* maximum prefix */
 #define PEER_FLAG_MAX_PREFIX_WARNING        (1 << 15) /* maximum prefix warning-only */
 #define PEER_FLAG_NEXTHOP_LOCAL_UNCHANGED   (1 << 16) /* leave link-local nexthop unchanged */
+#define PEER_FLAG_AS_OVERRIDE               (1 << 17) /* as-override */
 
   /* MD5 password */
   char *password;
@@ -811,7 +812,8 @@ enum bgp_clear_type
 #define BGP_ERR_TCPSIG_FAILED			-29
 #define BGP_ERR_NO_EBGP_MULTIHOP_WITH_TTLHACK	-30
 #define BGP_ERR_NO_IBGP_WITH_TTLHACK		-31
-#define BGP_ERR_MAX				-32
+#define BGP_ERR_AS_OVERRIDE                     -32
+#define BGP_ERR_MAX				-33
 
 extern struct bgp_master *bm;
 

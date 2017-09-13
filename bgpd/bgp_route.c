@@ -739,7 +739,20 @@ bgp_import_modifier (struct peer *rsclient, struct peer *peer,
     }
   return RMAP_PERMIT;
 }
-
+
+/* If this is an EBGP peer with as-override */
+static void
+bgp_peer_as_override(struct bgp *bgp, afi_t afi, safi_t safi,
+                     struct peer *peer, struct attr *attr)
+{
+  if (peer_sort(peer) == BGP_PEER_EBGP &&
+      peer_af_flag_check (peer, afi, safi, PEER_FLAG_AS_OVERRIDE))
+    {
+      if (aspath_single_asn_check (attr->aspath, peer->as))
+        attr->aspath = aspath_replace_specific_asn (attr->aspath, peer->as, bgp->as);
+    }
+}
+
 static int
 bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
 		    struct attr *attr, afi_t afi, safi_t safi)
@@ -1009,6 +1022,8 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
       && aspath_private_as_check (attr->aspath))
     attr->aspath = aspath_empty_get ();
 
+  bgp_peer_as_override(bgp, afi, safi, peer, attr);
+
   /* Route map & unsuppress-map apply. */
   if (ROUTE_MAP_OUT_NAME (filter)
       || (ri->extra && ri->extra->suppress) )
@@ -1225,6 +1240,8 @@ bgp_announce_check_rsclient (struct bgp_info *ri, struct peer *rsclient,
       && peer_af_flag_check (rsclient, afi, safi, PEER_FLAG_REMOVE_PRIVATE_AS)
       && aspath_private_as_check (attr->aspath))
     attr->aspath = aspath_empty_get ();
+
+  bgp_peer_as_override(bgp, afi, safi, rsclient, attr);
 
   /* Route map & unsuppress-map apply. */
   if (ROUTE_MAP_OUT_NAME (filter) || (ri->extra && ri->extra->suppress) )
